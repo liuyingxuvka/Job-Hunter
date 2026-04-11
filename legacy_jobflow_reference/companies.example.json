@@ -1,0 +1,1863 @@
+{
+  "companies": [
+    {
+      "name": "Nel Hydrogen",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "electrolyzer",
+        "PEM",
+        "alkaline",
+        "system",
+        "stack",
+        "BOP"
+      ],
+      "notes": "Electrolyzer OEM"
+    },
+    {
+      "name": "ITM Power",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "electrolyzer",
+        "PEM",
+        "system",
+        "stack",
+        "controls"
+      ],
+      "notes": "Electrolyzer OEM"
+    },
+    {
+      "name": "Siemens Energy",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "electrolyzer",
+        "PEM",
+        "system",
+        "controls",
+        "power_electronics"
+      ],
+      "notes": "Electrolyzer systems"
+    },
+    {
+      "name": "thyssenkrupp nucera",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "electrolyzer",
+        "alkaline",
+        "system",
+        "stack"
+      ],
+      "notes": "Electrolyzer OEM"
+    },
+    {
+      "name": "Plug Power",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "electrolyzer",
+        "PEM",
+        "fuel_cell",
+        "system",
+        "mobility"
+      ],
+      "notes": "Electrolyzer + Fuel cell"
+    },
+    {
+      "name": "Cummins (Hydrogenics)",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "electrolyzer",
+        "PEM",
+        "fuel_cell",
+        "system"
+      ],
+      "notes": "Electrolyzer + Fuel cell"
+    },
+    {
+      "name": "McPhy",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "electrolyzer",
+        "alkaline",
+        "system"
+      ],
+      "notes": "Electrolyzer OEM"
+    },
+    {
+      "name": "Enapter",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "electrolyzer",
+        "AEM",
+        "system",
+        "controls"
+      ],
+      "notes": "AEM electrolyzer"
+    },
+    {
+      "name": "Sunfire",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "electrolyzer",
+        "SOEC",
+        "alkaline",
+        "system"
+      ],
+      "notes": "SOEC / alkaline"
+    },
+    {
+      "name": "Topsoe",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "electrolyzer",
+        "SOEC",
+        "catalyst",
+        "materials"
+      ],
+      "notes": "SOEC + catalysts"
+    },
+    {
+      "name": "H-TEC Systems",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "electrolyzer",
+        "PEM",
+        "system"
+      ],
+      "notes": "PEM electrolyzer"
+    },
+    {
+      "name": "Ohmium",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "electrolyzer",
+        "PEM",
+        "system"
+      ],
+      "notes": "PEM electrolyzer"
+    },
+    {
+      "name": "Electric Hydrogen",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "electrolyzer",
+        "PEM",
+        "system",
+        "power_electronics"
+      ],
+      "notes": "PEM electrolyzer"
+    },
+    {
+      "name": "Verdagy",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "electrolyzer",
+        "system",
+        "stack"
+      ],
+      "notes": "Electrolyzer OEM"
+    },
+    {
+      "name": "H2Pro",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:IL",
+        "electrolyzer",
+        "system",
+        "materials"
+      ],
+      "notes": "E-TAC electrolyzer"
+    },
+    {
+      "name": "Elogen (Air Liquide)",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "electrolyzer",
+        "PEM",
+        "system"
+      ],
+      "notes": "PEM electrolyzer"
+    },
+    {
+      "name": "John Cockerill Hydrogen",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "electrolyzer",
+        "alkaline",
+        "system"
+      ],
+      "notes": "Alkaline electrolyzer"
+    },
+    {
+      "name": "Nikkiso (Nel/Hyosung)",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:JP",
+        "electrolyzer",
+        "system",
+        "BOP"
+      ],
+      "notes": "Hydrogen equipment"
+    },
+    {
+      "name": "Toshiba Energy Systems",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:JP",
+        "electrolyzer",
+        "system",
+        "controls"
+      ],
+      "notes": "Electrolyzer systems"
+    },
+    {
+      "name": "Mitsubishi Power (MHI)",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:JP",
+        "electrolyzer",
+        "system",
+        "controls"
+      ],
+      "notes": "Electrolyzer systems"
+    },
+    {
+      "name": "Hysata",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:AU",
+        "electrolyzer",
+        "system",
+        "materials"
+      ],
+      "notes": "High-efficiency electrolyzer"
+    },
+    {
+      "name": "Sungrow Hydrogen",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "electrolyzer",
+        "system",
+        "power_electronics"
+      ],
+      "notes": "China electrolyzer"
+    },
+    {
+      "name": "LONGi Hydrogen",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "electrolyzer",
+        "system",
+        "stack"
+      ],
+      "notes": "China electrolyzer"
+    },
+    {
+      "name": "PERIC Hydrogen",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "electrolyzer",
+        "system",
+        "stack"
+      ],
+      "notes": "China electrolyzer"
+    },
+    {
+      "name": "Ballard Power Systems",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CA",
+        "fuel_cell",
+        "PEMFC",
+        "stack",
+        "mobility"
+      ],
+      "notes": "Fuel cell OEM"
+    },
+    {
+      "name": "Bloom Energy",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "fuel_cell",
+        "SOFC",
+        "stationary",
+        "system"
+      ],
+      "notes": "SOFC systems"
+    },
+    {
+      "name": "FuelCell Energy",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "fuel_cell",
+        "MCFC",
+        "stationary",
+        "system"
+      ],
+      "notes": "Stationary fuel cell"
+    },
+    {
+      "name": "Ceres Power",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "fuel_cell",
+        "SOFC",
+        "stack",
+        "materials"
+      ],
+      "notes": "SOFC tech"
+    },
+    {
+      "name": "Advent Technologies",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "fuel_cell",
+        "HT-PEM",
+        "materials"
+      ],
+      "notes": "HT-PEM"
+    },
+    {
+      "name": "SFC Energy",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "fuel_cell",
+        "portable",
+        "DMFC"
+      ],
+      "notes": "Portable fuel cell"
+    },
+    {
+      "name": "Symbio",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "fuel_cell",
+        "PEMFC",
+        "system",
+        "mobility"
+      ],
+      "notes": "Automotive fuel cell"
+    },
+    {
+      "name": "cellcentric",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "fuel_cell",
+        "PEMFC",
+        "stack",
+        "mobility"
+      ],
+      "notes": "Truck fuel cell"
+    },
+    {
+      "name": "Bosch (Fuel Cell)",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "fuel_cell",
+        "PEMFC",
+        "stack",
+        "system",
+        "controls"
+      ],
+      "notes": "Fuel cell systems"
+    },
+    {
+      "name": "Toyota (Fuel Cell)",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:JP",
+        "fuel_cell",
+        "PEMFC",
+        "system",
+        "mobility"
+      ],
+      "notes": "Automotive fuel cell"
+    },
+    {
+      "name": "Hyundai (Fuel Cell)",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:KR",
+        "fuel_cell",
+        "PEMFC",
+        "system",
+        "mobility"
+      ],
+      "notes": "Automotive fuel cell"
+    },
+    {
+      "name": "Honda (Fuel Cell)",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:JP",
+        "fuel_cell",
+        "PEMFC",
+        "system",
+        "mobility"
+      ],
+      "notes": "Automotive fuel cell"
+    },
+    {
+      "name": "GM Hydrotec",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "fuel_cell",
+        "PEMFC",
+        "system",
+        "mobility"
+      ],
+      "notes": "Fuel cell systems"
+    },
+    {
+      "name": "PowerCell Sweden",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "fuel_cell",
+        "PEMFC",
+        "stack",
+        "system"
+      ],
+      "notes": "Fuel cell OEM"
+    },
+    {
+      "name": "Intelligent Energy",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "fuel_cell",
+        "PEMFC",
+        "stack",
+        "system"
+      ],
+      "notes": "Fuel cell OEM"
+    },
+    {
+      "name": "Horizon Fuel Cell Technologies",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "fuel_cell",
+        "PEMFC",
+        "system"
+      ],
+      "notes": "Fuel cell OEM"
+    },
+    {
+      "name": "Nuvera Fuel Cells",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "fuel_cell",
+        "PEMFC",
+        "system"
+      ],
+      "notes": "Fuel cell systems"
+    },
+    {
+      "name": "Nedstack",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "fuel_cell",
+        "PEMFC",
+        "stack"
+      ],
+      "notes": "Fuel cell stacks"
+    },
+    {
+      "name": "Doosan Fuel Cell",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:KR",
+        "fuel_cell",
+        "stationary",
+        "system"
+      ],
+      "notes": "Stationary fuel cell"
+    },
+    {
+      "name": "Hyzon Motors",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "fuel_cell",
+        "mobility",
+        "system"
+      ],
+      "notes": "Fuel cell trucks"
+    },
+    {
+      "name": "Nikola",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "fuel_cell",
+        "mobility",
+        "system"
+      ],
+      "notes": "Fuel cell trucks"
+    },
+    {
+      "name": "Air Liquide",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "industrial_gas",
+        "hydrogen",
+        "system"
+      ],
+      "notes": "Hydrogen production & systems"
+    },
+    {
+      "name": "Linde",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "industrial_gas",
+        "hydrogen",
+        "system"
+      ],
+      "notes": "Hydrogen production & systems"
+    },
+    {
+      "name": "Air Products",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "industrial_gas",
+        "hydrogen",
+        "system"
+      ],
+      "notes": "Hydrogen production & systems"
+    },
+    {
+      "name": "Freudenberg e-Power Systems",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "fuel_cell",
+        "MEA",
+        "materials",
+        "system"
+      ],
+      "notes": "Components + systems"
+    },
+    {
+      "name": "W. L. Gore (Fuel Cell)",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "materials",
+        "membrane",
+        "MEA"
+      ],
+      "notes": "Membranes / MEA materials"
+    },
+    {
+      "name": "Johnson Matthey",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "materials",
+        "catalyst"
+      ],
+      "notes": "Catalysts / MEA materials"
+    },
+    {
+      "name": "Umicore",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "materials",
+        "catalyst"
+      ],
+      "notes": "Catalysts"
+    },
+    {
+      "name": "BASF",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "materials",
+        "catalyst",
+        "membrane"
+      ],
+      "notes": "Materials"
+    },
+    {
+      "name": "DuPont",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "materials",
+        "membrane"
+      ],
+      "notes": "Membranes"
+    },
+    {
+      "name": "3M (Fuel Cell Materials)",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "materials",
+        "membrane",
+        "catalyst"
+      ],
+      "notes": "Materials"
+    },
+    {
+      "name": "Chemours",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "materials",
+        "membrane"
+      ],
+      "notes": "Membranes"
+    },
+    {
+      "name": "Solvay",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "materials",
+        "membrane"
+      ],
+      "notes": "Membranes"
+    },
+    {
+      "name": "AGC",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:JP",
+        "materials",
+        "membrane"
+      ],
+      "notes": "Membranes"
+    },
+    {
+      "name": "Asahi Kasei",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:JP",
+        "materials",
+        "membrane"
+      ],
+      "notes": "Membranes"
+    },
+    {
+      "name": "Toray",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:JP",
+        "materials",
+        "carbon",
+        "GDL"
+      ],
+      "notes": "Carbon materials / GDL"
+    },
+    {
+      "name": "SGL Carbon",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "materials",
+        "carbon",
+        "GDL"
+      ],
+      "notes": "Carbon materials / GDL"
+    },
+    {
+      "name": "Mitsubishi Chemical",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:JP",
+        "materials",
+        "membrane",
+        "catalyst"
+      ],
+      "notes": "Materials"
+    },
+    {
+      "name": "Teijin",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:JP",
+        "materials",
+        "carbon"
+      ],
+      "notes": "Carbon materials"
+    },
+    {
+      "name": "Clariant",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "materials",
+        "catalyst"
+      ],
+      "notes": "Catalysts"
+    },
+    {
+      "name": "Heraeus",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "materials",
+        "catalyst"
+      ],
+      "notes": "Precious metal catalysts"
+    },
+    {
+      "name": "Tanaka Kikinzoku",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:JP",
+        "materials",
+        "catalyst"
+      ],
+      "notes": "Precious metal catalysts"
+    },
+    {
+      "name": "De Nora",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "materials",
+        "catalyst",
+        "electrodes"
+      ],
+      "notes": "Electrodes & catalysts"
+    },
+    {
+      "name": "Ionomr Innovations",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CA",
+        "materials",
+        "membrane",
+        "AEM"
+      ],
+      "notes": "AEM membranes"
+    },
+    {
+      "name": "Fumatech",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "materials",
+        "membrane",
+        "AEM"
+      ],
+      "notes": "Ion exchange membranes"
+    },
+    {
+      "name": "Greenlight Innovation",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CA",
+        "testing",
+        "diagnostics",
+        "system"
+      ],
+      "notes": "Fuel cell/electrolyzer test systems"
+    },
+    {
+      "name": "Scribner Associates",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "testing",
+        "diagnostics",
+        "system"
+      ],
+      "notes": "Fuel cell test equipment"
+    },
+    {
+      "name": "Fuel Cell Technologies",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "testing",
+        "diagnostics",
+        "system"
+      ],
+      "notes": "Test systems"
+    },
+    {
+      "name": "Arbin Instruments",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "testing",
+        "diagnostics"
+      ],
+      "notes": "Electrochemical test systems"
+    },
+    {
+      "name": "Maccor",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "testing",
+        "diagnostics"
+      ],
+      "notes": "Test systems"
+    },
+    {
+      "name": "Keysight",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "testing",
+        "diagnostics",
+        "controls"
+      ],
+      "notes": "Instrumentation"
+    },
+    {
+      "name": "National Instruments (NI)",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "testing",
+        "diagnostics",
+        "controls",
+        "HIL"
+      ],
+      "notes": "Test & automation"
+    },
+    {
+      "name": "BekkTech",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "testing",
+        "diagnostics",
+        "membrane"
+      ],
+      "notes": "Membrane diagnostics"
+    },
+    {
+      "name": "AVL",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "testing",
+        "system",
+        "controls",
+        "engineering_services"
+      ],
+      "notes": "Engineering & testing"
+    },
+    {
+      "name": "HORIBA",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:JP",
+        "testing",
+        "diagnostics",
+        "system"
+      ],
+      "notes": "Test & measurement"
+    },
+    {
+      "name": "Ricardo",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "engineering_services",
+        "system",
+        "controls"
+      ],
+      "notes": "Engineering services"
+    },
+    {
+      "name": "IAV",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "engineering_services",
+        "system",
+        "controls"
+      ],
+      "notes": "Engineering services"
+    },
+    {
+      "name": "dSPACE",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "controls",
+        "HIL",
+        "system"
+      ],
+      "notes": "Control & HIL"
+    },
+    {
+      "name": "ETAS",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "controls",
+        "software",
+        "system"
+      ],
+      "notes": "Control & software"
+    },
+    {
+      "name": "Vector",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "controls",
+        "software",
+        "system"
+      ],
+      "notes": "Control & software"
+    },
+    {
+      "name": "Tesla",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "nev_oem",
+        "EV",
+        "system",
+        "controls",
+        "battery"
+      ],
+      "notes": "EV OEM"
+    },
+    {
+      "name": "Rivian",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "EV OEM"
+    },
+    {
+      "name": "Lucid Motors",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "EV OEM"
+    },
+    {
+      "name": "BYD",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "nev_oem",
+        "EV",
+        "battery",
+        "system"
+      ],
+      "notes": "EV OEM"
+    },
+    {
+      "name": "SAIC Motor",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "EV OEM"
+    },
+    {
+      "name": "Geely",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "EV OEM"
+    },
+    {
+      "name": "NIO",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "EV OEM"
+    },
+    {
+      "name": "XPeng",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "EV OEM"
+    },
+    {
+      "name": "Li Auto",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "EV OEM"
+    },
+    {
+      "name": "Changan",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "EV OEM"
+    },
+    {
+      "name": "GAC Aion",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "EV OEM"
+    },
+    {
+      "name": "Great Wall Motors",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "EV OEM"
+    },
+    {
+      "name": "FAW",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "EV OEM"
+    },
+    {
+      "name": "Dongfeng",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "EV OEM"
+    },
+    {
+      "name": "Chery",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "EV OEM"
+    },
+    {
+      "name": "Leapmotor",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "EV OEM"
+    },
+    {
+      "name": "Zeekr",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "EV OEM"
+    },
+    {
+      "name": "Volkswagen Group",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "OEM"
+    },
+    {
+      "name": "BMW",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "OEM"
+    },
+    {
+      "name": "Mercedes-Benz",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "OEM"
+    },
+    {
+      "name": "Stellantis",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "OEM"
+    },
+    {
+      "name": "Renault Group",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "OEM"
+    },
+    {
+      "name": "Nissan",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:JP",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "OEM"
+    },
+    {
+      "name": "Hyundai Motor Company",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:KR",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "OEM"
+    },
+    {
+      "name": "Kia",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:KR",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "OEM"
+    },
+    {
+      "name": "Toyota",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:JP",
+        "nev_oem",
+        "EV",
+        "system",
+        "fuel_cell"
+      ],
+      "notes": "OEM"
+    },
+    {
+      "name": "Ford",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "OEM"
+    },
+    {
+      "name": "General Motors",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "nev_oem",
+        "EV",
+        "system"
+      ],
+      "notes": "OEM"
+    },
+    {
+      "name": "CATL",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "battery",
+        "materials",
+        "system"
+      ],
+      "notes": "Battery manufacturer"
+    },
+    {
+      "name": "LG Energy Solution",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:KR",
+        "battery",
+        "materials",
+        "system"
+      ],
+      "notes": "Battery manufacturer"
+    },
+    {
+      "name": "Samsung SDI",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:KR",
+        "battery",
+        "materials"
+      ],
+      "notes": "Battery manufacturer"
+    },
+    {
+      "name": "SK On",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:KR",
+        "battery",
+        "materials"
+      ],
+      "notes": "Battery manufacturer"
+    },
+    {
+      "name": "Panasonic Energy",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:JP",
+        "battery",
+        "materials"
+      ],
+      "notes": "Battery manufacturer"
+    },
+    {
+      "name": "Northvolt",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "battery",
+        "materials"
+      ],
+      "notes": "Battery manufacturer"
+    },
+    {
+      "name": "Gotion High-Tech",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "battery",
+        "materials"
+      ],
+      "notes": "Battery manufacturer"
+    },
+    {
+      "name": "EVE Energy",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "battery",
+        "materials"
+      ],
+      "notes": "Battery manufacturer"
+    },
+    {
+      "name": "CALB",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:CN",
+        "battery",
+        "materials"
+      ],
+      "notes": "Battery manufacturer"
+    },
+    {
+      "name": "Envision AESC",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:JP",
+        "battery",
+        "materials"
+      ],
+      "notes": "Battery manufacturer"
+    },
+    {
+      "name": "ABB E-mobility",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "charging",
+        "power_electronics",
+        "system"
+      ],
+      "notes": "Charging"
+    },
+    {
+      "name": "ChargePoint",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "charging",
+        "system",
+        "software"
+      ],
+      "notes": "Charging network"
+    },
+    {
+      "name": "EVgo",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "charging",
+        "system"
+      ],
+      "notes": "Charging network"
+    },
+    {
+      "name": "Electrify America",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:US",
+        "charging",
+        "system"
+      ],
+      "notes": "Charging network"
+    },
+    {
+      "name": "IONITY",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "charging",
+        "system"
+      ],
+      "notes": "Charging network"
+    },
+    {
+      "name": "Fastned",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "charging",
+        "system"
+      ],
+      "notes": "Charging network"
+    },
+    {
+      "name": "Tritium",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:AU",
+        "charging",
+        "power_electronics",
+        "system"
+      ],
+      "notes": "Charging hardware"
+    },
+    {
+      "name": "Alpitronic",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "charging",
+        "power_electronics",
+        "system"
+      ],
+      "notes": "Charging hardware"
+    },
+    {
+      "name": "Wallbox",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:EU",
+        "charging",
+        "power_electronics",
+        "system"
+      ],
+      "notes": "Charging hardware"
+    },
+    {
+      "name": "Delta Electronics",
+      "website": "",
+      "careersUrl": "",
+      "atsType": "",
+      "atsId": "",
+      "tags": [
+        "region:TW",
+        "charging",
+        "power_electronics",
+        "system"
+      ],
+      "notes": "Power electronics"
+    }
+  ]
+}

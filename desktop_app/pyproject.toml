@@ -1,10 +1,10 @@
-[build-system]
+﻿[build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "jobflow-desktop-app"
-version = "0.1.1"
+version = "0.1.2"
 description = "Local desktop application for job discovery, screening, scoring, and export."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,3 +20,4 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+

@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to this repository will be documented in this file.
 
@@ -10,12 +10,15 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-04-11
+
 ### Added
 
 - Added a GitHub Actions workflow to create a GitHub Release automatically when a semantic version tag is pushed.
 
 ### Changed
 
+- Made repository docs and collaboration templates bilingual, and expanded contribution guidance.
 - Synced the package runtime version in `desktop_app/src/jobflow_desktop_app/__init__.py` with `desktop_app/pyproject.toml`.
 - Updated `scripts/release.ps1` so future version bumps also sync the package runtime version.
 
@@ -40,3 +43,4 @@ This project currently follows a lightweight semantic versioning approach:
 - Initial desktop application scaffold based on PySide6.
 - Local SQLite data model for candidates, search profiles, settings, jobs, analyses, and review states.
 - Legacy job discovery engine integration through `legacy_jobflow_reference/`.
+

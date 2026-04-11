@@ -1,6 +1,7 @@
 .git.broken.*/
 desktop_app/.deps/
 desktop_app/.venv/
+desktop_app/src/*.egg-info/
 desktop_app/**/*.pyc
 desktop_app/**/__pycache__/
 desktop_app/runtime/data/jobflow_desktop.db*

@@ -10,6 +10,15 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+### Added
+
+- Added a GitHub Actions workflow to create a GitHub Release automatically when a semantic version tag is pushed.
+
+### Changed
+
+- Synced the package runtime version in `desktop_app/src/jobflow_desktop_app/__init__.py` with `desktop_app/pyproject.toml`.
+- Updated `scripts/release.ps1` so future version bumps also sync the package runtime version.
+
 ## [0.1.1] - 2026-04-11
 
 ### Added

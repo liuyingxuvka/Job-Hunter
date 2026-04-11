@@ -10,11 +10,16 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $pyprojectPath = Join-Path $repoRoot "desktop_app\pyproject.toml"
+$packageVersionPath = Join-Path $repoRoot "desktop_app\src\jobflow_desktop_app\__init__.py"
 $changelogPath = Join-Path $repoRoot "CHANGELOG.md"
 $gitExe = "C:\Program Files\Git\cmd\git.exe"
 
 if (-not (Test-Path -LiteralPath $pyprojectPath)) {
   throw "pyproject.toml not found at $pyprojectPath"
+}
+
+if (-not (Test-Path -LiteralPath $packageVersionPath)) {
+  throw "__init__.py version file not found at $packageVersionPath"
 }
 
 if (-not (Test-Path -LiteralPath $changelogPath)) {
@@ -71,6 +76,15 @@ $updatedPyproject = [regex]::Replace(
 )
 Set-Content -LiteralPath $pyprojectPath -Value $updatedPyproject -Encoding UTF8
 
+$packageVersionContent = Get-Content -LiteralPath $packageVersionPath -Raw
+$updatedPackageVersion = [regex]::Replace(
+  $packageVersionContent,
+  '__version__ = "\d+\.\d+\.\d+"',
+  ('__version__ = "{0}"' -f $nextVersion),
+  1
+)
+Set-Content -LiteralPath $packageVersionPath -Value $updatedPackageVersion -Encoding UTF8
+
 $changelogContent = Get-Content -LiteralPath $changelogPath -Raw
 $newSection = @"
 ## [$nextVersion] - $releaseDate
@@ -91,6 +105,7 @@ Set-Content -LiteralPath $changelogPath -Value $updatedChangelog -Encoding UTF8
 
 Write-Output "Updated version: $($currentVersion.Major).$($currentVersion.Minor).$($currentVersion.Patch) -> $nextVersion"
 Write-Output "Updated changelog: $changelogPath"
+Write-Output "Updated package version: $packageVersionPath"
 
 if ($Tag) {
   if (-not (Test-Path -LiteralPath $gitExe)) {

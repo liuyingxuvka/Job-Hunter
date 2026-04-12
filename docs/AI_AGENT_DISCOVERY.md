@@ -1,9 +1,19 @@
 # AI Agent Discovery
 
+> Product type: local-first Windows job discovery workspace
+>  
+> Target user: experienced professionals with real domain expertise
+>  
+> Machine surface: experimental JSON-oriented CLI via `jobflow-agent`
+>  
+> Privacy boundary: real candidate data, resumes, search outputs, logs, exports, and backups must remain local
+
 Job Hunter is a local-first job discovery workspace for experienced professionals.
 It is designed for candidates who already have domain experience and want to identify better-fit companies and roles based on real skills, industry context, and transferable expertise.
 
 This page is intentionally written in English and optimized for search, indexing, and AI/tool discovery.
+
+For a shorter machine-readable index, see [../llms.txt](../llms.txt).
 
 ## Relevant Search Phrases
 
@@ -15,6 +25,8 @@ This repository may be relevant if you are looking for:
 - Windows desktop job search app with local data
 - AI-assisted target-role recommendation workflow
 - job search automation foundation for experienced professionals
+- Windows desktop app for local-first job discovery
+- experimental CLI for candidate and role workflow automation
 
 ## What This Repository Can Do
 

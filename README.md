@@ -156,6 +156,7 @@ python -m venv .venv
 - [更新记录](CHANGELOG.md)
 - [产品定位](docs/PRODUCT_POSITIONING.md)
 - [架构概览](docs/ARCHITECTURE.md)
+- [llms.txt](llms.txt)
 - [AI agent 检索说明（English）](docs/AI_AGENT_DISCOVERY.md)
 - [自动化与 AI 集成说明](docs/AI_INTEGRATION.md)
 - [路线图](docs/ROADMAP.md)
@@ -331,6 +332,7 @@ This boundary is now enforced through `.gitignore`, `legacy_jobflow_reference/.g
 - [Changelog](CHANGELOG.md)
 - [Product Positioning](docs/PRODUCT_POSITIONING.md)
 - [Architecture Overview](docs/ARCHITECTURE.md)
+- [llms.txt](llms.txt)
 - [AI Agent Discovery](docs/AI_AGENT_DISCOVERY.md)
 - [Automation And AI Integration Notes](docs/AI_INTEGRATION.md)
 - [Roadmap](docs/ROADMAP.md)
@@ -355,18 +357,3 @@ Useful contribution areas include:
 If GitHub Discussions is not enabled, opening an Issue is still a valid way to discuss ideas. A proposal can be framed as a feature suggestion, a research hypothesis, a data-source idea, or an analysis of why existing platforms fail to match certain professional profiles well.
 
 Before opening an Issue or PR, please read [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## AI Tool Discovery
-
-This repository may be relevant if you are searching for:
-
-- an AI agent job-search tool for experienced professionals
-- a local-first candidate and target-role workspace
-- a Windows desktop job-search app with local SQLite storage
-- a JSON-friendly CLI for candidate, profile, and AI-assisted role workflows
-
-Start here:
-
-- [AI Agent Discovery](docs/AI_AGENT_DISCOVERY.md)
-- [AI Integration Notes](docs/AI_INTEGRATION.md)
-- experimental CLI: `jobflow-agent`

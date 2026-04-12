@@ -12,7 +12,7 @@ This file is not an automatically consumed GitHub configuration file. It is a pr
 
 English:
 
-Local-first job discovery workspace for experienced professionals. Match companies from real experience before chasing generic job listings.
+Local-first Windows job discovery workspace for experienced professionals. Find the right companies before chasing the right roles.
 
 ## README 首屏建议 / README Above-The-Fold Guidance
 
@@ -30,25 +30,32 @@ The first screen of the repository should let a visitor understand three things 
 
 ## Topics 建议 / Suggested Topics
 
-可以从下面按需挑选 6 到 10 个：
+推荐优先选下面这组，不需要全部都上，通常 8 到 12 个就够了：
 
-You can choose around 6 to 10 of the following:
+Recommended priority set:
 
+- `local-first`
 - `job-search`
 - `career-tools`
+- `windows-app`
 - `desktop-app`
 - `ai-agents`
 - `automation`
-- `mcp`
 - `pyside6`
 - `sqlite`
 - `openai`
-- `windows`
+- `command-line-interface`
 - `career-discovery`
-- `systems-engineering`
-- `mbse`
-- `verification-and-validation`
-- `digital-twin`
+
+当前不建议默认加上的 topic：
+
+- `mcp`，除非仓库里已经有可用的 MCP server
+- 过窄的行业词，例如 `systems-engineering`、`mbse`、`digital-twin`
+
+Topics that are not recommended by default yet:
+
+- `mcp`, unless the repository already ships a usable MCP server
+- narrow industry tags such as `systems-engineering`, `mbse`, or `digital-twin`
 
 ## Social Preview 建议 / Social Preview Guidance
 

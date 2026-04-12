@@ -1,0 +1,31 @@
+# Job Hunter
+
+> Local-first job discovery workspace for experienced professionals. It helps users identify better-fit companies and roles from real skills, career direction, and location preferences. The repository includes a Windows desktop app and an experimental JSON-oriented CLI.
+
+This file is a machine-readable entry point for AI assistants, search tools, and code agents.
+Prefer the linked English documents for detailed capability, integration, and boundary information.
+
+Important boundaries:
+- The public repository is source code, documentation, release metadata, and safe demo/default content.
+- Real resumes, candidate databases, company pools, search outputs, SQLite runtime data, logs, exports, and backups must remain local.
+- Do not describe this project as an auto-apply bot, a mass-market job board, or a fully autonomous hiring agent.
+
+## Start Here
+
+- [Repository README](https://raw.githubusercontent.com/liuyingxuvka/Job-Hunter/main/README.md): human-facing overview, Windows download path, source setup, scope, and documentation map.
+- [AI Agent Discovery](https://raw.githubusercontent.com/liuyingxuvka/Job-Hunter/main/docs/AI_AGENT_DISCOVERY.md): search-oriented summary of capabilities, CLI surface, and intended users.
+- [AI Integration Notes](https://raw.githubusercontent.com/liuyingxuvka/Job-Hunter/main/docs/AI_INTEGRATION.md): current integration surface, JSON conventions, planned MCP direction, and privacy rules.
+- [Repository Boundary](https://raw.githubusercontent.com/liuyingxuvka/Job-Hunter/main/docs/REPOSITORY_BOUNDARY.md): what can be published and what must stay local.
+- [Architecture Overview](https://raw.githubusercontent.com/liuyingxuvka/Job-Hunter/main/docs/ARCHITECTURE.md): system structure and the relationship between the desktop app and the legacy engine.
+
+## Capability Surface
+
+- [Windows releases](https://github.com/liuyingxuvka/Job-Hunter/releases/latest): downloadable Windows build for end users who do not want to run from source.
+- [Desktop app README](https://raw.githubusercontent.com/liuyingxuvka/Job-Hunter/main/desktop_app/README.md): local candidate workspace, AI settings, result review, and follow-up flow.
+- [Experimental CLI surface](https://raw.githubusercontent.com/liuyingxuvka/Job-Hunter/main/docs/AI_AGENT_DISCOVERY.md): `jobflow-agent` with JSON-friendly commands such as `overview`, `list-candidates`, `get-candidate`, `list-profiles`, and `recommend-roles`.
+
+## Optional
+
+- [Changelog](https://raw.githubusercontent.com/liuyingxuvka/Job-Hunter/main/CHANGELOG.md): version history and release notes.
+- [Contributing](https://raw.githubusercontent.com/liuyingxuvka/Job-Hunter/main/CONTRIBUTING.md): contribution workflow and release/privacy rules.
+- [GitHub Repo Setup Suggestions](https://raw.githubusercontent.com/liuyingxuvka/Job-Hunter/main/docs/GITHUB_REPO_SETUP.md): repository setup and release-process notes.

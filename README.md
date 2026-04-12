@@ -26,14 +26,14 @@ In one sentence: **find the right companies before chasing the right roles.**
 中文：
 
 - 已经工作一段时间、具备明确专业能力的中高级求职者
-- 细分行业或专业岗位人群，如系统工程、验证测试、MBSE、数字孪生、可靠性、能源装备、氢能等方向
+- 细分行业或专业岗位人群，如系统工程、验证测试、MBSE、数字孪生、可靠性、能源装备等方向
 - 希望跨行业迁移，但不想丢掉核心能力的人
 - 不满足于“职位平台推荐流”，更希望主动建立目标公司池的人
 
 English:
 
 - Experienced candidates with clear professional skills and domain depth
-- Specialists in areas such as systems engineering, validation and verification, MBSE, digital twin, reliability, energy equipment, or hydrogen
+- Specialists in areas such as systems engineering, validation and verification, MBSE, digital twin, reliability, or energy equipment
 - People who want to move into adjacent industries without abandoning their core strengths
 - People who prefer building a focused target-company pipeline instead of relying on generic platform feeds
 

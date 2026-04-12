@@ -79,9 +79,23 @@ The following should not be interpreted as fully completed yet:
 
 ## 本地运行 / Local Run
 
-如果你是普通 Windows 用户，不打算从源码运行，请优先使用 GitHub Releases 里的 `Job-Hunter-<version>-win64.zip`，解压后直接启动 `Jobflow Desktop.exe`。
+如果你是普通 Windows 用户，不打算从源码运行，请优先使用 GitHub Releases 里的 Windows 发布包：
 
-If you are a non-developer Windows user, prefer the packaged GitHub Release asset `Job-Hunter-<version>-win64.zip` and launch `Jobflow Desktop.exe` after extracting it.
+- 最新发布页：
+  [https://github.com/liuyingxuvka/Job-Hunter/releases/latest](https://github.com/liuyingxuvka/Job-Hunter/releases/latest)
+- 下载文件：
+  `Job-Hunter-<version>-win64.zip`
+- 解压后直接启动：
+  `Jobflow Desktop.exe`
+
+If you are a non-developer Windows user, prefer the packaged GitHub Release asset:
+
+- Latest release page:
+  [https://github.com/liuyingxuvka/Job-Hunter/releases/latest](https://github.com/liuyingxuvka/Job-Hunter/releases/latest)
+- Download file:
+  `Job-Hunter-<version>-win64.zip`
+- Launch after extraction:
+  `Jobflow Desktop.exe`
 
 下面这部分说明的是源码工作树运行方式，不是最终面向普通用户的发布形态。
 

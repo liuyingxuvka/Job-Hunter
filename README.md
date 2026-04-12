@@ -110,16 +110,46 @@ Things the project should not overclaim today:
 
 If you are not working from source and just want a double-clickable app, download the latest Windows release package from GitHub Releases:
 
-- `Job-Hunter-<version>-win64.zip`
-- 解压后启动 `Jobflow Desktop.exe`
+- 最新发布页：
+  [https://github.com/liuyingxuvka/Job-Hunter/releases/latest](https://github.com/liuyingxuvka/Job-Hunter/releases/latest)
+- 所有发布版本：
+  [https://github.com/liuyingxuvka/Job-Hunter/releases](https://github.com/liuyingxuvka/Job-Hunter/releases)
+- 当前应下载的文件名格式：`Job-Hunter-<version>-win64.zip`
+- 下载后先解压，再双击 `Jobflow Desktop.exe`
+- 如果 Windows 对直接启动 `.exe` 比较严格，也可以双击 `START_JOBFLOW_DESKTOP.cmd`
 - 这个发布包会自带桌面运行时、便携 Node、demo 候选人种子和安全模板
 
-- unzip it and launch `Jobflow Desktop.exe`
+- Latest release page:
+  [https://github.com/liuyingxuvka/Job-Hunter/releases/latest](https://github.com/liuyingxuvka/Job-Hunter/releases/latest)
+- All releases:
+  [https://github.com/liuyingxuvka/Job-Hunter/releases](https://github.com/liuyingxuvka/Job-Hunter/releases)
+- Download the file named `Job-Hunter-<version>-win64.zip`
+- Extract it first, then launch `Jobflow Desktop.exe`
+- If Windows is cautious about launching the `.exe` directly, you can use `START_JOBFLOW_DESKTOP.cmd` instead
 - the package ships with the desktop runtime, portable Node, demo candidate seed, and safe templates
+
+对普通 Windows 用户，推荐按下面步骤操作：
+
+Recommended steps for non-developer Windows users:
+
+1. 打开上面的 latest release 链接。  
+   Open the latest release link above.
+2. 下载 `Job-Hunter-<version>-win64.zip`。  
+   Download `Job-Hunter-<version>-win64.zip`.
+3. 解压到一个普通文件夹，不要直接在 zip 压缩包里运行。  
+   Extract it to a normal folder instead of launching from inside the zip archive.
+4. 双击 `Jobflow Desktop.exe`。  
+   Double-click `Jobflow Desktop.exe`.
+5. 第一次打开后，在应用里填写 API 设置即可开始使用。  
+   After the first launch, enter your API settings in the app and start using it.
 
 发布包不会包含真实候选人数据库、客户数据、搜索历史、导出结果或运行备份。
 
 The release package does not include real candidate databases, customer data, search history, exports, or runtime backups.
+
+对非开发者来说，本地不需要额外安装 Python。
+
+For non-developers, no separate local Python installation is required.
 
 ### 方式一：直接启动桌面应用 / Option 1: Start The Desktop App Directly
 

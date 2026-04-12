@@ -113,7 +113,7 @@ python -m venv .venv
 .\.venv\Scripts\jobflow-desktop
 ```
 
-### 环境要求
+##### 环境要求
 
 - Windows 开发环境优先
 - Python 3.10+
@@ -133,13 +133,13 @@ python -m venv .venv
 - `JOBFLOW_NODE_PATH`
 - `JOBFLOW_PYTHON_PATH`
 
-### 公开仓库边界
+##### 公开仓库边界
 
 这个仓库公开部分只保留源码、文档、演示种子和安全示例模板；个人简历、公司池、搜索结果、SQLite 数据和运行备份必须留在本地。
 
 当前已经把这套边界写进 `.gitignore`、`legacy_jobflow_reference/.gitignore`、`scripts/privacy_audit.ps1` 和 GitHub Actions，所以未来同事协作时也会按同一规则执行。
 
-### 文档导航
+##### 文档导航
 
 - [更新记录](CHANGELOG.md)
 - [产品定位](docs/PRODUCT_POSITIONING.md)
@@ -149,7 +149,7 @@ python -m venv .venv
 - [GitHub 仓库设置建议](docs/GITHUB_REPO_SETUP.md)
 - [贡献说明](CONTRIBUTING.md)
 
-### 贡献与讨论
+##### 贡献与讨论
 
 这个项目欢迎的不只是代码提交，也欢迎思路、实验方向和产品判断。我们尤其欢迎围绕“专业型人才如何更高效找到更匹配职位”这个问题展开合作。
 
@@ -277,7 +277,7 @@ python -m venv .venv
 .\.venv\Scripts\jobflow-desktop
 ```
 
-### Environment
+##### Environment
 
 - Windows-first development environment
 - Python 3.10+
@@ -297,13 +297,13 @@ Supported environment variables:
 - `JOBFLOW_NODE_PATH`
 - `JOBFLOW_PYTHON_PATH`
 
-### Public Repository Boundary
+##### Public Repository Boundary
 
 The public repository keeps only source code, documentation, demo seeds, and safe example templates. Personal resumes, company pools, search outputs, SQLite data, and runtime backups must remain local.
 
 This boundary is now enforced through `.gitignore`, `legacy_jobflow_reference/.gitignore`, `scripts/privacy_audit.ps1`, and GitHub Actions so future collaborators follow the same rules by default.
 
-### Documentation
+##### Documentation
 
 - [Changelog](CHANGELOG.md)
 - [Product Positioning](docs/PRODUCT_POSITIONING.md)
@@ -313,7 +313,7 @@ This boundary is now enforced through `.gitignore`, `legacy_jobflow_reference/.g
 - [GitHub Repo Setup Suggestions](docs/GITHUB_REPO_SETUP.md)
 - [Contributing](CONTRIBUTING.md)
 
-### Contribute And Discuss
+##### Contribute And Discuss
 
 This project welcomes more than code. It also welcomes ideas, experiments, product thinking, and research around one central question: how professionals can find better-fit opportunities more effectively.
 

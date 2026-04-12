@@ -255,3 +255,27 @@ The project currently follows lightweight semantic versioning:
 版本记录集中维护在 [CHANGELOG.md](CHANGELOG.md)。
 
 Version history is maintained in [CHANGELOG.md](CHANGELOG.md).
+
+如果某次版本是给普通 Windows 用户下载使用的，那么发布不应只停留在源码提交或 tag。
+同一个版本还应同步产出并上传对应的 Windows 发布包：
+
+- `Job-Hunter-<version>-win64.zip`
+- `Job-Hunter-<version>-win64.zip.sha256`
+
+也就是说，面向用户的版本发布边界应包含三者一致：
+
+- 源码版本号
+- Git tag / GitHub Release
+- Windows 发布资产
+
+If a release is intended for regular Windows end users, the release should not stop at a source commit or git tag alone.
+The same version should also ship the matching Windows release assets:
+
+- `Job-Hunter-<version>-win64.zip`
+- `Job-Hunter-<version>-win64.zip.sha256`
+
+For end-user releases, keep these three aligned:
+
+- source version
+- git tag / GitHub Release
+- Windows release assets

@@ -88,6 +88,7 @@ Better homepage options later may include:
 
 - 用 GitHub Releases 发 `Job-Hunter-<version>-win64.zip`
 - 同时附带 `.sha256` 校验文件
+- 不要只推源码版本号或 tag；对普通用户可见的版本应同时挂上对应 Windows 包
 - 在 Release Notes 里区分“本次已完成”和“仍在规划中”
 - 把启动方式、依赖和已知限制写清楚
 
@@ -95,6 +96,7 @@ If GitHub Releases is the public download channel, it is recommended to:
 
 - publish `Job-Hunter-<version>-win64.zip` through GitHub Releases
 - attach a `.sha256` checksum file alongside the archive
+- do not stop at a source-only version bump or tag; end-user-visible releases should include the matching Windows package
 - keep release notes explicit about what is shipped now versus what is still planned
 - document startup steps, dependencies, and known limitations clearly
 

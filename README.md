@@ -1,29 +1,10 @@
 # Job Hunter
 
-> 本说明包含完整中文版本和完整英文版本。请先阅读中文部分，英文部分在后面。  
-> This document includes a full Chinese version and a full English version. The Chinese section comes first, followed by the English section.
-
-## Agent-Facing Summary / 面向 Agent 的摘要
-
-Job Hunter is a local-first job discovery workspace for experienced professionals. It is designed to keep personal data on the user's machine, while exposing the underlying candidate, search, and review workflow in a way that is easier for AI agents and developers to understand.
-
-Job Hunter 是一个面向有经验求职者的本地优先岗位发现工作台。它的目标是把个人数据留在用户本地，同时让候选人管理、搜索流程和结果维护这些底层逻辑更容易被 AI agent 和开发者理解。
-
-If you are an AI agent or an automated coding assistant, start here:
-
-- Read `docs/AI_INTEGRATION.md` for capabilities, privacy boundaries, current and planned integration surfaces, safe-data guidance, and example workflows
-- Read `docs/REPOSITORY_BOUNDARY.md` before touching any local runtime data or personal records
-- Treat the repository as source + docs + demo seeds only; do not assume real candidate data belongs in GitHub
-- Prefer machine-readable outputs and headless entry points over UI-only interaction
-- Use the experimental `jobflow-agent` CLI for JSON-based headless access when working from `desktop_app/`
-
-如果你是 AI agent 或自动化编码助手，请先看：
-
-- 阅读 `docs/AI_INTEGRATION.md`，了解能力、隐私边界、当前与规划中的接入面、安全数据指引和示例工作流
-- 在接触任何本地运行数据或个人记录之前，先阅读 `docs/REPOSITORY_BOUNDARY.md`
-- 把这个仓库理解为“源码 + 文档 + demo 种子”，不要默认真实候选人数据应该进入 GitHub
-- 优先使用机器可读输出，而不是只依赖 UI 交互
-- 在 `desktop_app/` 工作时，可优先使用实验性的 `jobflow-agent` CLI 获取 JSON 输出
+> 面向有经验求职者的本地优先岗位发现工作台。核心思路是：先找对公司，再找对岗位。  
+> A local-first job discovery workspace for experienced professionals. The core idea is simple: find the right companies before chasing the right roles.
+>
+> 本 README 先给中文，再给英文。普通用户请直接看 Windows 下载部分；开发者和协作者再看源码说明。  
+> This README starts with Chinese and ends with English. End users should go straight to the Windows download section; developers and collaborators can use the source instructions.
 
 ## 中文说明
 
@@ -43,19 +24,6 @@ Job Hunter 不是一个面向大众求职场景的职位推荐器。它更适合
 - 细分行业或专业岗位人群，如系统工程、验证测试、MBSE、数字孪生、可靠性、能源装备等方向
 - 希望跨行业迁移，但不想丢掉核心能力的人
 - 不满足于“职位平台推荐流”，更希望主动建立目标公司池的人
-
-### 当前仓库能做什么
-
-当前仓库主要包含一个正在持续迭代的本地桌面工作台，以及一套旧版岗位发现引擎参考实现。
-
-已落地能力包括：
-
-- 本地候选人管理：维护姓名、邮箱、当前所在地、目标地区、备注和简历路径
-- AI 目标岗位设立：辅助生成更具体的岗位方向，并维护中英文岗位名称和说明
-- 本地 AI 设置：支持直接填写 API Key 或绑定环境变量，并验证模型可用性
-- 公司优先的岗位发现流程：根据候选人的岗位方向和偏好，调用旧版搜索引擎做公司与岗位发现
-- 搜索结果工作台：查看匹配结果，并维护关注、投递、Offer、放弃等状态
-- 本地优先数据存储：通过 SQLite 保存候选人、搜索配置、结果状态和运行数据
 
 ### 你应该从哪里开始
 
@@ -129,14 +97,25 @@ python -m venv .venv
 .\.venv\Scripts\jobflow-desktop
 ```
 
-面向 agent 的无头入口（实验性）：
+如果你是在做 CLI、自动化或 AI 集成，请直接阅读：
 
-```powershell
-cd .\desktop_app
-.\.venv\Scripts\jobflow-agent overview
-.\.venv\Scripts\jobflow-agent list-candidates
-.\.venv\Scripts\jobflow-agent get-candidate --candidate-id <candidate-id>
-```
+- [AI Agent Discovery (English)](docs/AI_AGENT_DISCOVERY.md)
+- [AI Integration Notes](docs/AI_INTEGRATION.md)
+
+这些内容保留在单独文档里，不放在 GitHub 首页 README 展开。
+
+### 当前仓库能做什么
+
+当前仓库主要包含一个正在持续迭代的本地桌面工作台，以及一套旧版岗位发现引擎参考实现。
+
+已落地能力包括：
+
+- 本地候选人管理：维护姓名、邮箱、当前所在地、目标地区、备注和简历路径
+- AI 目标岗位设立：辅助生成更具体的岗位方向，并维护中英文岗位名称和说明
+- 本地 AI 设置：支持直接填写 API Key 或绑定环境变量，并验证模型可用性
+- 公司优先的岗位发现流程：根据候选人的岗位方向和偏好，调用旧版搜索引擎做公司与岗位发现
+- 搜索结果工作台：查看匹配结果，并维护关注、投递、Offer、放弃等状态
+- 本地优先数据存储：通过 SQLite 保存候选人、搜索配置、结果状态和运行数据
 
 ### 核心流程
 
@@ -177,7 +156,8 @@ cd .\desktop_app
 - [更新记录](CHANGELOG.md)
 - [产品定位](docs/PRODUCT_POSITIONING.md)
 - [架构概览](docs/ARCHITECTURE.md)
-- [AI 集成说明](docs/AI_INTEGRATION.md)
+- [AI agent 检索说明（English）](docs/AI_AGENT_DISCOVERY.md)
+- [自动化与 AI 集成说明](docs/AI_INTEGRATION.md)
 - [路线图](docs/ROADMAP.md)
 - [仓库边界](docs/REPOSITORY_BOUNDARY.md)
 - [GitHub 仓库设置建议](docs/GITHUB_REPO_SETUP.md)
@@ -219,19 +199,6 @@ In one sentence: **find the right companies before chasing the right roles.**
 - Specialists in areas such as systems engineering, validation and verification, MBSE, digital twin, reliability, or energy equipment
 - People who want to move into adjacent industries without abandoning their core strengths
 - People who prefer building a focused target-company pipeline instead of relying on generic platform feeds
-
-### What The Repository Can Do Today
-
-Today the repository contains two practical layers: an evolving local desktop workspace and a legacy job discovery engine that still powers part of the search pipeline.
-
-Current implemented capabilities include:
-
-- Local candidate management for names, contact info, location preferences, notes, and resume paths
-- AI-assisted target-role setup with bilingual role names and descriptions
-- Local AI settings with API key handling, environment-variable support, and model validation
-- Company-first job discovery through the legacy engine based on candidate direction and preferences
-- A results workspace for reviewing matches and maintaining focus, applied, offer, rejected, or dropped states
-- Local-first persistence through SQLite for candidate data, search settings, review states, and runtime data
 
 ### Where To Start
 
@@ -305,6 +272,26 @@ python -m venv .venv
 .\.venv\Scripts\jobflow-desktop
 ```
 
+If you are working on CLI, automation, or AI integrations, go straight to:
+
+- [AI Agent Discovery](docs/AI_AGENT_DISCOVERY.md)
+- [AI Integration Notes](docs/AI_INTEGRATION.md)
+
+Those details stay in a separate document instead of being expanded on the GitHub front page.
+
+### What The Repository Can Do Today
+
+Today the repository contains two practical layers: an evolving local desktop workspace and a legacy job discovery engine that still powers part of the search pipeline.
+
+Current implemented capabilities include:
+
+- Local candidate management for names, contact info, location preferences, notes, and resume paths
+- AI-assisted target-role setup with bilingual role names and descriptions
+- Local AI settings with API key handling, environment-variable support, and model validation
+- Company-first job discovery through the legacy engine based on candidate direction and preferences
+- A results workspace for reviewing matches and maintaining focus, applied, offer, rejected, or dropped states
+- Local-first persistence through SQLite for candidate data, search settings, review states, and runtime data
+
 ### Core Workflow
 
 1. Create a candidate profile, attach a resume, and set current location, preferred locations, and notes.
@@ -344,7 +331,8 @@ This boundary is now enforced through `.gitignore`, `legacy_jobflow_reference/.g
 - [Changelog](CHANGELOG.md)
 - [Product Positioning](docs/PRODUCT_POSITIONING.md)
 - [Architecture Overview](docs/ARCHITECTURE.md)
-- [AI Integration Notes](docs/AI_INTEGRATION.md)
+- [AI Agent Discovery](docs/AI_AGENT_DISCOVERY.md)
+- [Automation And AI Integration Notes](docs/AI_INTEGRATION.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Repository Boundary](docs/REPOSITORY_BOUNDARY.md)
 - [GitHub Repo Setup Suggestions](docs/GITHUB_REPO_SETUP.md)
@@ -367,3 +355,18 @@ Useful contribution areas include:
 If GitHub Discussions is not enabled, opening an Issue is still a valid way to discuss ideas. A proposal can be framed as a feature suggestion, a research hypothesis, a data-source idea, or an analysis of why existing platforms fail to match certain professional profiles well.
 
 Before opening an Issue or PR, please read [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## AI Tool Discovery
+
+This repository may be relevant if you are searching for:
+
+- an AI agent job-search tool for experienced professionals
+- a local-first candidate and target-role workspace
+- a Windows desktop job-search app with local SQLite storage
+- a JSON-friendly CLI for candidate, profile, and AI-assisted role workflows
+
+Start here:
+
+- [AI Agent Discovery](docs/AI_AGENT_DISCOVERY.md)
+- [AI Integration Notes](docs/AI_INTEGRATION.md)
+- experimental CLI: `jobflow-agent`

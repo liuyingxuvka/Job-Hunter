@@ -16,6 +16,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Run privacy audit
+        shell: pwsh
+        run: .\scripts\privacy_audit.ps1 -Scope repo
+
       - name: Build release notes from CHANGELOG
         shell: bash
         run: |

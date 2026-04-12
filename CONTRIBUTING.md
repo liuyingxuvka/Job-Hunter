@@ -146,6 +146,46 @@ python -m venv .venv
 
 If you need to run the legacy discovery engine, you will also need a usable Node.js runtime, or the portable Node binaries under `desktop_app/runtime/tools/`.
 
+## 数据边界 / Repository Data Boundary
+
+请把公开仓库理解为“产品代码与公共文档”，而不是任何人的真实求职工作区。
+
+Treat the public repository as product code plus public documentation, not as anyone's live job-search workspace.
+
+以下内容必须留在本地：
+
+The following must remain local:
+
+- `legacy_jobflow_reference/config.json`、`config.adjacent.json`
+- `legacy_jobflow_reference/companies.json`、`companies_adjacent.json`
+- `legacy_jobflow_reference/resume.md`
+- `legacy_jobflow_reference/jobs*.json`、`jobs*.xlsx`
+- `desktop_app/runtime/data/jobflow_desktop.db*`
+- `desktop_app/runtime/backups/**`
+
+- `legacy_jobflow_reference/config.json` and `config.adjacent.json`
+- `legacy_jobflow_reference/companies.json` and `companies_adjacent.json`
+- `legacy_jobflow_reference/resume.md`
+- `legacy_jobflow_reference/jobs*.json` and `jobs*.xlsx`
+- `desktop_app/runtime/data/jobflow_desktop.db*`
+- `desktop_app/runtime/backups/**`
+
+如果你需要从模板开始，请复制 `*.example.*` 文件到本地工作副本，不要把个人资料写回模板。
+
+If you need a starting point, copy the `*.example.*` files into local working copies and keep personal data out of the templates.
+
+提交前请运行：
+
+Run this before you push:
+
+```powershell
+.\scripts\privacy_audit.ps1
+```
+
+更完整的边界说明见 [docs/REPOSITORY_BOUNDARY.md](docs/REPOSITORY_BOUNDARY.md)。
+
+See [docs/REPOSITORY_BOUNDARY.md](docs/REPOSITORY_BOUNDARY.md) for the full boundary policy.
+
 ## PR 期望 / PR Expectations
 
 提交 PR 时，请尽量说明：

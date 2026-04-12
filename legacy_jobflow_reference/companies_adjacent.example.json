@@ -1,23 +1,23 @@
 {
   "companies": [
     {
-      "name": "Example Energy Systems",
+      "name": "Example Mobility Systems",
       "website": "https://example.com",
       "careersUrl": "https://example.com/careers",
       "atsType": "",
       "atsId": "",
       "tags": [
         "region:EU",
-        "energy",
+        "complex_equipment",
         "systems",
-        "integration",
-        "reliability"
+        "verification",
+        "integration"
       ],
       "priority": 20,
-      "notes": "Placeholder example showing the expected schema for a company-first search list."
+      "notes": "Placeholder example for adjacent-track company curation."
     },
     {
-      "name": "Sample Industrial Technology",
+      "name": "Sample Automation Group",
       "website": "https://example.org",
       "careersUrl": "https://example.org/jobs",
       "atsType": "",
@@ -25,26 +25,26 @@
       "tags": [
         "region:US",
         "industrial_automation",
-        "validation",
-        "digital_twin"
+        "digital_twin",
+        "technical_interface"
       ],
       "priority": 18,
-      "notes": "Use tags and priority to bias discovery toward companies that fit the candidate's profile."
+      "notes": "Add your real target companies only to the local companies_adjacent.json copy."
     },
     {
-      "name": "Contoso Reliability Labs",
+      "name": "Contoso Digital Engineering",
       "website": "https://example.net",
       "careersUrl": "https://example.net/careers",
       "atsType": "",
       "atsId": "",
       "tags": [
         "region:APAC",
-        "testing",
-        "diagnostics",
-        "condition_monitoring"
+        "MBSE",
+        "reliability",
+        "validation"
       ],
       "priority": 16,
-      "notes": "Replace these placeholders with your own local company pool in companies.json."
+      "notes": "Keep the public repository limited to examples rather than real maintained company pools."
     }
   ]
 }

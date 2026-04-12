@@ -12,6 +12,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $pyprojectPath = Join-Path $repoRoot "desktop_app\pyproject.toml"
 $packageVersionPath = Join-Path $repoRoot "desktop_app\src\jobflow_desktop_app\__init__.py"
 $changelogPath = Join-Path $repoRoot "CHANGELOG.md"
+$privacyAuditPath = Join-Path $repoRoot "scripts\privacy_audit.ps1"
 $gitExe = "C:\Program Files\Git\cmd\git.exe"
 
 if (-not (Test-Path -LiteralPath $pyprojectPath)) {
@@ -24,6 +25,10 @@ if (-not (Test-Path -LiteralPath $packageVersionPath)) {
 
 if (-not (Test-Path -LiteralPath $changelogPath)) {
   throw "CHANGELOG.md not found at $changelogPath"
+}
+
+if (-not (Test-Path -LiteralPath $privacyAuditPath)) {
+  throw "privacy_audit.ps1 not found at $privacyAuditPath"
 }
 
 function Get-CurrentVersion {
@@ -61,6 +66,8 @@ function Get-ReleaseDate {
   }
   return (Get-Date).ToString("yyyy-MM-dd")
 }
+
+& $privacyAuditPath -Scope repo
 
 $pyprojectContent = Get-Content -LiteralPath $pyprojectPath -Raw
 $currentVersion = Get-CurrentVersion -Content $pyprojectContent

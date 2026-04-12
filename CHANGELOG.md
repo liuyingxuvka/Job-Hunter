@@ -10,6 +10,11 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-04-12
+
+### Changed
+
+- Hardened repository privacy boundaries, replaced local working files with safe templates, and added automated privacy checks.
 ## [0.1.2] - 2026-04-11
 
 ### Added
@@ -43,4 +48,5 @@ This project currently follows a lightweight semantic versioning approach:
 - Initial desktop application scaffold based on PySide6.
 - Local SQLite data model for candidates, search profiles, settings, jobs, analyses, and review states.
 - Legacy job discovery engine integration through `legacy_jobflow_reference/`.
+
 

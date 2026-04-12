@@ -1,0 +1,3 @@
+# Keep backup artifacts local only.
+*
+!.gitignore

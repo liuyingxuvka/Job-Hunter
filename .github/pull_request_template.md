@@ -20,6 +20,8 @@ Explain the problem this PR solves.
 - [ ] Manually verified locally
 - [ ] Updated documentation when needed
 - [ ] Added or adjusted tests when practical
+- [ ] Ran `.\scripts\privacy_audit.ps1`
+- [ ] Confirmed no personal data, local runtime files, or private company libraries are included
 
 ## Risks or follow-ups / 风险与后续事项
 

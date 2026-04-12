@@ -155,12 +155,23 @@ English:
 - `JOBFLOW_NODE_PATH`
 - `JOBFLOW_PYTHON_PATH`
 
+## 公开仓库边界 / Public Repository Boundary
+
+这个仓库公开部分只保留源码、文档、演示种子和安全示例模板；个人简历、公司池、搜索结果、SQLite 数据和运行备份必须留在本地。
+
+The public repository keeps only source code, documentation, demo seeds, and safe example templates. Personal resumes, company pools, search outputs, SQLite data, and runtime backups must remain local.
+
+当前已经把这套边界写进 `.gitignore`、`legacy_jobflow_reference/.gitignore`、`scripts/privacy_audit.ps1` 和 GitHub Actions，所以未来同事协作时也会按同一规则执行。
+
+This boundary is now enforced through `.gitignore`, `legacy_jobflow_reference/.gitignore`, `scripts/privacy_audit.ps1`, and GitHub Actions so future collaborators follow the same rules by default.
+
 ## 文档导航 / Documentation
 
 - [更新记录 / Changelog](CHANGELOG.md)
 - [产品定位 / Product Positioning](docs/PRODUCT_POSITIONING.md)
 - [架构概览 / Architecture Overview](docs/ARCHITECTURE.md)
 - [路线图 / Roadmap](docs/ROADMAP.md)
+- [仓库边界 / Repository Boundary](docs/REPOSITORY_BOUNDARY.md)
 - [GitHub 仓库设置建议 / GitHub Repo Setup Suggestions](docs/GITHUB_REPO_SETUP.md)
 - [贡献说明 / Contributing](CONTRIBUTING.md)
 

@@ -51,7 +51,7 @@
 - 已经补齐的全套设计、数据库和流程文档
 - 完整的自动化测试体系
 
-### 使用方式
+### 你应该怎么使用这个目录
 
 #### 普通用户：不要从这里开始
 
@@ -68,6 +68,17 @@
 
 下面这部分才是源码工作树运行方式。
 
+开发依赖：
+
+- Python 3.10+
+- `PySide6`
+- OpenAI 或兼容接口配置
+- Node.js，或 `runtime/tools/` 下的便携版本
+
+下载好的 Windows 发布包已经内置桌面运行时，不需要额外安装本地 Python。
+
+推荐方式：安装后运行
+
 推荐在这个目录下使用独立虚拟环境：
 
 ```powershell
@@ -78,6 +89,8 @@ python -m venv .venv
 .\.venv\Scripts\jobflow-desktop
 ```
 
+备选方式：直接启动模块
+
 如果暂时不想安装为可执行脚本，也可以直接启动模块：
 
 ```powershell
@@ -86,7 +99,7 @@ $env:PYTHONPATH = ".\src;.\.deps"
 python -m jobflow_desktop_app.main
 ```
 
-### Windows 启动脚本
+Windows 源码启动脚本：
 
 项目里还提供了面向 Windows 的启动脚本：
 
@@ -107,15 +120,6 @@ cd .\desktop_app
 | `runtime/` | 本地运行数据、日志、导出和旧版搜索运行结果 |
 | `assets/` | 图标等静态资源 |
 | `run_release.ps1` | Windows 启动脚本 |
-
-### 依赖说明
-
-- Python 3.10+
-- `PySide6`
-- OpenAI 或兼容接口配置
-- Node.js，或 `runtime/tools/` 下的便携版本
-
-下载好的 Windows 发布包已经内置桌面运行时，不需要额外安装本地 Python。
 
 ## English
 
@@ -165,7 +169,7 @@ The following should not be interpreted as fully completed yet:
 - a fully finished set of design, database, and flow documents
 - complete automated test coverage
 
-### How To Use It
+### How To Use This Directory
 
 #### End Users: Do Not Start Here
 
@@ -182,6 +186,17 @@ If you are not a developer and just want to use the app, do not start from the `
 
 The instructions below are the source-checkout workflow.
 
+Development dependencies:
+
+- Python 3.10+
+- `PySide6`
+- OpenAI or a compatible API endpoint configuration
+- Node.js, or the portable runtime under `runtime/tools/`
+
+The packaged Windows release already bundles the desktop runtime and does not require a separate local Python installation.
+
+Recommended path: install and run
+
 Recommended setup in this directory:
 
 ```powershell
@@ -192,6 +207,8 @@ python -m venv .venv
 .\.venv\Scripts\jobflow-desktop
 ```
 
+Fallback path: run the module directly
+
 If you do not want to install the console script yet, you can run the module directly:
 
 ```powershell
@@ -200,7 +217,7 @@ $env:PYTHONPATH = ".\src;.\.deps"
 python -m jobflow_desktop_app.main
 ```
 
-### Windows Launch Script
+Windows source-checkout launch script:
 
 The project also includes a Windows launch script:
 
@@ -221,12 +238,3 @@ It is intended for the source checkout; the GitHub Release package provides `Job
 | `runtime/` | Local runtime data, logs, exports, and legacy run outputs |
 | `assets/` | Static assets such as icons |
 | `run_release.ps1` | Windows launch script |
-
-### Dependencies
-
-- Python 3.10+
-- `PySide6`
-- OpenAI or a compatible API endpoint configuration
-- Node.js, or the portable runtime under `runtime/tools/`
-
-The packaged Windows release already bundles the desktop runtime and does not require a separate local Python installation.

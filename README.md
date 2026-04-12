@@ -35,35 +35,9 @@ Job Hunter 不是一个面向大众求职场景的职位推荐器。它更适合
 - 搜索结果工作台：查看匹配结果，并维护关注、投递、Offer、放弃等状态
 - 本地优先数据存储：通过 SQLite 保存候选人、搜索配置、结果状态和运行数据
 
-### 仓库结构
+### 你应该从哪里开始
 
-| Path | 说明 |
-| --- | --- |
-| `desktop_app/` | 新版桌面应用，负责候选人工作台、AI 设置、搜索结果查看与后续维护 |
-| `legacy_jobflow_reference/` | 旧版岗位发现参考引擎，当前仍作为搜索执行层被桌面应用调用 |
-| `docs/` | GitHub 说明文档，包括产品定位、架构和路线图 |
-| `README_RELEASE.txt` | 面向打包发布目录的简要启动说明 |
-| `START_JOBFLOW_DESKTOP.cmd` | Windows 下的快速启动入口 |
-
-### 核心流程
-
-1. 创建候选人档案，导入简历，填写当前所在地、目标地区和补充说明。
-2. 通过 AI 推荐或手动补充方式，建立真正值得追踪的目标岗位方向。
-3. 基于这些岗位方向生成搜索上下文，优先发现相关公司，再抓取公司官网或 ATS 的公开职位。
-4. 对岗位进行匹配分析和结果整理，在工作台里持续维护关注、投递和反馈状态。
-
-### 当前边界
-
-这个项目目前更接近一个“发现 + 筛选 + 管理”的本地工作台，而不是一个“全自动找工作/自动投递平台”。
-
-当前明确不应过度承诺的内容：
-
-- 不是面向所有求职者的大众化职位推荐产品
-- 不是自动投递系统
-- 不是已经完成商业化打磨的成品桌面软件
-- 不是完全脱离旧版引擎的独立新架构，当前搜索执行仍依赖 `legacy_jobflow_reference/`
-
-### 快速开始
+如果你只是想直接使用软件，请先看“普通用户”路径；如果你要改代码、排查问题或参与协作，再看“开发者”路径。
 
 #### 普通用户：直接下载 Windows 版本
 
@@ -91,29 +65,9 @@ Job Hunter 不是一个面向大众求职场景的职位推荐器。它更适合
 
 #### 开发者：从源码运行
 
-下面这些步骤是给开发者和协作者看的，不是给普通用户直接使用的。
+下面这部分只面向开发者和协作者。
 
-方式一：从仓库根目录快速启动
-
-在仓库根目录双击：
-
-```bat
-START_JOBFLOW_DESKTOP.cmd
-```
-
-这个入口会调用 `desktop_app/run_release.ps1`，自动寻找本地 Python，并启动桌面应用。
-
-方式二：开发模式运行
-
-```powershell
-cd .\desktop_app
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -U pip
-.\.venv\Scripts\python -m pip install -e .
-.\.venv\Scripts\jobflow-desktop
-```
-
-##### 环境要求
+开发环境要求：
 
 - Windows 开发环境优先
 - Python 3.10+
@@ -133,13 +87,61 @@ python -m venv .venv
 - `JOBFLOW_NODE_PATH`
 - `JOBFLOW_PYTHON_PATH`
 
-##### 公开仓库边界
+源码启动方式 A：从仓库根目录快速启动
+
+在仓库根目录双击：
+
+```bat
+START_JOBFLOW_DESKTOP.cmd
+```
+
+这个入口会调用 `desktop_app/run_release.ps1`，自动寻找本地 Python，并启动桌面应用。
+
+源码启动方式 B：在 `desktop_app/` 下以开发模式运行
+
+```powershell
+cd .\desktop_app
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -U pip
+.\.venv\Scripts\python -m pip install -e .
+.\.venv\Scripts\jobflow-desktop
+```
+
+### 核心流程
+
+1. 创建候选人档案，导入简历，填写当前所在地、目标地区和补充说明。
+2. 通过 AI 推荐或手动补充方式，建立真正值得追踪的目标岗位方向。
+3. 基于这些岗位方向生成搜索上下文，优先发现相关公司，再抓取公司官网或 ATS 的公开职位。
+4. 对岗位进行匹配分析和结果整理，在工作台里持续维护关注、投递和反馈状态。
+
+### 仓库结构
+
+| Path | 说明 |
+| --- | --- |
+| `desktop_app/` | 新版桌面应用，负责候选人工作台、AI 设置、搜索结果查看与后续维护 |
+| `legacy_jobflow_reference/` | 旧版岗位发现参考引擎，当前仍作为搜索执行层被桌面应用调用 |
+| `docs/` | GitHub 说明文档，包括产品定位、架构和路线图 |
+| `README_RELEASE.txt` | 面向打包发布目录的简要启动说明 |
+| `START_JOBFLOW_DESKTOP.cmd` | Windows 下的快速启动入口 |
+
+### 当前边界
+
+这个项目目前更接近一个“发现 + 筛选 + 管理”的本地工作台，而不是一个“全自动找工作/自动投递平台”。
+
+当前明确不应过度承诺的内容：
+
+- 不是面向所有求职者的大众化职位推荐产品
+- 不是自动投递系统
+- 不是已经完成商业化打磨的成品桌面软件
+- 不是完全脱离旧版引擎的独立新架构，当前搜索执行仍依赖 `legacy_jobflow_reference/`
+
+### 公开仓库边界
 
 这个仓库公开部分只保留源码、文档、演示种子和安全示例模板；个人简历、公司池、搜索结果、SQLite 数据和运行备份必须留在本地。
 
 当前已经把这套边界写进 `.gitignore`、`legacy_jobflow_reference/.gitignore`、`scripts/privacy_audit.ps1` 和 GitHub Actions，所以未来同事协作时也会按同一规则执行。
 
-##### 文档导航
+### 文档导航
 
 - [更新记录](CHANGELOG.md)
 - [产品定位](docs/PRODUCT_POSITIONING.md)
@@ -149,7 +151,7 @@ python -m venv .venv
 - [GitHub 仓库设置建议](docs/GITHUB_REPO_SETUP.md)
 - [贡献说明](CONTRIBUTING.md)
 
-##### 贡献与讨论
+### 贡献与讨论
 
 这个项目欢迎的不只是代码提交，也欢迎思路、实验方向和产品判断。我们尤其欢迎围绕“专业型人才如何更高效找到更匹配职位”这个问题展开合作。
 
@@ -199,35 +201,9 @@ Current implemented capabilities include:
 - A results workspace for reviewing matches and maintaining focus, applied, offer, rejected, or dropped states
 - Local-first persistence through SQLite for candidate data, search settings, review states, and runtime data
 
-### Repository Structure
+### Where To Start
 
-| Path | Description |
-| --- | --- |
-| `desktop_app/` | The main desktop application for candidate workspaces, AI settings, result review, and follow-up workflows |
-| `legacy_jobflow_reference/` | The legacy job discovery engine still used as the current search execution layer |
-| `docs/` | Repository-facing documentation for positioning, architecture, roadmap, and setup guidance |
-| `README_RELEASE.txt` | A short release-package startup note |
-| `START_JOBFLOW_DESKTOP.cmd` | A Windows entry point to start the desktop app quickly |
-
-### Core Workflow
-
-1. Create a candidate profile, attach a resume, and set current location, preferred locations, and notes.
-2. Use AI suggestions or manual input to define role directions that are actually worth tracking.
-3. Build search context from those role directions, prioritize relevant companies, and then search official career pages or ATS listings.
-4. Review job matches, organize results, and maintain interest, application, and outcome states inside the workspace.
-
-### Current Scope And Non-Goals
-
-At the moment this project is much closer to a local workspace for discovery, filtering, and tracking than to a fully automated job-search or auto-apply platform.
-
-Things the project should not overclaim today:
-
-- It is not a broad, mass-market job recommendation product
-- It is not an automatic application system
-- It is not yet a fully polished commercial desktop product
-- It is not yet a fully independent architecture divorced from the legacy engine
-
-### Quick Start
+If you only want to use the app, follow the end-user path first. If you want to modify code, debug behavior, or collaborate on development, use the developer path below.
 
 #### End Users: Download The Windows Build
 
@@ -255,29 +231,9 @@ The release package does not include real candidate databases, customer data, se
 
 #### Developers: Run From Source
 
-The steps below are for developers and collaborators, not for end users.
+The rest of this section is only for developers and collaborators.
 
-Option 1: Start from the repository root
-
-Double-click this entry point from the repository root:
-
-```bat
-START_JOBFLOW_DESKTOP.cmd
-```
-
-This entry point calls `desktop_app/run_release.ps1`, locates a usable local Python installation, and starts the desktop app.
-
-Option 2: Run in development mode
-
-```powershell
-cd .\desktop_app
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -U pip
-.\.venv\Scripts\python -m pip install -e .
-.\.venv\Scripts\jobflow-desktop
-```
-
-##### Environment
+Development environment requirements:
 
 - Windows-first development environment
 - Python 3.10+
@@ -297,13 +253,61 @@ Supported environment variables:
 - `JOBFLOW_NODE_PATH`
 - `JOBFLOW_PYTHON_PATH`
 
-##### Public Repository Boundary
+Source-start option A: start from the repository root
+
+Double-click this entry point from the repository root:
+
+```bat
+START_JOBFLOW_DESKTOP.cmd
+```
+
+This entry point calls `desktop_app/run_release.ps1`, locates a usable local Python installation, and starts the desktop app.
+
+Source-start option B: run in development mode under `desktop_app/`
+
+```powershell
+cd .\desktop_app
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -U pip
+.\.venv\Scripts\python -m pip install -e .
+.\.venv\Scripts\jobflow-desktop
+```
+
+### Core Workflow
+
+1. Create a candidate profile, attach a resume, and set current location, preferred locations, and notes.
+2. Use AI suggestions or manual input to define role directions that are actually worth tracking.
+3. Build search context from those role directions, prioritize relevant companies, and then search official career pages or ATS listings.
+4. Review job matches, organize results, and maintain interest, application, and outcome states inside the workspace.
+
+### Repository Structure
+
+| Path | Description |
+| --- | --- |
+| `desktop_app/` | The main desktop application for candidate workspaces, AI settings, result review, and follow-up workflows |
+| `legacy_jobflow_reference/` | The legacy job discovery engine still used as the current search execution layer |
+| `docs/` | Repository-facing documentation for positioning, architecture, roadmap, and setup guidance |
+| `README_RELEASE.txt` | A short release-package startup note |
+| `START_JOBFLOW_DESKTOP.cmd` | A Windows entry point to start the desktop app quickly |
+
+### Current Scope And Non-Goals
+
+At the moment this project is much closer to a local workspace for discovery, filtering, and tracking than to a fully automated job-search or auto-apply platform.
+
+Things the project should not overclaim today:
+
+- It is not a broad, mass-market job recommendation product
+- It is not an automatic application system
+- It is not yet a fully polished commercial desktop product
+- It is not yet a fully independent architecture divorced from the legacy engine
+
+### Public Repository Boundary
 
 The public repository keeps only source code, documentation, demo seeds, and safe example templates. Personal resumes, company pools, search outputs, SQLite data, and runtime backups must remain local.
 
 This boundary is now enforced through `.gitignore`, `legacy_jobflow_reference/.gitignore`, `scripts/privacy_audit.ps1`, and GitHub Actions so future collaborators follow the same rules by default.
 
-##### Documentation
+### Documentation
 
 - [Changelog](CHANGELOG.md)
 - [Product Positioning](docs/PRODUCT_POSITIONING.md)
@@ -313,7 +317,7 @@ This boundary is now enforced through `.gitignore`, `legacy_jobflow_reference/.g
 - [GitHub Repo Setup Suggestions](docs/GITHUB_REPO_SETUP.md)
 - [Contributing](CONTRIBUTING.md)
 
-##### Contribute And Discuss
+### Contribute And Discuss
 
 This project welcomes more than code. It also welcomes ideas, experiments, product thinking, and research around one central question: how professionals can find better-fit opportunities more effectively.
 

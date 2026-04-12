@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import hashlib
 import json
 import re
 import urllib.error
@@ -112,6 +113,53 @@ JSON format:
   "description_en": "Sentence 1. Sentence 2. Sentence 3."
 }
 """.strip()
+
+CANDIDATE_SEMANTIC_PROFILE_PROMPT = """
+You are a rigorous candidate-profile analyst.
+
+Task:
+Read the candidate context and extract a structured semantic profile that will be reused for:
+1. company discovery
+2. search query generation
+3. AI role recommendation
+
+Rules:
+1. Return strict JSON only. No Markdown. No extra explanation.
+2. Focus on business domains, technical focus areas, demonstrated experience themes, and realistic future directions.
+3. Keep "demonstrated background" separate from "future target directions".
+4. Arrays must contain short phrases, not sentences.
+5. Prefer domain/business/technology phrases over job titles.
+6. Do not use generic titles such as engineer, scientist, manager, analyst as standalone keywords.
+7. Output an ENGLISH-ONLY reusable business phrase library for search and company discovery.
+8. `core_business_areas` should stay close to what the candidate has already demonstrated.
+9. `adjacent_business_areas` should be plausible expansions, not random jumps.
+10. `exploration_business_areas` can be broader, but still defensible.
+11. `strong_capabilities` should capture methods / technical strengths, but not generic job titles.
+12. `avoid_business_areas` should list misleading directions that might be over-inferred from isolated tools or weak signals.
+13. Prefer 2-5 word English phrases that can be used directly in search.
+14. Build a large reusable phrase library, but keep quality high.
+15. Phrase-count targets:
+    - `core_business_areas`: up to 45
+    - `adjacent_business_areas`: up to 30
+    - `exploration_business_areas`: up to 15
+    - `strong_capabilities`: up to 10
+16. Do not output Chinese search phrases.
+
+JSON format:
+{
+  "summary": "One short paragraph.",
+  "background_keywords": ["..."],
+  "target_direction_keywords": ["..."],
+  "core_business_areas": ["..."],
+  "adjacent_business_areas": ["..."],
+  "exploration_business_areas": ["..."],
+  "avoid_business_areas": ["..."],
+  "strong_capabilities": ["..."],
+  "seniority_signals": ["..."]
+}
+""".strip()
+
+SEMANTIC_PROFILE_SCHEMA_VERSION = 2
 
 
 STRONG_ADJACENT_SCOPE_KEYWORDS = (
@@ -229,6 +277,65 @@ class ResumeReadResult:
     text: str = ""
     error: str = ""
     source_type: str = ""
+
+
+@dataclass(frozen=True)
+class CandidateSemanticProfile:
+    source_signature: str = ""
+    summary: str = ""
+    background_keywords: tuple[str, ...] = ()
+    target_direction_keywords: tuple[str, ...] = ()
+    core_business_areas: tuple[str, ...] = ()
+    adjacent_business_areas: tuple[str, ...] = ()
+    exploration_business_areas: tuple[str, ...] = ()
+    avoid_business_areas: tuple[str, ...] = ()
+    strong_capabilities: tuple[str, ...] = ()
+    seniority_signals: tuple[str, ...] = ()
+
+    def is_usable(self) -> bool:
+        return bool(
+            self.core_business_areas
+            or self.adjacent_business_areas
+            or self.exploration_business_areas
+            or self.background_keywords
+            or self.target_direction_keywords
+            or self.strong_capabilities
+        )
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "source_signature": self.source_signature,
+            "summary": self.summary,
+            "background_keywords": list(self.background_keywords),
+            "target_direction_keywords": list(self.target_direction_keywords),
+            "core_business_areas": list(self.core_business_areas),
+            "adjacent_business_areas": list(self.adjacent_business_areas),
+            "exploration_business_areas": list(self.exploration_business_areas),
+            "avoid_business_areas": list(self.avoid_business_areas),
+            "strong_capabilities": list(self.strong_capabilities),
+            "seniority_signals": list(self.seniority_signals),
+        }
+
+    def company_discovery_phrase_library_en(self) -> tuple[str, ...]:
+        return _normalize_semantic_list(
+            [
+                *self.core_business_areas,
+                *self.adjacent_business_areas,
+                *self.exploration_business_areas,
+            ],
+            max_items=100,
+        )
+
+    def job_search_phrase_library_en(self) -> tuple[str, ...]:
+        return _normalize_semantic_list(
+            [
+                *self.core_business_areas,
+                *self.adjacent_business_areas,
+                *self.exploration_business_areas,
+                *self.strong_capabilities,
+            ],
+            max_items=100,
+        )
 
 
 def decode_bilingual_description(raw_text: str) -> tuple[str, str]:
@@ -523,10 +630,238 @@ def build_missing_background_error(
     )
 
 
+def _normalize_semantic_list(
+    raw_value: Any,
+    *,
+    max_items: int,
+    max_length: int = 72,
+) -> tuple[str, ...]:
+    if not isinstance(raw_value, list):
+        return ()
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for item in raw_value:
+        text = re.sub(r"\s+", " ", str(item or "").strip())
+        text = text.strip(" \t\r\n,;|，；、。.!?：:()[]{}<>\"'`")
+        if not text:
+            continue
+        if len(text) > max_length:
+            text = text[:max_length].rstrip(" ,;|，；、。.!?：:()[]{}<>\"'`")
+        if not text:
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(text)
+        if len(ordered) >= max_items:
+            break
+    return tuple(ordered)
+
+
+def build_candidate_semantic_profile_source_signature(
+    candidate: CandidateRecord,
+    resume_result: ResumeReadResult,
+) -> str:
+    payload = {
+        "semantic_profile_schema_version": SEMANTIC_PROFILE_SCHEMA_VERSION,
+        "candidate": {
+            "name": candidate.name.strip(),
+            "base_location": candidate.base_location.strip(),
+            "preferred_locations": candidate.preferred_locations.strip(),
+            "target_directions": candidate.target_directions.strip(),
+            "notes": manual_background_summary(candidate),
+            "active_resume_path": candidate.active_resume_path.strip(),
+        },
+        "resume": {
+            "text": resume_result.text,
+            "error": resume_result.error,
+            "source_type": resume_result.source_type,
+        },
+    }
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def parse_candidate_semantic_profile(
+    payload_text: str,
+    *,
+    source_signature: str = "",
+) -> CandidateSemanticProfile | None:
+    text = _extract_json_object_text(payload_text)
+    if not text:
+        return None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    summary = re.sub(r"\s+", " ", str(payload.get("summary") or "").strip())
+    if len(summary) > 320:
+        summary = summary[:320].rstrip() + "..."
+
+    profile = CandidateSemanticProfile(
+        source_signature=str(payload.get("source_signature") or source_signature or "").strip(),
+        summary=summary,
+        background_keywords=_normalize_semantic_list(payload.get("background_keywords"), max_items=20),
+        target_direction_keywords=_normalize_semantic_list(payload.get("target_direction_keywords"), max_items=20),
+        core_business_areas=_normalize_semantic_list(payload.get("core_business_areas"), max_items=45),
+        adjacent_business_areas=_normalize_semantic_list(payload.get("adjacent_business_areas"), max_items=30),
+        exploration_business_areas=_normalize_semantic_list(payload.get("exploration_business_areas"), max_items=15),
+        avoid_business_areas=_normalize_semantic_list(payload.get("avoid_business_areas"), max_items=10),
+        strong_capabilities=_normalize_semantic_list(payload.get("strong_capabilities"), max_items=10),
+        seniority_signals=_normalize_semantic_list(payload.get("seniority_signals"), max_items=8),
+    )
+    if not profile.is_usable():
+        return None
+    if not profile.source_signature and source_signature:
+        profile = CandidateSemanticProfile(
+            source_signature=source_signature,
+            summary=profile.summary,
+            background_keywords=profile.background_keywords,
+            target_direction_keywords=profile.target_direction_keywords,
+            core_business_areas=profile.core_business_areas,
+            adjacent_business_areas=profile.adjacent_business_areas,
+            exploration_business_areas=profile.exploration_business_areas,
+            avoid_business_areas=profile.avoid_business_areas,
+            strong_capabilities=profile.strong_capabilities,
+            seniority_signals=profile.seniority_signals,
+        )
+    return profile
+
+
+def load_candidate_semantic_profile_cache(
+    cache_path: Path | None,
+    *,
+    source_signature: str,
+) -> CandidateSemanticProfile | None:
+    if cache_path is None or not cache_path.exists():
+        return None
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    profile = parse_candidate_semantic_profile(
+        json.dumps(payload, ensure_ascii=False),
+        source_signature=source_signature,
+    )
+    if profile is None or not profile.is_usable():
+        return None
+    if profile.source_signature and profile.source_signature != source_signature:
+        return None
+    return profile
+
+
+def save_candidate_semantic_profile_cache(
+    cache_path: Path | None,
+    profile: CandidateSemanticProfile,
+) -> None:
+    if cache_path is None:
+        return
+    cache_path.write_text(
+        json.dumps(profile.to_payload(), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def build_candidate_semantic_profile_prompt(
+    candidate: CandidateRecord,
+    *,
+    resume_result: ResumeReadResult | None = None,
+) -> str:
+    resolved_resume = resume_result or load_resume_excerpt_result(candidate.active_resume_path, max_chars=12000)
+    background_summary = manual_background_summary(candidate)
+    parts = [
+        f"Candidate name: {candidate.name}",
+        f"Current location: {candidate.base_location or 'N/A'}",
+        "Preferred locations:",
+        candidate.preferred_locations.strip() or "N/A",
+        "Future target directions (self-described):",
+        candidate.target_directions.strip() or "N/A",
+        "Professional background summary (manual):",
+        background_summary or "N/A",
+        "Important extraction intent:",
+        "- Extract demonstrated business/technical experience from the resume and manual summary.",
+        "- Separately extract future-oriented target directions from the self-described target directions field.",
+        "- Prefer English business domains, product/platform areas, technical themes, and credible adjacent directions.",
+        "- Do not collapse everything into generic job titles.",
+        "- Build a reusable English phrase library for company discovery and job-search planning.",
+    ]
+    if candidate.active_resume_path.strip() and resolved_resume.text:
+        parts.extend(
+            [
+                f"Resume path: {candidate.active_resume_path.strip()}",
+                "Resume excerpt:",
+                resolved_resume.text,
+            ]
+        )
+    elif candidate.active_resume_path.strip() and resolved_resume.error:
+        parts.extend(
+            [
+                f"Resume path: {candidate.active_resume_path.strip()}",
+                "Resume read status:",
+                resolved_resume.error,
+                "If the resume text is unavailable, rely on the manual professional background summary and target directions.",
+            ]
+        )
+    parts.append("Return strict JSON only.")
+    return "\n".join(parts)
+
+
+def semantic_profile_prompt_lines(profile: CandidateSemanticProfile | None) -> list[str]:
+    if profile is None or not profile.is_usable():
+        return []
+    sections: list[tuple[str, tuple[str, ...] | str, int | None]] = [
+        ("AI semantic summary:", profile.summary),
+        ("AI extracted core business areas:", profile.core_business_areas, 24),
+        ("AI extracted adjacent business areas:", profile.adjacent_business_areas, 16),
+        ("AI extracted exploration business areas:", profile.exploration_business_areas, 8),
+        ("AI extracted background keywords:", profile.background_keywords, 14),
+        ("AI extracted target-direction keywords:", profile.target_direction_keywords, 14),
+        ("AI extracted strong capabilities:", profile.strong_capabilities, 10),
+        ("AI extracted seniority signals:", profile.seniority_signals, 8),
+    ]
+    lines: list[str] = []
+    lines.extend(
+        [
+            "AI English business phrase library size:",
+            f"- company-discovery phrases: {len(profile.company_discovery_phrase_library_en())}",
+            f"- job-search phrases: {len(profile.job_search_phrase_library_en())}",
+        ]
+    )
+    for entry in sections:
+        label = entry[0]
+        value = entry[1]
+        limit = entry[2] if len(entry) >= 3 else None
+        if isinstance(value, tuple):
+            if not value:
+                continue
+            lines.append(label)
+            shown = value[: limit or len(value)]
+            lines.extend(f"- {item}" for item in shown)
+            if limit is not None and len(value) > limit:
+                lines.append(f"- ... ({len(value) - limit} more)")
+            continue
+        if str(value or "").strip():
+            lines.extend([label, str(value).strip()])
+    if profile.avoid_business_areas:
+        lines.append("AI extracted avoid / misleading directions:")
+        shown_avoid = profile.avoid_business_areas[:8]
+        lines.extend(f"- {item}" for item in shown_avoid)
+        if len(profile.avoid_business_areas) > 8:
+            lines.append(f"- ... ({len(profile.avoid_business_areas) - 8} more)")
+    return lines
+
+
 def build_role_recommendation_prompt(
     candidate: CandidateRecord,
     existing_roles: list[tuple[str, str]] | None = None,
     resume_result: ResumeReadResult | None = None,
+    semantic_profile: CandidateSemanticProfile | None = None,
 ) -> str:
     resolved_resume = resume_result or load_resume_excerpt_result(candidate.active_resume_path)
     resume_excerpt = resolved_resume.text
@@ -551,6 +886,7 @@ def build_role_recommendation_prompt(
         "Professional background summary (manual):",
         background_summary or "N/A",
     ]
+    parts.extend(semantic_profile_prompt_lines(semantic_profile))
 
     if candidate.active_resume_path.strip() and resume_excerpt:
         parts.extend(
@@ -762,6 +1098,88 @@ class OpenAIRoleRecommendationService:
             return f"{normalized}/v1/responses"
         return f"{normalized}/v1/responses"
 
+    def extract_candidate_semantic_profile(
+        self,
+        candidate: CandidateRecord,
+        settings: OpenAISettings,
+        api_base_url: str = "",
+        cache_path: Path | None = None,
+    ) -> CandidateSemanticProfile:
+        resume_result = load_resume_excerpt_result(candidate.active_resume_path, max_chars=12000)
+        source_signature = build_candidate_semantic_profile_source_signature(candidate, resume_result)
+        cached_profile = load_candidate_semantic_profile_cache(
+            cache_path,
+            source_signature=source_signature,
+        )
+        if cached_profile is not None:
+            return cached_profile
+
+        background_error = build_missing_background_error(
+            action_name="AI semantic profile extraction",
+            candidate=candidate,
+            resume_result=resume_result,
+        )
+        if background_error:
+            raise RoleRecommendationError(background_error)
+        if not settings.api_key.strip():
+            raise RoleRecommendationError("OpenAI API Key is required.")
+
+        payload = {
+            "model": settings.model.strip() or "gpt-5",
+            "input": [
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": CANDIDATE_SEMANTIC_PROFILE_PROMPT,
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": build_candidate_semantic_profile_prompt(
+                                candidate,
+                                resume_result=resume_result,
+                            ),
+                        }
+                    ],
+                },
+            ],
+        }
+        request = urllib.request.Request(
+            self.resolve_api_url(api_base_url),
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {settings.api_key.strip()}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response:
+                response_payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="ignore")
+            raise RoleRecommendationError(f"OpenAI API request failed: HTTP {exc.code}. {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise RoleRecommendationError(f"Unable to connect OpenAI API: {exc.reason}") from exc
+        except TimeoutError as exc:
+            raise RoleRecommendationError("OpenAI API request timed out.") from exc
+
+        output_text = _extract_output_text(response_payload)
+        profile = parse_candidate_semantic_profile(
+            output_text,
+            source_signature=source_signature,
+        )
+        if profile is None or not profile.is_usable():
+            raise RoleRecommendationError("AI did not return a usable candidate semantic profile.")
+        save_candidate_semantic_profile_cache(cache_path, profile)
+        return profile
+
     def recommend_roles(
         self,
         candidate: CandidateRecord,
@@ -787,6 +1205,15 @@ class OpenAIRoleRecommendationService:
             for role in (existing_roles or [])
             if isinstance(role, tuple) and len(role) == 2 and str(role[0] or "").strip()
         }
+        semantic_profile: CandidateSemanticProfile | None = None
+        try:
+            semantic_profile = self.extract_candidate_semantic_profile(
+                candidate=candidate,
+                settings=settings,
+                api_base_url=api_base_url,
+            )
+        except RoleRecommendationError:
+            semantic_profile = None
 
         payload = {
             "model": settings.model.strip() or "gpt-5",
@@ -809,6 +1236,7 @@ class OpenAIRoleRecommendationService:
                                 candidate,
                                 existing_roles=existing_roles,
                                 resume_result=resume_result,
+                                semantic_profile=semantic_profile,
                             ),
                         }
                     ],
@@ -876,6 +1304,15 @@ class OpenAIRoleRecommendationService:
             raise RoleRecommendationError(background_error)
         resume_excerpt = resume_result.text
         background_summary = manual_background_summary(candidate)
+        semantic_profile: CandidateSemanticProfile | None = None
+        try:
+            semantic_profile = self.extract_candidate_semantic_profile(
+                candidate=candidate,
+                settings=settings,
+                api_base_url=api_base_url,
+            )
+        except RoleRecommendationError:
+            semantic_profile = None
         user_prompt_parts = [
             f"Candidate name: {candidate.name}",
             f"Current location: {candidate.base_location or 'N/A'}",
@@ -890,6 +1327,7 @@ class OpenAIRoleRecommendationService:
             f"- Rough description: {str(rough_description or '').strip() or 'N/A'}",
             "Keep the refined role close to the candidate's demonstrated main domain instead of over-weighting isolated tool keywords.",
         ]
+        user_prompt_parts.extend(semantic_profile_prompt_lines(semantic_profile))
         if candidate.active_resume_path.strip() and resume_excerpt:
             user_prompt_parts.extend(
                 [

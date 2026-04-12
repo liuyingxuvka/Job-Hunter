@@ -3376,16 +3376,16 @@ class SearchResultsStep(QWidget):
                 _t(
                     self.ui_language,
                     (
-                        f"当前求职者：{self.current_candidate_name}。已加载最近一次运行结果，共 {visible_count} 条；"
+                        f"当前求职者：{self.current_candidate_name}。已加载最近一次运行结果；"
                         f"另有 {pending_count} 条上次未补完，只有再次点击“寻找更多岗位”时才会继续处理。"
                         if pending_count > 0
-                        else f"当前求职者：{self.current_candidate_name}。已加载最近一次运行结果，共 {visible_count} 条。"
+                        else f"当前求职者：{self.current_candidate_name}。已加载最近一次运行结果。"
                     ),
                     (
-                        f"Current candidate: {self.current_candidate_name}. Loaded latest run results: {visible_count} item(s); "
+                        f"Current candidate: {self.current_candidate_name}. Loaded latest run results; "
                         f"{pending_count} unfinished main-stage job(s) from the last run will resume only after you click 'Find More Jobs' again."
                         if pending_count > 0
-                        else f"Current candidate: {self.current_candidate_name}. Loaded latest run results: {visible_count} item(s)."
+                        else f"Current candidate: {self.current_candidate_name}. Loaded latest run results."
                     ),
                 )
             )
@@ -3507,15 +3507,15 @@ class SearchResultsStep(QWidget):
                 self.results_meta_label.setText(
                     _t(
                         self.ui_language,
-                        f"当前求职者：{candidate.name}。后台搜索已停止，当前保留已完成落盘的结果（{visible_count} 条）。",
-                        f"Current candidate: {candidate.name}. Background search stopped. Any fully persisted results have been kept ({visible_count} item(s)).",
+                        f"当前求职者：{candidate.name}。后台搜索已停止，当前保留已完成落盘的结果。",
+                        f"Current candidate: {candidate.name}. Background search stopped. Any fully persisted results have been kept.",
                     )
                 )
                 self._show_notification_toast(
                     _t(
                         self.ui_language,
-                        f"岗位搜索已停止，当前保留 {visible_count} 条结果。",
-                        f"Job search stopped. Kept {visible_count} result(s).",
+                        "岗位搜索已停止。",
+                        "Job search stopped.",
                     ),
                     level="warning",
                     duration_ms=4500,
@@ -3545,16 +3545,16 @@ class SearchResultsStep(QWidget):
                 _t(
                     self.ui_language,
                     (
-                        f"当前求职者：{candidate.name}。搜索已完成，当前展示 {visible_count} 条结果；"
+                        f"当前求职者：{candidate.name}。搜索已完成；"
                         f"仍有 {pending_after_run} 条主流程岗位待补完，下次点击“寻找更多岗位”时会优先继续处理。"
                         if pending_after_run > 0
-                        else f"当前求职者：{candidate.name}。搜索已完成，当前展示 {visible_count} 条结果。"
+                        else f"当前求职者：{candidate.name}。搜索已完成。"
                     ),
                     (
-                        f"Current candidate: {candidate.name}. Search finished, now showing {visible_count} result(s); "
+                        f"Current candidate: {candidate.name}. Search finished; "
                         f"{pending_after_run} main-stage job(s) are still pending and will resume first the next time you click 'Find More Jobs'."
                         if pending_after_run > 0
-                        else f"Current candidate: {candidate.name}. Search finished, now showing {visible_count} result(s)."
+                        else f"Current candidate: {candidate.name}. Search finished."
                     ),
                 )
             )
@@ -3562,8 +3562,8 @@ class SearchResultsStep(QWidget):
                 (
                     _t(
                         self.ui_language,
-                        f"岗位搜索已完成，当前展示 {visible_count} 条结果。",
-                        f"Job search finished. Showing {visible_count} result(s).",
+                        "岗位搜索已完成。",
+                        "Job search finished.",
                     )
                     if visible_count > 0
                     else _t(
@@ -3979,7 +3979,6 @@ class SearchResultsStep(QWidget):
                         f"Signal 命中 {stats.signal_hit_job_count} 条；"
                         f"主流程已发现 {stats.main_discovered_job_count} 条，"
                         f"已评分 {stats.main_scored_job_count} 条，"
-                        f"当前展示 {stats.displayable_result_count} 条，"
                         f"待补完 {stats.main_pending_analysis_count} 条。"
                     ),
                     (
@@ -3987,7 +3986,6 @@ class SearchResultsStep(QWidget):
                         f"Signal hits {stats.signal_hit_job_count}; "
                         f"main-stage discovered {stats.main_discovered_job_count}, "
                         f"scored {stats.main_scored_job_count}, "
-                        f"displayed {stats.displayable_result_count}, "
                         f"pending completion {stats.main_pending_analysis_count}."
                     ),
                 )
@@ -4173,8 +4171,8 @@ class SearchResultsStep(QWidget):
         self.results_meta_label.setText(
             _t(
                 self.ui_language,
-                f"当前求职者：{self.current_candidate_name}。已删除 {len(selected_rows)} 条岗位，当前展示 {self.table.rowCount()} 条。",
-                f"Current candidate: {self.current_candidate_name}. Deleted {len(selected_rows)} row(s), now showing {self.table.rowCount()} row(s).",
+                f"当前求职者：{self.current_candidate_name}。已删除 {len(selected_rows)} 条岗位。",
+                f"Current candidate: {self.current_candidate_name}. Deleted {len(selected_rows)} row(s).",
             )
         )
 

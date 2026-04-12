@@ -1349,8 +1349,8 @@ async function discoverCompaniesFromQuery({ client, config, query }) {
   };
 
   const input = isAdjacentScope(config)
-    ? `Find real companies with official websites that hire for adjacent technical roles around MBSE, systems engineering, requirements/traceability, verification & validation, integration, reliability/durability, diagnostics, digital twin/PHM, technical interface, and owner engineering.
-Prefer companies in automotive & complex equipment, industrial equipment & automation, aerospace & high-end manufacturing, plus energy/infrastructure platforms with strong systems-engineering needs.
+    ? `Find real companies with official websites operating in adjacent technical business domains around MBSE, systems engineering, requirements/traceability, verification & validation, integration, reliability/durability, diagnostics, digital twin/PHM, technical interface, and owner engineering.
+Prefer companies whose products, platforms, or industrial programs sit in automotive & complex equipment, industrial equipment & automation, aerospace & high-end manufacturing, plus energy/infrastructure systems with strong systems-engineering needs.
 Return only real companies with official websites (no aggregators).
 Region should be one of: Global, EU, US, CN, JP, KR, CA, AU, UK, CH, IL, IN, ME, AE, SA, ES, PT, SE, NO, DK, NL, FR, DE.
 Tags should be short lowercase keywords, e.g. mbse, systems, requirements, traceability, verification, validation, integration, reliability, durability, digital_twin, phm, technical_interface, owner_engineering, automotive, complex_equipment, industrial_automation, aerospace, high_end_manufacturing, energy, infrastructure.
@@ -1360,8 +1360,8 @@ ${query}
 
 Return up to ${config.companyDiscovery.maxCompaniesPerQuery} companies.
 Output ONLY JSON matching the schema.`
-    : `Find companies related to hydrogen, electrolyzers, fuel cells, MEA/membranes/catalysts, diagnostic testing, system/control, and electrochemical energy systems.
-Return only real companies with official websites (no aggregators). Prefer companies with active R&D or engineering roles.
+    : `Find real companies with official websites operating in business areas related to hydrogen systems, electrolyzers, fuel cells, MEA/membranes/catalysts, diagnostic testing, controls, durability, and electrochemical energy systems.
+Return only real companies with official websites (no aggregators). Prefer companies with meaningful products, platforms, industrial programs, or R&D activity in these areas.
 Region should be one of: Global, EU, US, CN, JP, KR, CA, AU, UK, CH, IL, IN, ME, AE, SA, ES, PT, SE, NO, DK, NL, FR, DE.
 Tags should be short lowercase keywords, e.g. electrolyzer, fuel_cell, materials, catalyst, membrane, MEA, diagnostics, testing, systems, controls, stack, balance_of_plant, OEM, energy_storage, research.
 
@@ -2169,7 +2169,14 @@ function isLikelyNoiseTitle(text) {
   if (!t) return false;
   if (t.length > 180) return true;
   if (/<\/?[a-z][^>]*>/i.test(t)) return true;
+  if (/^\$\{[^}]+\}$/.test(t)) return true;
   if (isGenericLocationOrCategoryTitle(t)) return true;
+  if (
+    /^(skip to (?:content|main content|main navigation)|skip navigation|language|languages|menu|navigation|content|search|locale|country|region|zum hauptinhalt|zum inhalt|zum seiteninhalt|direkt zum inhalt|springe zum inhalt|aller au contenu|aller au contenu principal|aller au contenu principal|ir al contenido|saltar al contenido|vai al contenuto|accedi al contenuto|ga naar inhoud|naar inhoud|gå til indhold|hoppa till innehåll)$/i.test(
+      t
+    )
+  )
+    return true;
   if (/^(apply|apply now|view job|open job|job details?|learn more|details?|read more|see job|continue)$/i.test(t))
     return true;
   if (/^(申请|立即申请|查看职位|职位详情|查看详情|更多信息)$/i.test(t)) return true;
@@ -2189,6 +2196,89 @@ function isLikelyNoiseTitle(text) {
   )
     return true;
   return false;
+}
+
+function sanitizeJobTitleCandidate(text) {
+  const t = String(text || "").replace(/\s+/g, " ").trim();
+  if (!t) return "";
+  if (isLikelyNoiseTitle(t) || isGenericLocationOrCategoryTitle(t)) return "";
+  if (!isLikelyJobText(t)) {
+    const words = t.split(/\s+/).filter(Boolean);
+    if (words.length < 2 || t.length < 8) return "";
+  }
+  return t;
+}
+
+function preferJobTitle(currentTitle, nextTitle) {
+  const currentClean = sanitizeJobTitleCandidate(currentTitle);
+  const nextClean = sanitizeJobTitleCandidate(nextTitle);
+  if (nextClean && !currentClean) return nextClean;
+  if (currentClean) return currentClean;
+  if (nextClean) return nextClean;
+  return String(currentTitle || nextTitle || "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeDocumentTitleCandidate(text) {
+  const raw = String(text || "").replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+
+  const candidates = [];
+  const pushCandidate = (value) => {
+    const clean = String(value || "")
+      .replace(/\s+/g, " ")
+      .replace(
+        /\s*(?:[\-|:\u2013\u2014]\s*)?(?:job details?|career details?|vacancy details?|opening details?|posting details?|stellendetails?|stellenangebot(?:details)?|职位详情|岗位详情)$/i,
+        ""
+      )
+      .trim();
+    if (!clean) return;
+    candidates.push(clean);
+  };
+
+  pushCandidate(raw);
+  raw
+    .split(/\s*[|\u2013\u2014]\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .forEach(pushCandidate);
+
+  for (const candidate of candidates) {
+    const accepted = sanitizeJobTitleCandidate(candidate);
+    if (accepted) return accepted;
+  }
+  return "";
+}
+
+function extractFallbackJobTitleFromDocument($, finalUrl) {
+  const metaSelectors = [
+    'meta[property="og:title"]',
+    'meta[name="twitter:title"]',
+    'meta[name="title"]'
+  ];
+  for (const selector of metaSelectors) {
+    const content = normalizeDocumentTitleCandidate($(selector).attr("content") || "");
+    if (content) return content;
+  }
+
+  const headingTitle = normalizeDocumentTitleCandidate($("h1").first().text());
+  if (headingTitle) return headingTitle;
+
+  const titleTag = normalizeDocumentTitleCandidate($("title").first().text());
+  if (titleTag) return titleTag;
+
+  try {
+    const parts = String(new URL(finalUrl).pathname || "")
+      .split("/")
+      .filter(Boolean)
+      .map((part) => decodeURIComponent(part));
+    const slug = parts.find((part) => /[A-Za-z].*-[A-Za-z]/.test(part)) || "";
+    const slugTitle = normalizeDocumentTitleCandidate(slug.replace(/[-_]+/g, " "));
+    if (slugTitle) return slugTitle;
+  } catch {
+    // ignore malformed URL
+  }
+
+  return "";
 }
 
 function hasJobSignal({ title, url, summary }) {
@@ -2668,7 +2758,7 @@ async function refreshJobLinkStatusInPlace(job, config) {
     rawText: details.rawText,
     applyUrl: details.applyUrl || ""
   };
-  if (extracted.title) job.title = extracted.title;
+  if (extracted.title) job.title = preferJobTitle(job.title, extracted.title);
   if (extracted.company) job.company = extracted.company;
   if (extracted.location) job.location = extracted.location;
   if (extracted.datePosted) job.datePosted = extracted.datePosted;
@@ -3588,6 +3678,9 @@ async function fetchJobDetails({ url, config }) {
     const fromLd = jobPostingToFields(jobPosting);
     const text = stripHtmlToText(html);
     const $ = cheerio.load(html);
+    const extractedTitle =
+      sanitizeJobTitleCandidate(fromLd?.title || "") ||
+      extractFallbackJobTitleFromDocument($, res.url || url);
     const metaLocation =
       $('meta[name="jobLocation"]').attr("content") ||
       $('meta[property="jobLocation"]').attr("content") ||
@@ -3603,7 +3696,16 @@ async function fetchJobDetails({ url, config }) {
       contentType,
       finalUrl: res.url || url,
       redirected: Boolean(res.redirected),
-      extracted: fromLd,
+      extracted:
+        extractedTitle || fromLd
+          ? {
+              title: extractedTitle,
+              company: fromLd?.company || "",
+              location: fromLd?.location || "",
+              datePosted: fromLd?.datePosted || "",
+              description: fromLd?.description || ""
+            }
+          : null,
       rawText: chunk(text, 20000),
       applyUrl,
       fetchedAt: nowIso(),
@@ -5764,7 +5866,7 @@ async function main() {
 
         const merged = {
           ...base,
-          title: j.title || base.title || "",
+          title: preferJobTitle(base.title, j.title),
           company: j.company || base.company || "",
           location: j.location || base.location || "",
           dateFound: base.dateFound || nowIso(),
@@ -5839,7 +5941,7 @@ async function main() {
             rawText: details.rawText,
             applyUrl: details.applyUrl || ""
           };
-          merged.title = extracted.title || merged.title;
+          merged.title = preferJobTitle(merged.title, extracted.title);
           merged.company = extracted.company || merged.company;
           merged.location = extracted.location || merged.location;
           merged.datePosted = extracted.datePosted || merged.datePosted || "";

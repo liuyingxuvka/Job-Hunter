@@ -30,6 +30,7 @@ function Resolve-PythonExe {
     (Join-Path $desktopRoot ".venv\Scripts\python.exe"),
     $env:JOBFLOW_PYTHON_PATH
   ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+  $candidates = @($candidates)
 
   if ($candidates.Count -gt 0) {
     return $candidates[0]

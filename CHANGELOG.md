@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to this repository will be documented in this file.
 
@@ -9,6 +9,21 @@ This project currently follows a lightweight semantic versioning approach:
 - `major` for breaking changes or large architectural shifts
 
 ## [Unreleased]
+
+## [0.4.0] - 2026-04-12
+
+### Added
+
+- Added AI-derived candidate semantic profiles that extract reusable business domains, strengths, and target directions from candidate context for downstream search and recommendation flows.
+- Added semantic business phrase libraries and weighted discovery-anchor planning so company discovery and search-query generation can work from business areas instead of only direct role-name terms.
+
+### Changed
+
+- Expanded the legacy search runtime to reuse AI semantic profiles for company discovery, query planning, and search-track mixing across main, resume-pending, and web-signal stages.
+- Improved legacy job-detail extraction by filtering noisy pseudo-titles more aggressively and recovering missing job titles from metadata, headings, and URL slugs when structured data is weak.
+- Refined search-results status copy so the desktop UI emphasizes workflow state instead of repeatedly restating visible result counts.
+- Updated desktop application icon assets.
+- Fixed the Windows release build script so local packaging can resolve a single discovered Python executable correctly without requiring an explicit `-PythonExe` override.
 
 ## [0.3.1] - 2026-04-12
 

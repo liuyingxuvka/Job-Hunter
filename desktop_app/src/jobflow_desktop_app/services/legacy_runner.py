@@ -18,7 +18,212 @@ from ..db.repositories.candidates import CandidateRecord
 from ..db.repositories.profiles import SearchProfileRecord
 from ..db.repositories.settings import OpenAISettings
 from .location_structured import candidate_location_preference_text
-from .role_recommendations import description_query_lines, load_resume_excerpt_result, role_name_query_lines
+from .role_recommendations import (
+    CandidateSemanticProfile,
+    OpenAIRoleRecommendationService,
+    RoleRecommendationError,
+    description_query_lines,
+    load_resume_excerpt_result,
+    role_name_query_lines,
+)
+
+
+BUSINESS_QUERY_WEIGHTS = {
+    "core": 0.60,
+    "adjacent": 0.25,
+    "explore": 0.15,
+}
+
+PHRASE_LIBRARY_LIMITS = {
+    "core": 45,
+    "adjacent": 30,
+    "explore": 15,
+}
+
+ROUND_PHRASE_SAMPLE_COUNTS = {
+    "core": 5,
+    "adjacent": 2,
+    "explore": 1,
+}
+
+SEARCH_TRACK_KEYS = (
+    "hydrogen_core",
+    "energy_digitalization",
+    "battery_ess_powertrain",
+    "test_validation_reliability",
+)
+
+MAINLINE_SEARCH_TRACK_PATTERNS = {
+    "hydrogen_core": re.compile(
+        r"\b(fuel cell|fuel-cell|electrolyzer|electrolysis|hydrogen|h2|electrochemical|pem|lt-?pem|ht-?pem|mea|membrane electrode|catalyst|anode|cathode)\b|燃料电池|电解槽|氢能|电化学|膜电极|催化剂",
+        flags=re.IGNORECASE,
+    ),
+    "energy_digitalization": re.compile(
+        r"\b(digital twin|digital-twin|phm|prognostics|health management|condition monitoring|state monitoring|asset health|predictive maintenance|remaining useful life|rul|model[- ]based|mbse|systems engineering)\b|数字孪生|状态监测|健康管理|寿命预测|模型驱动|系统工程",
+        flags=re.IGNORECASE,
+    ),
+    "battery_ess_powertrain": re.compile(
+        r"\b(battery|bms|state of health|soh|state of charge|soc|energy storage|ess|pack|cell|module|powertrain|e-?mobility|ev|thermal runaway|inverter|motor control)\b|电池|储能|电驱|热失控|BMS",
+        flags=re.IGNORECASE,
+    ),
+    "test_validation_reliability": re.compile(
+        r"\b(test data|test bench|validation|verification|v&v|ast|accelerated stress test|durability|reliability|lifetime|parameter identification|parameter estimation|system identification|calibration|doe)\b|测试数据|试验台架|验证|方法学|加速应力测试|可靠性|寿命|参数辨识|参数识别|标定",
+        flags=re.IGNORECASE,
+    ),
+}
+
+ADJACENT_SCOPE_TRACK_PATTERNS = {
+    "hydrogen_core": re.compile(
+        r"\b(mbse|systems engineering|system engineer|sysml|requirements|traceability|technical interface|owner engineer)\b|系统工程|需求|可追溯|技术接口|业主工程",
+        flags=re.IGNORECASE,
+    ),
+    "energy_digitalization": re.compile(
+        r"\b(digital twin|phm|condition monitoring|asset health|predictive maintenance|rul)\b|数字孪生|状态监测|健康管理|寿命预测",
+        flags=re.IGNORECASE,
+    ),
+    "battery_ess_powertrain": re.compile(
+        r"\b(automotive|vehicle|powertrain|battery|bms|drivetrain|ev)\b|汽车|动力总成|电池|电驱",
+        flags=re.IGNORECASE,
+    ),
+    "test_validation_reliability": re.compile(
+        r"\b(verification|validation|v&v|integration|qualification|reliability|durability|test engineer|failure analysis)\b|验证|集成|鉴定|可靠性|耐久|测试|故障分析",
+        flags=re.IGNORECASE,
+    ),
+}
+
+SCOPE_TRACK_MIX_FALLBACKS = {
+    "hydrogen_mainline": {
+        "hydrogen_core": 0.60,
+        "energy_digitalization": 0.10,
+        "battery_ess_powertrain": 0.15,
+        "test_validation_reliability": 0.15,
+    },
+    "adjacent_mbse": {
+        "hydrogen_core": 0.45,
+        "energy_digitalization": 0.20,
+        "battery_ess_powertrain": 0.15,
+        "test_validation_reliability": 0.20,
+    },
+}
+
+MAINLINE_BUSINESS_ANCHORS = {
+    "core": [
+        ("hydrogen systems", r"\bhydrogen\b|\bh2\b|氢能|氢系统"),
+        ("fuel cells", r"\bfuel cell\b|fuel-cell|燃料电池"),
+        ("electrolyzers", r"\belectroly[sz]er\b|electrolysis|电解槽|制氢"),
+        ("electrochemical diagnostics", r"electrochem|electrochemical|电化学|diagnostic|diagnostics|诊断"),
+        ("degradation and aging", r"degradation|aging|老化|降解"),
+        ("durability and reliability", r"durability|reliability|耐久|可靠性"),
+        ("lifetime prediction", r"lifetime|remaining useful life|寿命预测|rul"),
+        ("stack and balance-of-plant", r"\bstack\b|balance of plant|bop|堆|系统"),
+        ("MEA and membrane materials", r"\bmea\b|membrane electrode|membrane|膜电极|膜|催化剂|catalyst"),
+    ],
+    "adjacent": [
+        ("system validation and testing", r"validation|verification|test bench|testing|试验|验证|测试"),
+        ("energy digitalization and PHM", r"digital twin|phm|condition monitoring|asset health|predictive maintenance|数字孪生|状态监测|健康管理"),
+        ("industrial controls and automation", r"controls?|control systems?|automation|自动化|控制"),
+        ("systems engineering and MBSE", r"mbse|systems engineering|sysml|requirements|traceability|系统工程|需求|可追溯"),
+        ("technical diagnostics and monitoring", r"monitoring|diagnostics?|health management|监测|诊断|健康管理"),
+    ],
+    "explore": [
+        ("battery aging and diagnostics", r"\bbattery\b|\bbms\b|储能|电池|soh|soc"),
+        ("complex equipment reliability", r"complex equipment|industrial equipment|equipment reliability|高端装备|装备"),
+        ("model-based diagnostics", r"model-based|simulation|parameter identification|calibration|建模|参数辨识|标定"),
+        ("energy infrastructure platforms", r"energy infrastructure|industrial gas|grid|能源基础设施|工业气体"),
+    ],
+}
+
+ADJACENT_SCOPE_BUSINESS_ANCHORS = {
+    "core": [
+        ("systems engineering", r"systems engineering|system engineer|系统工程"),
+        ("MBSE and digital thread", r"mbse|sysml|digital thread|模型驱动|数字线程"),
+        ("requirements and traceability", r"requirements|traceability|需求|可追溯"),
+        ("verification and validation", r"verification|validation|v&v|验证|确认"),
+        ("reliability and durability", r"reliability|durability|可靠性|耐久"),
+        ("integration and qualification", r"integration|qualification|集成|鉴定"),
+    ],
+    "adjacent": [
+        ("digital twin and PHM", r"digital twin|phm|condition monitoring|状态监测|健康管理"),
+        ("industrial automation and controls", r"industrial automation|automation|controls?|工业自动化|控制"),
+        ("complex equipment platforms", r"complex equipment|industrial equipment|装备|平台"),
+        ("technical diagnostics", r"diagnostic|diagnostics|故障分析|诊断"),
+    ],
+    "explore": [
+        ("automotive and powertrain systems", r"automotive|vehicle|powertrain|battery|bms|汽车|动力总成|电池"),
+        ("energy infrastructure systems", r"energy infrastructure|grid|utility|能源基础设施|电网"),
+        ("aerospace and high-end manufacturing", r"aerospace|manufacturing|航空航天|高端制造"),
+    ],
+}
+
+DEFAULT_BUSINESS_ANCHORS = {
+    "hydrogen_mainline": {
+        "core": [
+            "hydrogen systems",
+            "fuel cells",
+            "electrolyzers",
+            "electrochemical diagnostics",
+            "durability and reliability",
+        ],
+        "adjacent": [
+            "system validation and testing",
+            "energy digitalization and PHM",
+            "industrial controls and automation",
+        ],
+        "explore": [
+            "battery aging and diagnostics",
+            "model-based diagnostics",
+            "energy infrastructure platforms",
+        ],
+    },
+    "adjacent_mbse": {
+        "core": [
+            "systems engineering",
+            "MBSE and digital thread",
+            "requirements and traceability",
+            "verification and validation",
+        ],
+        "adjacent": [
+            "digital twin and PHM",
+            "industrial automation and controls",
+            "technical diagnostics",
+        ],
+        "explore": [
+            "automotive and powertrain systems",
+            "energy infrastructure systems",
+            "aerospace and high-end manufacturing",
+        ],
+    },
+}
+
+BUSINESS_JOB_QUERY_TEMPLATES = {
+    "core": [
+        "{anchor} job",
+        "{anchor} careers",
+    ],
+    "adjacent": [
+        "{anchor} job",
+        "{anchor} careers",
+    ],
+    "explore": [
+        "{anchor} job",
+        "{anchor} careers",
+    ],
+}
+
+BUSINESS_COMPANY_QUERY_TEMPLATES = {
+    "core": [
+        "{anchor} companies",
+        "{anchor} industrial technology companies",
+    ],
+    "adjacent": [
+        "{anchor} companies",
+        "{anchor} industrial technology companies",
+    ],
+    "explore": [
+        "{anchor} companies",
+        "{anchor} industrial technology companies",
+    ],
+}
 
 
 @dataclass(frozen=True)
@@ -87,6 +292,13 @@ class LegacyStageRunResult:
     cancelled: bool = False
 
 
+@dataclass(frozen=True)
+class DiscoveryAnchorPlan:
+    core: list[str]
+    adjacent: list[str]
+    explore: list[str]
+
+
 class LegacyJobflowRunner:
     PIPELINE_MODE_COMPANY_ONLY = "company_only"
     PIPELINE_MODE_COMPANY_PLUS_WEB_SIGNAL = "company_plus_web_signal"
@@ -116,6 +328,7 @@ class LegacyJobflowRunner:
         resume_config_path = run_dir / "config.generated.resume.json"
         recommended_json_path = run_dir / "jobs_recommended.json"
         progress_started_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        query_rotation_seed = time.time_ns()
         current_stage = "preparing"
         progress_lock = threading.Lock()
 
@@ -179,6 +392,7 @@ class LegacyJobflowRunner:
             )
         pipeline_mode = self._resolve_pipeline_mode()
         source_companies_path: Path | None = None
+        semantic_profile: CandidateSemanticProfile | None = None
         analysis_budget = 0
         stage_stdout: list[tuple[str, str]] = []
         stage_stderr: list[tuple[str, str]] = []
@@ -190,11 +404,26 @@ class LegacyJobflowRunner:
                 profiles=profiles,
                 run_dir=run_dir,
             )
+            semantic_profile = self._load_candidate_semantic_profile_for_run(
+                candidate=candidate,
+                settings=settings,
+                api_base_url=api_base_url,
+                run_dir=run_dir,
+            )
+            if semantic_profile is not None and semantic_profile.is_usable():
+                write_progress(
+                    status="running",
+                    stage=current_stage,
+                    message="Preparing search runtime with AI semantic profile.",
+                    last_event="AI-derived business profile loaded for company discovery and query planning.",
+                )
             runtime_config = self._build_runtime_config(
                 base_config=base_config,
                 candidate=candidate,
                 profiles=profiles,
                 run_dir=run_dir,
+                query_rotation_seed=query_rotation_seed,
+                semantic_profile=semantic_profile,
                 model_override=self._resolve_model_override(settings),
                 source_companies_path=source_companies_path,
                 pipeline_stage="main",
@@ -218,6 +447,8 @@ class LegacyJobflowRunner:
                 candidate=candidate,
                 profiles=profiles,
                 run_dir=run_dir,
+                query_rotation_seed=query_rotation_seed,
+                semantic_profile=semantic_profile,
                 model_override=self._resolve_model_override(settings),
                 source_companies_path=source_companies_path,
                 pipeline_stage="resume_pending",
@@ -233,6 +464,8 @@ class LegacyJobflowRunner:
                     candidate=candidate,
                     profiles=profiles,
                     run_dir=run_dir,
+                    query_rotation_seed=query_rotation_seed,
+                    semantic_profile=semantic_profile,
                     model_override=self._resolve_model_override(settings),
                     source_companies_path=source_companies_path,
                     pipeline_stage="web_signal",
@@ -671,6 +904,10 @@ class LegacyJobflowRunner:
         url = str(item.get("url") or item.get("canonicalUrl") or "").strip()
         if url:
             return url.casefold()
+        return LegacyJobflowRunner._job_identity_key(item)
+
+    @staticmethod
+    def _job_identity_key(item: dict) -> str:
         title = str(item.get("title") or "").strip().casefold()
         company = str(item.get("company") or "").strip().casefold()
         date_found = str(item.get("dateFound") or "").strip()
@@ -804,16 +1041,22 @@ class LegacyJobflowRunner:
 
     @classmethod
     def _normalize_resume_pending_jobs(cls, jobs: list[dict], run_dir: Path) -> list[dict]:
+        merged_detail_items = cls._merge_job_items_from_paths(
+            [
+                run_dir / "jobs_found.json",
+                run_dir / "jobs.json",
+                run_dir / "jobs_recommended.json",
+            ]
+        )
         merged_details = {
             cls._job_item_key(item): item
-            for item in cls._merge_job_items_from_paths(
-                [
-                    run_dir / "jobs_found.json",
-                    run_dir / "jobs.json",
-                    run_dir / "jobs_recommended.json",
-                ]
-            )
+            for item in merged_detail_items
             if cls._job_item_key(item)
+        }
+        merged_details_by_identity = {
+            cls._job_identity_key(item): item
+            for item in merged_detail_items
+            if cls._job_identity_key(item)
         }
         pending_jobs: list[dict] = []
         for raw in jobs:
@@ -821,10 +1064,13 @@ class LegacyJobflowRunner:
                 continue
             job = dict(raw)
             key = cls._job_item_key(job)
-            if key:
-                detail = merged_details.get(key)
-                if detail is not None:
-                    job = cls._merge_job_item(job, detail)
+            detail = merged_details.get(key) if key else None
+            if detail is None:
+                identity_key = cls._job_identity_key(job)
+                if identity_key:
+                    detail = merged_details_by_identity.get(identity_key)
+            if detail is not None:
+                job = cls._merge_job_item(job, detail)
             job_url = str(job.get("url") or job.get("canonicalUrl") or "").strip()
             if not job_url:
                 continue
@@ -1209,6 +1455,8 @@ class LegacyJobflowRunner:
         candidate: CandidateRecord,
         profiles: list[SearchProfileRecord],
         run_dir: Path,
+        query_rotation_seed: int = 0,
+        semantic_profile: CandidateSemanticProfile | None = None,
         model_override: str = "",
         source_companies_path: Path | None = None,
         pipeline_stage: str = "main",
@@ -1225,6 +1473,13 @@ class LegacyJobflowRunner:
         resume_path = self._resolve_resume_path(candidate, run_dir)
         scope_profile = self._resolve_scope_profile(profiles)
         target_role = self._resolve_target_role(candidate, profiles)
+        anchor_plan = self._build_discovery_anchor_plan(
+            candidate=candidate,
+            profiles=profiles,
+            scope_profile=scope_profile,
+            semantic_profile=semantic_profile,
+            run_dir=run_dir,
+        )
         location_preference = candidate_location_preference_text(
             base_location_struct=candidate.base_location_struct,
             preferred_locations_struct=candidate.preferred_locations_struct,
@@ -1236,9 +1491,26 @@ class LegacyJobflowRunner:
         candidate_config["scopeProfile"] = scope_profile
         candidate_config["targetRole"] = target_role
         candidate_config["locationPreference"] = location_preference
+        if semantic_profile is not None and semantic_profile.is_usable():
+            candidate_config["semanticProfilePath"] = str(
+                self._candidate_semantic_profile_path(run_dir).resolve()
+            )
 
-        queries = self._build_queries(candidate, profiles, run_dir=run_dir)
+        queries = self._build_queries(
+            candidate,
+            profiles,
+            run_dir=run_dir,
+            anchor_plan=anchor_plan,
+            semantic_profile=semantic_profile,
+            rotation_seed=query_rotation_seed,
+        )
         search_config["queries"] = queries
+        search_config["trackMix"] = self._build_search_track_mix(
+            scope_profile=scope_profile,
+            candidate=candidate,
+            profiles=profiles,
+            semantic_profile=semantic_profile,
+        )
         if pipeline_stage == "web_signal":
             search_config["maxJobsPerQuery"] = min(
                 35,
@@ -1262,8 +1534,11 @@ class LegacyJobflowRunner:
             candidate=candidate,
             profiles=profiles,
             search_queries=queries,
+            anchor_plan=anchor_plan,
+            semantic_profile=semantic_profile,
             run_dir=run_dir,
             companies_path=source_companies_path,
+            rotation_seed=query_rotation_seed,
         )
         sources_config["companiesPath"] = str(source_companies_path.resolve())
 
@@ -1677,31 +1952,603 @@ class LegacyJobflowRunner:
             return candidate.target_directions.strip()
         return "Systems Engineer"
 
+    @staticmethod
+    def _candidate_semantic_profile_path(run_dir: Path) -> Path:
+        return run_dir / "candidate.semantic_profile.generated.json"
+
+    def _load_candidate_semantic_profile_for_run(
+        self,
+        *,
+        candidate: CandidateRecord,
+        settings: OpenAISettings | None,
+        api_base_url: str,
+        run_dir: Path,
+    ) -> CandidateSemanticProfile | None:
+        cache_path = self._candidate_semantic_profile_path(run_dir)
+        service = OpenAIRoleRecommendationService()
+        try:
+            return service.extract_candidate_semantic_profile(
+                candidate=candidate,
+                settings=settings or OpenAISettings(),
+                api_base_url=api_base_url,
+                cache_path=cache_path,
+            )
+        except RoleRecommendationError:
+            return None
+
+    @staticmethod
+    def _anchor_library(scope_profile: str) -> dict[str, list[tuple[str, str]]]:
+        if scope_profile == "adjacent_mbse":
+            return ADJACENT_SCOPE_BUSINESS_ANCHORS
+        return MAINLINE_BUSINESS_ANCHORS
+
+    @staticmethod
+    def _default_anchor_buckets(scope_profile: str) -> dict[str, list[str]]:
+        if scope_profile == "adjacent_mbse":
+            return DEFAULT_BUSINESS_ANCHORS["adjacent_mbse"]
+        return DEFAULT_BUSINESS_ANCHORS["hydrogen_mainline"]
+
+    @staticmethod
+    def _looks_like_role_phrase(text: str) -> bool:
+        value = str(text or "").strip().casefold()
+        if not value:
+            return False
+        return bool(
+            re.search(
+                r"\b(engineer|scientist|manager|specialist|analyst|developer|designer|intern|lead|director)\b|工程师|科学家|经理|专家|分析师|开发|总监",
+                value,
+            )
+        )
+
+    @staticmethod
+    def _normalize_business_hint(text: str) -> str:
+        value = re.sub(r"\s+", " ", str(text or "").strip())
+        if not value:
+            return ""
+        value = value.strip(" \t\r\n,;|，；、。.!?：:()[]{}<>\"'`")
+        value = re.sub(
+            r"^(focus(?:ed)? on|speciali[sz](?:e|ed|ing) in|work(?:ed|ing)? on|experience in|background in|expertise in|interested in|related to|around)\s+",
+            "",
+            value,
+            flags=re.IGNORECASE,
+        )
+        value = re.sub(
+            r"^(and|with|for|toward|towards|future|target|desired|adjacent|explor(?:e|ation))\s+",
+            "",
+            value,
+            flags=re.IGNORECASE,
+        )
+        value = re.sub(
+            r"^(聚焦(?:于)?|专注(?:于)?|从事|擅长|熟悉|研究方向(?:为)?|研究|方向(?:为)?|相关(?:方向|领域)?|主要(?:方向|关注|做)?|涉及|偏向|偏重|以及|还有|并|和|未来(?:方向)?|目标(?:方向)?|邻近(?:方向)?|相邻(?:方向)?|探索(?:方向)?)\s*",
+            "",
+            value,
+        )
+        return value.strip(" \t\r\n,;|，；、。.!?：:()[]{}<>\"'`")
+
+    @staticmethod
+    def _looks_like_business_noise(text: str) -> bool:
+        value = str(text or "").strip().casefold()
+        if not value:
+            return True
+        if len(value) < 3:
+            return True
+        if len(value.split()) > 10:
+            return True
+        return bool(
+            re.search(
+                r"looking for|prefer|seeking|resume|curriculum vitae|\bcv\b|\bjob\b|博士背景|硕士背景|工作经历|专业背景|希望|想找|想做|保留|简历|候选人",
+                value,
+            )
+        )
+
+    def _collect_business_hint_terms(
+        self,
+        candidate: CandidateRecord,
+        profiles: list[SearchProfileRecord],
+        semantic_profile: CandidateSemanticProfile | None = None,
+    ) -> list[str]:
+        active_profiles = [profile for profile in profiles if profile.is_active]
+        source = active_profiles if active_profiles else profiles
+        hints: list[str] = []
+        if semantic_profile is not None:
+            hints.extend(list(semantic_profile.background_keywords))
+            hints.extend(list(semantic_profile.target_direction_keywords))
+            hints.extend(list(semantic_profile.strong_capabilities))
+        for profile in source:
+            hints.extend(self._split_multivalue_text(profile.company_focus))
+            hints.extend(self._split_multivalue_text(profile.company_keyword_focus))
+            hints.extend(self._split_multivalue_text(profile.keyword_focus))
+            hints.extend(self._split_multivalue_text(profile.target_role))
+        hints.extend(self._split_multivalue_text(candidate.target_directions))
+        hints.extend(self._split_multivalue_text(candidate.notes))
+        filtered: list[str] = []
+        for hint in hints:
+            text = self._normalize_business_hint(hint)
+            if not text or len(text) > 72:
+                continue
+            if self._looks_like_role_phrase(text):
+                continue
+            if self._looks_like_business_noise(text):
+                continue
+            filtered.append(text)
+        return self._dedup_text(filtered, limit=24)
+
+    def _build_anchor_source_text(
+        self,
+        candidate: CandidateRecord,
+        profiles: list[SearchProfileRecord],
+        semantic_profile: CandidateSemanticProfile | None = None,
+        run_dir: Path | None = None,
+    ) -> str:
+        active_profiles = [profile for profile in profiles if profile.is_active]
+        source = active_profiles if active_profiles else profiles
+        parts: list[str] = [
+            candidate.target_directions.strip(),
+            candidate.notes.strip(),
+        ]
+        if semantic_profile is not None:
+            parts.append(semantic_profile.summary)
+            parts.extend(semantic_profile.background_keywords)
+            parts.extend(semantic_profile.target_direction_keywords)
+            parts.extend(semantic_profile.core_business_areas)
+            parts.extend(semantic_profile.adjacent_business_areas)
+            parts.extend(semantic_profile.exploration_business_areas)
+            parts.extend(semantic_profile.strong_capabilities)
+        resume_result = load_resume_excerpt_result(candidate.active_resume_path, max_chars=12000)
+        if resume_result.text:
+            parts.append(resume_result.text)
+        feedback = self._load_run_feedback(run_dir)
+        parts.extend(feedback.get("keywords", [])[:16])
+        for profile in source:
+            parts.extend(role_name_query_lines(profile.role_name_i18n, fallback_name=profile.name))
+            parts.append(str(profile.target_role or "").strip())
+            parts.extend(description_query_lines(profile.keyword_focus))
+            parts.extend(self._split_multivalue_text(profile.company_focus))
+            parts.extend(self._split_multivalue_text(profile.company_keyword_focus))
+            parts.extend(self._split_multivalue_text("\n".join(profile.queries[:8])))
+        return "\n".join(part for part in parts if str(part or "").strip())
+
+    def _classify_business_hint(self, hint: str, scope_profile: str) -> str:
+        text = str(hint or "").strip()
+        if not text:
+            return "core"
+        for bucket in ("core", "adjacent", "explore"):
+            for _, pattern in self._anchor_library(scope_profile).get(bucket, []):
+                if re.search(pattern, text, flags=re.IGNORECASE):
+                    return bucket
+        return "core"
+
+    def _build_discovery_anchor_plan(
+        self,
+        candidate: CandidateRecord,
+        profiles: list[SearchProfileRecord],
+        scope_profile: str,
+        semantic_profile: CandidateSemanticProfile | None = None,
+        run_dir: Path | None = None,
+    ) -> DiscoveryAnchorPlan:
+        defaults = self._default_anchor_buckets(scope_profile)
+        if semantic_profile is not None and semantic_profile.is_usable():
+            normalized = {
+                "core": self._dedup_text(
+                    [
+                        self._normalize_business_hint(item)
+                        for item in semantic_profile.core_business_areas
+                    ],
+                    limit=PHRASE_LIBRARY_LIMITS["core"],
+                ),
+                "adjacent": self._dedup_text(
+                    [
+                        self._normalize_business_hint(item)
+                        for item in semantic_profile.adjacent_business_areas
+                    ],
+                    limit=PHRASE_LIBRARY_LIMITS["adjacent"],
+                ),
+                "explore": self._dedup_text(
+                    [
+                        self._normalize_business_hint(item)
+                        for item in semantic_profile.exploration_business_areas
+                    ],
+                    limit=PHRASE_LIBRARY_LIMITS["explore"],
+                ),
+            }
+            minimum_sizes = {"core": 6, "adjacent": 4, "explore": 3}
+            for bucket in ("core", "adjacent", "explore"):
+                values = normalized[bucket]
+                for default_value in defaults.get(bucket, []):
+                    if len(values) >= minimum_sizes[bucket]:
+                        break
+                    if default_value.casefold() not in {item.casefold() for item in values}:
+                        values.append(default_value)
+                normalized[bucket] = values[: PHRASE_LIBRARY_LIMITS[bucket]]
+            return DiscoveryAnchorPlan(
+                core=normalized["core"],
+                adjacent=normalized["adjacent"],
+                explore=normalized["explore"],
+            )
+
+        source_text = self._build_anchor_source_text(
+            candidate,
+            profiles,
+            semantic_profile=semantic_profile,
+            run_dir=run_dir,
+        )
+        library = self._anchor_library(scope_profile)
+        buckets: dict[str, list[str]] = {"core": [], "adjacent": [], "explore": []}
+
+        for bucket in ("core", "adjacent", "explore"):
+            for label, pattern in library.get(bucket, []):
+                if re.search(pattern, source_text, flags=re.IGNORECASE):
+                    buckets[bucket].append(label)
+
+        for hint in self._collect_business_hint_terms(
+            candidate,
+            profiles,
+            semantic_profile=semantic_profile,
+        ):
+            buckets[self._classify_business_hint(hint, scope_profile)].append(hint)
+
+        minimum_sizes = {"core": 4, "adjacent": 3, "explore": 2}
+        normalized: dict[str, list[str]] = {}
+        for bucket in ("core", "adjacent", "explore"):
+            values = self._dedup_text(buckets[bucket], limit=PHRASE_LIBRARY_LIMITS[bucket])
+            for default_value in defaults.get(bucket, []):
+                if len(values) >= minimum_sizes[bucket]:
+                    break
+                if default_value.casefold() not in {item.casefold() for item in values}:
+                    values.append(default_value)
+            normalized[bucket] = values[: PHRASE_LIBRARY_LIMITS[bucket]]
+
+        return DiscoveryAnchorPlan(
+            core=normalized["core"],
+            adjacent=normalized["adjacent"],
+            explore=normalized["explore"],
+        )
+
+    @staticmethod
+    def _sample_bucket_phrases(values: list[str], count: int, seed: int) -> list[str]:
+        if count <= 0 or not values:
+            return []
+        rotated = LegacyJobflowRunner._rotate_list(values, seed)
+        return rotated[: min(len(rotated), count)]
+
+    def _select_round_phrase_plan(
+        self,
+        *,
+        anchor_plan: DiscoveryAnchorPlan,
+        seed: int,
+    ) -> DiscoveryAnchorPlan:
+        return DiscoveryAnchorPlan(
+            core=self._sample_bucket_phrases(
+                self._dedup_text(anchor_plan.core, limit=PHRASE_LIBRARY_LIMITS["core"]),
+                ROUND_PHRASE_SAMPLE_COUNTS["core"],
+                seed + 11,
+            ),
+            adjacent=self._sample_bucket_phrases(
+                self._dedup_text(anchor_plan.adjacent, limit=PHRASE_LIBRARY_LIMITS["adjacent"]),
+                ROUND_PHRASE_SAMPLE_COUNTS["adjacent"],
+                seed + 23,
+            ),
+            explore=self._sample_bucket_phrases(
+                self._dedup_text(anchor_plan.explore, limit=PHRASE_LIBRARY_LIMITS["explore"]),
+                ROUND_PHRASE_SAMPLE_COUNTS["explore"],
+                seed + 37,
+            ),
+        )
+
+    @staticmethod
+    def _rotate_list(values: list[str], seed: int) -> list[str]:
+        if not values:
+            return []
+        offset = abs(int(seed)) % len(values)
+        return list(values[offset:]) + list(values[:offset])
+
+    @staticmethod
+    def _allocate_weighted_counts(limit: int) -> dict[str, int]:
+        total = max(0, int(limit or 0))
+        if total <= 0:
+            return {"core": 0, "adjacent": 0, "explore": 0}
+        counts = {
+            bucket: int(total * weight)
+            for bucket, weight in BUSINESS_QUERY_WEIGHTS.items()
+        }
+        assigned = sum(counts.values())
+        while assigned < total:
+            for bucket in ("core", "adjacent", "explore"):
+                if assigned >= total:
+                    break
+                counts[bucket] += 1
+                assigned += 1
+        return counts
+
+    @staticmethod
+    def _weighted_bucket_schedule(counts: dict[str, int]) -> list[str]:
+        total = sum(max(0, int(value or 0)) for value in counts.values())
+        if total <= 0:
+            return []
+        emitted = {bucket: 0 for bucket in ("core", "adjacent", "explore")}
+        schedule: list[str] = []
+        for position in range(total):
+            best_bucket = ""
+            best_score = float("-inf")
+            for bucket in ("core", "adjacent", "explore"):
+                target_count = max(0, int(counts.get(bucket, 0) or 0))
+                if emitted[bucket] >= target_count:
+                    continue
+                desired = (position + 1) * (target_count / total)
+                score = desired - emitted[bucket]
+                if score > best_score:
+                    best_score = score
+                    best_bucket = bucket
+            if not best_bucket:
+                break
+            emitted[best_bucket] += 1
+            schedule.append(best_bucket)
+        return schedule
+
+    @staticmethod
+    def _normalize_company_discovery_query(raw: str) -> str:
+        text = re.sub(r"\s+", " ", str(raw or "").strip())
+        if not text:
+            return ""
+        if len(text) > 200:
+            text = text[:200].strip()
+        return text
+
+    def _generate_bucket_queries(
+        self,
+        *,
+        anchors: list[str],
+        templates: list[str],
+        limit: int,
+        seed: int,
+        normalize: Callable[[str], str],
+    ) -> list[str]:
+        if limit <= 0 or not anchors or not templates:
+            return []
+        rotated_anchors = self._rotate_list(self._dedup_text(anchors, limit=32), seed)
+        rotated_templates = self._rotate_list(list(templates), seed // 7 if seed else 0)
+        queries: list[str] = []
+        seen: set[str] = set()
+        max_attempts = max(limit * 8, len(rotated_anchors) * len(rotated_templates))
+        for attempt in range(max_attempts):
+            anchor = rotated_anchors[attempt % len(rotated_anchors)]
+            template = rotated_templates[(attempt // max(1, len(rotated_anchors))) % len(rotated_templates)]
+            normalized = normalize(template.format(anchor=anchor))
+            if not normalized:
+                continue
+            key = normalized.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            queries.append(normalized)
+            if len(queries) >= limit:
+                break
+        return queries
+
+    def _generate_weighted_query_plan(
+        self,
+        *,
+        anchor_plan: DiscoveryAnchorPlan,
+        templates: dict[str, list[str]],
+        limit: int,
+        seed: int,
+        normalize: Callable[[str], str],
+    ) -> list[str]:
+        counts = self._allocate_weighted_counts(limit)
+        bucket_queries = {
+            "core": self._generate_bucket_queries(
+                anchors=anchor_plan.core,
+                templates=templates.get("core", []),
+                limit=max(counts["core"], 1),
+                seed=seed + 11,
+                normalize=normalize,
+            ),
+            "adjacent": self._generate_bucket_queries(
+                anchors=anchor_plan.adjacent,
+                templates=templates.get("adjacent", []),
+                limit=max(counts["adjacent"], 1),
+                seed=seed + 23,
+                normalize=normalize,
+            ),
+            "explore": self._generate_bucket_queries(
+                anchors=anchor_plan.explore,
+                templates=templates.get("explore", []),
+                limit=max(counts["explore"], 1),
+                seed=seed + 37,
+                normalize=normalize,
+            ),
+        }
+
+        indices = {"core": 0, "adjacent": 0, "explore": 0}
+        planned: list[str] = []
+        seen: set[str] = set()
+        for bucket in self._weighted_bucket_schedule(counts):
+            bucket_list = bucket_queries.get(bucket, [])
+            if indices[bucket] >= len(bucket_list):
+                continue
+            value = bucket_list[indices[bucket]]
+            indices[bucket] += 1
+            key = value.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            planned.append(value)
+            if len(planned) >= limit:
+                break
+        return planned
+
+    @staticmethod
+    def _search_track_patterns(scope_profile: str) -> dict[str, re.Pattern[str]]:
+        if scope_profile == "adjacent_mbse":
+            return ADJACENT_SCOPE_TRACK_PATTERNS
+        return MAINLINE_SEARCH_TRACK_PATTERNS
+
+    @staticmethod
+    def _fallback_search_track_mix(scope_profile: str) -> dict[str, float]:
+        fallback = SCOPE_TRACK_MIX_FALLBACKS.get(
+            scope_profile,
+            SCOPE_TRACK_MIX_FALLBACKS["hydrogen_mainline"],
+        )
+        return {
+            key: float(fallback.get(key, 0.0) or 0.0)
+            for key in SEARCH_TRACK_KEYS
+        }
+
+    @staticmethod
+    def _normalize_search_track_mix(values: dict[str, float]) -> dict[str, float]:
+        normalized = {
+            key: max(0.0, float(values.get(key, 0.0) or 0.0))
+            for key in SEARCH_TRACK_KEYS
+        }
+        total = sum(normalized.values())
+        if total <= 0:
+            equal_share = 1.0 / len(SEARCH_TRACK_KEYS)
+            return {key: equal_share for key in SEARCH_TRACK_KEYS}
+        normalized = {key: value / total for key, value in normalized.items()}
+        minimum_share = 0.06
+        if any(value < minimum_share for value in normalized.values()):
+            normalized = {
+                key: max(value, minimum_share)
+                for key, value in normalized.items()
+            }
+            total = sum(normalized.values())
+            normalized = {key: value / total for key, value in normalized.items()}
+        return normalized
+
+    def _build_search_track_mix_chunks(
+        self,
+        *,
+        candidate: CandidateRecord,
+        profiles: list[SearchProfileRecord],
+        semantic_profile: CandidateSemanticProfile | None,
+    ) -> list[tuple[str, float]]:
+        active_profiles = [profile for profile in profiles if profile.is_active]
+        source = active_profiles if active_profiles else profiles
+        chunks: list[tuple[str, float]] = []
+
+        def add(values: list[str] | tuple[str, ...], weight: float) -> None:
+            for value in values:
+                text = str(value or "").strip()
+                if text:
+                    chunks.append((text, weight))
+
+        if semantic_profile is not None and semantic_profile.is_usable():
+            add([semantic_profile.summary], 1.6)
+            add(list(semantic_profile.core_business_areas), 4.0)
+            add(list(semantic_profile.background_keywords), 3.2)
+            add(list(semantic_profile.strong_capabilities), 2.8)
+            add(list(semantic_profile.target_direction_keywords), 2.4)
+            add(list(semantic_profile.adjacent_business_areas), 2.0)
+            add(list(semantic_profile.exploration_business_areas), 1.2)
+        else:
+            resume_result = load_resume_excerpt_result(candidate.active_resume_path, max_chars=8000)
+            if resume_result.text:
+                add([resume_result.text], 1.4)
+
+        add(self._split_multivalue_text(candidate.target_directions), 2.2)
+        add(self._split_multivalue_text(candidate.notes), 1.6)
+
+        for profile in source:
+            add(role_name_query_lines(profile.role_name_i18n, fallback_name=profile.name), 1.8)
+            add([profile.target_role], 1.8)
+            add(self._split_multivalue_text(profile.keyword_focus), 1.8)
+            add(self._split_multivalue_text(profile.company_focus), 1.4)
+            add(self._split_multivalue_text(profile.company_keyword_focus), 1.4)
+
+        return chunks
+
+    def _score_search_tracks(
+        self,
+        *,
+        scope_profile: str,
+        candidate: CandidateRecord,
+        profiles: list[SearchProfileRecord],
+        semantic_profile: CandidateSemanticProfile | None,
+    ) -> tuple[dict[str, float], int]:
+        patterns = self._search_track_patterns(scope_profile)
+        scores = {key: 0.0 for key in SEARCH_TRACK_KEYS}
+        evidence_hits = 0
+
+        for text, weight in self._build_search_track_mix_chunks(
+            candidate=candidate,
+            profiles=profiles,
+            semantic_profile=semantic_profile,
+        ):
+            matched = False
+            for key, pattern in patterns.items():
+                if not pattern.search(text):
+                    continue
+                scores[key] += weight
+                matched = True
+            if matched:
+                evidence_hits += 1
+
+        if semantic_profile is not None and semantic_profile.is_usable():
+            for text in semantic_profile.avoid_business_areas:
+                for key, pattern in patterns.items():
+                    if not pattern.search(text):
+                        continue
+                    scores[key] = max(0.0, scores[key] - 1.8)
+
+        return scores, evidence_hits
+
+    def _build_search_track_mix(
+        self,
+        *,
+        scope_profile: str,
+        candidate: CandidateRecord,
+        profiles: list[SearchProfileRecord],
+        semantic_profile: CandidateSemanticProfile | None = None,
+    ) -> dict[str, float]:
+        fallback = self._fallback_search_track_mix(scope_profile)
+        scores, evidence_hits = self._score_search_tracks(
+            scope_profile=scope_profile,
+            candidate=candidate,
+            profiles=profiles,
+            semantic_profile=semantic_profile,
+        )
+        if evidence_hits <= 0 or sum(scores.values()) <= 0:
+            return fallback
+
+        evidence_mix = self._normalize_search_track_mix(scores)
+        evidence_weight = 0.80 if semantic_profile is not None and semantic_profile.is_usable() else 0.65
+        blended = {
+            key: fallback[key] * (1.0 - evidence_weight) + evidence_mix[key] * evidence_weight
+            for key in SEARCH_TRACK_KEYS
+        }
+        return self._normalize_search_track_mix(blended)
+
     def _build_queries(
         self,
         candidate: CandidateRecord,
         profiles: list[SearchProfileRecord],
         run_dir: Path | None = None,
+        anchor_plan: DiscoveryAnchorPlan | None = None,
+        semantic_profile: CandidateSemanticProfile | None = None,
+        rotation_seed: int = 0,
     ) -> list[str]:
-        active_profiles = [profile for profile in profiles if profile.is_active]
-        source = active_profiles if active_profiles else profiles
-        raw_queries: list[str] = []
+        scope_profile = self._resolve_scope_profile(profiles)
+        resolved_anchor_plan = anchor_plan or self._build_discovery_anchor_plan(
+            candidate=candidate,
+            profiles=profiles,
+            scope_profile=scope_profile,
+            semantic_profile=semantic_profile,
+            run_dir=run_dir,
+        )
+        round_phrase_plan = self._select_round_phrase_plan(
+            anchor_plan=resolved_anchor_plan,
+            seed=rotation_seed,
+        )
+        raw_queries = self._generate_weighted_query_plan(
+            anchor_plan=round_phrase_plan,
+            templates=BUSINESS_JOB_QUERY_TEMPLATES,
+            limit=12,
+            seed=rotation_seed,
+            normalize=self._normalize_query,
+        )
 
-        for profile in source:
-            raw_queries.extend(profile.queries)
-            raw_queries.extend(role_name_query_lines(profile.role_name_i18n, fallback_name=profile.name))
-            raw_queries.append(profile.target_role)
-            raw_queries.append(profile.name)
-            raw_queries.extend(description_query_lines(profile.keyword_focus))
-            raw_queries.extend(self._split_multivalue_text(profile.company_focus))
-            raw_queries.extend(self._split_multivalue_text(profile.company_keyword_focus))
-
-        raw_queries.extend(candidate.target_directions.splitlines())
-        feedback = self._load_run_feedback(run_dir)
-        for item in feedback.get("companies", [])[:10]:
-            raw_queries.append(f"{item} careers")
-        for item in feedback.get("keywords", [])[:12]:
-            raw_queries.append(item)
+        if not raw_queries and semantic_profile is not None and semantic_profile.is_usable():
+            raw_queries.extend(list(semantic_profile.job_search_phrase_library_en())[:8])
 
         normalized: list[str] = []
         seen: set[str] = set()
@@ -1716,101 +2563,72 @@ class LegacyJobflowRunner:
             normalized.append(text)
 
         if not normalized:
-            normalized = ["systems engineer job", "verification engineer job"]
-        return normalized[:80]
+            normalized = [
+                "hydrogen systems job",
+                "systems engineering job",
+            ]
+        return normalized[:12]
 
     def _build_company_discovery_queries(
         self,
         candidate: CandidateRecord,
         profiles: list[SearchProfileRecord],
         search_queries: list[str],
+        anchor_plan: DiscoveryAnchorPlan | None = None,
+        semantic_profile: CandidateSemanticProfile | None = None,
         run_dir: Path | None = None,
         companies_path: Path | None = None,
+        rotation_seed: int = 0,
     ) -> list[str]:
-        active_profiles = [profile for profile in profiles if profile.is_active]
-        source = active_profiles if active_profiles else profiles
+        scope_profile = self._resolve_scope_profile(profiles)
+        resolved_anchor_plan = anchor_plan or self._build_discovery_anchor_plan(
+            candidate=candidate,
+            profiles=profiles,
+            scope_profile=scope_profile,
+            semantic_profile=semantic_profile,
+            run_dir=run_dir,
+        )
+        round_phrase_plan = self._select_round_phrase_plan(
+            anchor_plan=resolved_anchor_plan,
+            seed=rotation_seed + 101,
+        )
+        generated = self._generate_weighted_query_plan(
+            anchor_plan=round_phrase_plan,
+            templates=BUSINESS_COMPANY_QUERY_TEMPLATES,
+            limit=16,
+            seed=rotation_seed + 101,
+            normalize=self._normalize_company_discovery_query,
+        )
 
-        role_terms: list[str] = []
-        for profile in source:
-            role_terms.extend(role_name_query_lines(profile.role_name_i18n, fallback_name=profile.name))
-            role_terms.append(profile.name)
-            role_terms.append(profile.target_role)
-            role_terms.extend(description_query_lines(profile.keyword_focus))
-            role_terms.extend(self._split_multivalue_text(profile.company_focus))
-            role_terms.extend(self._split_multivalue_text(profile.company_keyword_focus))
-        role_terms.extend(candidate.target_directions.splitlines())
-
-        normalized_roles: list[str] = []
-        seen_roles: set[str] = set()
-        for raw in role_terms:
-            text = str(raw or "").strip()
-            if not text:
-                continue
-            if len(text) > 120:
-                continue
-            if len(text) > 80 and re.search(r"[,.，。;；:：]", text):
-                continue
-            key = text.casefold()
-            if key in seen_roles:
-                continue
-            seen_roles.add(key)
-            normalized_roles.append(text)
-
-        feedback = self._load_run_feedback(run_dir)
-        feedback_companies = list(feedback.get("companies", []))
-        feedback_keywords = list(feedback.get("keywords", []))
-        if companies_path is not None:
-            payload = self._load_companies_payload(companies_path)
-            for company in payload.get("companies", []) or []:
-                if not isinstance(company, dict):
-                    continue
-                name = str(company.get("name") or "").strip()
-                if name:
-                    feedback_companies.append(name)
-        feedback_companies = self._dedup_text(feedback_companies, limit=120)
-        feedback_keywords = self._dedup_text(feedback_keywords, limit=80)
-
-        seed_queries: list[str] = []
-        for raw in search_queries:
-            text = str(raw or "").strip()
-            if not text:
-                continue
-            base = re.sub(r"\bjobs?\b", "", text, flags=re.IGNORECASE)
-            base = re.sub(r"\bcareer(s)?\b", "", base, flags=re.IGNORECASE).strip()
-            if not base:
-                continue
-            if len(base) > 120:
-                continue
-            if len(base) > 80 and re.search(r"[,.，。;；:：]", base):
-                continue
-            seed_queries.append(f"{base} companies careers")
-
-        generated: list[str] = []
-        for role in normalized_roles[:6]:
-            generated.append(f"{role} companies careers")
-            generated.append(f"{role} employers")
-        for company in feedback_companies[:8]:
-            generated.append(f"{company} careers")
-        for keyword in feedback_keywords[:6]:
-            generated.append(f"{keyword} companies careers")
-        generated.extend(seed_queries[:6])
-        if not generated:
-            generated = ["systems engineer companies careers", "verification engineer companies careers"]
+        if not generated and semantic_profile is not None and semantic_profile.is_usable():
+            for phrase in list(semantic_profile.company_discovery_phrase_library_en())[:8]:
+                generated.append(self._normalize_company_discovery_query(f"{phrase} companies"))
+                generated.append(
+                    self._normalize_company_discovery_query(
+                        f"{phrase} industrial technology companies"
+                    )
+                )
 
         dedup: list[str] = []
         seen: set[str] = set()
         for raw in generated:
-            text = str(raw or "").strip()
+            text = self._normalize_company_discovery_query(raw)
             if not text:
                 continue
-            if len(text) > 240:
-                text = text[:240].strip()
             key = text.casefold()
             if key in seen:
                 continue
             seen.add(key)
             dedup.append(text)
-        return dedup[:36]
+            if len(dedup) >= 16:
+                break
+        if not dedup:
+            dedup = [
+                "hydrogen systems companies",
+                "systems engineering companies",
+                "industrial technology companies",
+            ]
+        return dedup[:16]
 
     def _resolve_pipeline_mode(self) -> str:
         raw = str(os.getenv("JOBFLOW_PIPELINE_MODE", "") or "").strip().lower()
@@ -2072,7 +2890,7 @@ class LegacyJobflowRunner:
         text = str(raw or "")
         if not text.strip():
             return []
-        tokens = re.split(r"[\n,;|]+", text)
+        tokens = re.split(r"[\n,;|，；、。]+", text)
         values: list[str] = []
         seen: set[str] = set()
         for token in tokens:

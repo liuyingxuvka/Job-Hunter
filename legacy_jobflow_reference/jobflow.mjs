@@ -115,6 +115,81 @@ function normalizeJobUrl(rawUrl) {
   return normalized || "";
 }
 
+function extractAnalysisMatchScore(analysis) {
+  if (!analysis || typeof analysis !== "object") return null;
+  const rawScore = analysis.matchScore;
+  if (typeof rawScore === "number" && Number.isFinite(rawScore)) {
+    return Math.trunc(rawScore);
+  }
+  if (typeof rawScore === "string") {
+    const text = rawScore.trim();
+    if (!text) return null;
+    const parsed = Number(text);
+    if (Number.isFinite(parsed)) return Math.trunc(parsed);
+  }
+  return null;
+}
+
+function hasCompletedAnalysis(job) {
+  if (!job || typeof job !== "object") return false;
+  const analysis = job.analysis;
+  if (!analysis || typeof analysis !== "object") return false;
+  return extractAnalysisMatchScore(analysis) !== null || analysis.prefilterRejected === true;
+}
+
+function needsAnalysis(job) {
+  return !hasCompletedAnalysis(job);
+}
+
+function jobSourceDescriptor(job) {
+  const source = String(job?.source || "").toLowerCase();
+  const sourceType = String(job?.sourceType || "").toLowerCase();
+  return `${source} | ${sourceType}`.trim();
+}
+
+function isSignalOnlyJob(job) {
+  const descriptor = jobSourceDescriptor(job);
+  if (!descriptor) return false;
+  if (!descriptor.includes("web_search")) return false;
+  return !descriptor.includes("company");
+}
+
+function isPromotableSignalJob(job) {
+  if (!job || typeof job !== "object") return false;
+  if (!isSignalOnlyJob(job)) return false;
+  if (hasCompletedAnalysis(job)) return false;
+
+  const targetUrl = canonicalJobUrl(job) || job?.url || "";
+  if (!targetUrl) return false;
+  if (isLikelyParkingHost(targetUrl) || isGenericCareersUrl(targetUrl) || isAggregatorHost(targetUrl))
+    return false;
+  if (!isSpecificJobDetailUrl(targetUrl)) return false;
+  if (isGenericLocationOrCategoryTitle(job?.title || "")) return false;
+
+  return hasJobSignal({
+    title: job?.title || "",
+    url: targetUrl,
+    summary: job?.summary || ""
+  });
+}
+
+function sortResumePendingJobs(jobs) {
+  return Array.isArray(jobs)
+    ? [...jobs].sort((a, b) => {
+        const aDate = String(a?.dateFound || "");
+        const bDate = String(b?.dateFound || "");
+        if (aDate !== bDate) return aDate.localeCompare(bDate);
+        const aCompany = String(a?.company || "").toLowerCase();
+        const bCompany = String(b?.company || "").toLowerCase();
+        if (aCompany !== bCompany) return aCompany.localeCompare(bCompany);
+        const aTitle = String(a?.title || "").toLowerCase();
+        const bTitle = String(b?.title || "").toLowerCase();
+        if (aTitle !== bTitle) return aTitle.localeCompare(bTitle);
+        return String(a?.url || "").localeCompare(String(b?.url || ""));
+      })
+    : [];
+}
+
 function canonicalJobUrl(job) {
   const finalUrl =
     job?.analysis?.postVerify?.finalUrl ||
@@ -657,6 +732,42 @@ async function readJsonIfExists(filePath) {
   }
 }
 
+function extractJobsList(payload) {
+  if (Array.isArray(payload?.jobs)) {
+    return payload.jobs.filter((item) => item && typeof item === "object");
+  }
+  if (Array.isArray(payload)) {
+    return payload.filter((item) => item && typeof item === "object");
+  }
+  return [];
+}
+
+function normalizeQueuedJob(job, config) {
+  const url = normalizeJobUrl(job?.url || job?.canonicalUrl || "");
+  if (!url) return null;
+  const normalized = {
+    ...job,
+    url
+  };
+  normalized.canonicalUrl =
+    normalizeJobUrl(normalized.canonicalUrl || "") || canonicalJobUrl(normalized) || url;
+  normalized.sourceQuality = normalized.sourceQuality || inferSourceQuality(normalized, config);
+  normalized.regionTag = normalized.regionTag || inferRegionTag(normalized);
+  return normalized;
+}
+
+function uniqueQueuedJobs(jobs, config) {
+  const seen = new Set();
+  const ordered = [];
+  for (const job of Array.isArray(jobs) ? jobs : []) {
+    const normalized = normalizeQueuedJob(job, config);
+    if (!normalized || !normalized.url || seen.has(normalized.url)) continue;
+    seen.add(normalized.url);
+    ordered.push(normalized);
+  }
+  return ordered;
+}
+
 async function writeJsonAtomic(filePath, data) {
   const dir = path.dirname(filePath);
   await fs.mkdir(dir, { recursive: true });
@@ -805,6 +916,10 @@ function withDefaults(config) {
             },
       regionMode: config?.search?.regionMode ?? "global_open",
       feedbackWeightEnabled: config?.search?.feedbackWeightEnabled ?? true,
+      webSearchConcurrency: Math.max(
+        1,
+        Math.floor(toFiniteNumber(config?.search?.webSearchConcurrency, 3))
+      ),
       allowPlatformListings: config?.search?.allowPlatformListings ?? false,
       platformListingDomains: Array.isArray(config?.search?.platformListingDomains)
         ? config.search.platformListingDomains
@@ -814,6 +929,10 @@ function withDefaults(config) {
       model: config?.analysis?.model ?? "gpt-5.2",
       strictScoring: config?.analysis?.strictScoring ?? false,
       maxJobsToAnalyzePerRun: config?.analysis?.maxJobsToAnalyzePerRun ?? 200,
+      jdFetchMaxJobsPerRun: Math.max(
+        0,
+        Math.floor(toFiniteNumber(config?.analysis?.jdFetchMaxJobsPerRun, 10))
+      ),
       preFilterEnabled: config?.analysis?.preFilterEnabled ?? true,
       preFilterScoreThreshold: config?.analysis?.preFilterScoreThreshold ?? 40,
       lowTokenMode: config?.analysis?.lowTokenMode ?? false,
@@ -840,6 +959,10 @@ function withDefaults(config) {
       maxCompaniesPerRun: config?.sources?.maxCompaniesPerRun ?? 50,
       maxJobsPerCompany: config?.sources?.maxJobsPerCompany ?? 60,
       maxJobLinksPerCompany: config?.sources?.maxJobLinksPerCompany ?? 40,
+      companyConcurrency: Math.max(
+        1,
+        Math.floor(toFiniteNumber(config?.sources?.companyConcurrency, 4))
+      ),
       preferMajorCompanies: config?.sources?.preferMajorCompanies ?? true,
       rotateCompanyWindow: config?.sources?.rotateCompanyWindow ?? true,
       majorCompanyPinnedCount: Math.max(
@@ -904,9 +1027,146 @@ function withDefaults(config) {
       enableAutoDiscovery: config?.companyDiscovery?.enableAutoDiscovery ?? true,
       maxNewCompaniesPerRun: config?.companyDiscovery?.maxNewCompaniesPerRun ?? 40,
       maxCompaniesPerQuery: config?.companyDiscovery?.maxCompaniesPerQuery ?? 12,
+      queryConcurrency: Math.max(
+        1,
+        Math.floor(toFiniteNumber(config?.companyDiscovery?.queryConcurrency, 3))
+      ),
       queries: Array.isArray(config?.companyDiscovery?.queries)
         ? config.companyDiscovery.queries
         : []
+    },
+    adaptiveSearch: {
+      enabled: config?.adaptiveSearch?.enabled ?? true,
+      minNewJobsToContinue: Math.max(
+        1,
+        Math.floor(
+          toFiniteNumber(
+            config?.adaptiveSearch?.minNewJobsToContinue,
+            toFiniteNumber(config?.adaptiveSearch?.targetNewJobs, 3)
+          )
+        )
+      ),
+      baseRoundSeconds: Math.max(
+        1,
+        Math.floor(
+          toFiniteNumber(
+            config?.adaptiveSearch?.baseRoundSeconds,
+            toFiniteNumber(config?.adaptiveSearch?.baseBudgetSeconds, 300)
+          )
+        )
+      ),
+      extendRoundSeconds: Math.max(
+        1,
+        Math.floor(
+          toFiniteNumber(
+            config?.adaptiveSearch?.extendRoundSeconds,
+            toFiniteNumber(config?.adaptiveSearch?.extendBudgetSeconds, 480)
+          )
+        )
+      ),
+      deepRoundSeconds: Math.max(
+        1,
+        Math.floor(
+          toFiniteNumber(
+            config?.adaptiveSearch?.deepRoundSeconds,
+            toFiniteNumber(config?.adaptiveSearch?.deepBudgetSeconds, 720)
+          )
+        )
+      ),
+      baseExistingCompanyBatchSize: Math.max(
+        1,
+        Math.floor(
+          toFiniteNumber(
+            config?.adaptiveSearch?.baseExistingCompanyBatchSize,
+            toFiniteNumber(config?.adaptiveSearch?.baseExistingCompanies, 8)
+          )
+        )
+      ),
+      extendExistingCompanyBatchSize: Math.max(
+        1,
+        Math.floor(
+          toFiniteNumber(
+            config?.adaptiveSearch?.extendExistingCompanyBatchSize,
+            toFiniteNumber(config?.adaptiveSearch?.extendCompanyBatchSize, 4)
+          )
+        )
+      ),
+      coldStartQueryBudget: Math.max(
+        1,
+        Math.floor(
+          toFiniteNumber(
+            config?.adaptiveSearch?.coldStartQueryBudget,
+            toFiniteNumber(config?.adaptiveSearch?.coldDiscoveryQueryBudget, 6)
+          )
+        )
+      ),
+      coldStartMaxNewCompanies: Math.max(
+        1,
+        Math.floor(
+          toFiniteNumber(
+            config?.adaptiveSearch?.coldStartMaxNewCompanies,
+            toFiniteNumber(config?.adaptiveSearch?.coldDiscoveryCompanyBudget, 6)
+          )
+        )
+      ),
+      coldStartImmediateProcessBatchSize: Math.max(
+        1,
+        Math.floor(
+          toFiniteNumber(
+            config?.adaptiveSearch?.coldStartImmediateProcessBatchSize,
+            toFiniteNumber(config?.adaptiveSearch?.processDiscoveredCompaniesPerRound, 4)
+          )
+        )
+      ),
+      deepSearchQueryBudget: Math.max(
+        1,
+        Math.floor(
+          toFiniteNumber(
+            config?.adaptiveSearch?.deepSearchQueryBudget,
+            toFiniteNumber(config?.adaptiveSearch?.warmDiscoveryQueryBudget, 4)
+          )
+        )
+      ),
+      deepSearchMaxNewCompanies: Math.max(
+        1,
+        Math.floor(
+          toFiniteNumber(
+            config?.adaptiveSearch?.deepSearchMaxNewCompanies,
+            toFiniteNumber(config?.adaptiveSearch?.warmDiscoveryCompanyBudget, 4)
+          )
+        )
+      ),
+      deepSearchImmediateProcessBatchSize: Math.max(
+        1,
+        Math.floor(
+          toFiniteNumber(
+            config?.adaptiveSearch?.deepSearchImmediateProcessBatchSize,
+            toFiniteNumber(config?.adaptiveSearch?.processDiscoveredCompaniesPerRound, 4)
+          )
+        )
+      ),
+      companyCooldownDaysNoJobs: Math.max(
+        1,
+        Math.floor(toFiniteNumber(config?.adaptiveSearch?.companyCooldownDaysNoJobs, 7))
+      ),
+      companyCooldownDaysSomeJobsNoNew: Math.max(
+        1,
+        Math.floor(
+          toFiniteNumber(
+            config?.adaptiveSearch?.companyCooldownDaysSomeJobsNoNew,
+            toFiniteNumber(config?.adaptiveSearch?.companyCooldownDaysNoNewJobs, 3)
+          )
+        )
+      ),
+      companyCooldownDaysWithNew: Math.max(
+        1,
+        Math.floor(
+          toFiniteNumber(
+            config?.adaptiveSearch?.companyCooldownDaysWithNew,
+            toFiniteNumber(config?.adaptiveSearch?.companyCooldownDaysWithNewJobs, 2)
+          )
+        )
+      )
     },
     translation: {
       enable: config?.translation?.enable ?? false,
@@ -924,7 +1184,7 @@ function withDefaults(config) {
   };
 }
 
-async function loadCompanies(companiesPath, examplePath) {
+async function loadCompanies(companiesPath) {
   try {
     const raw = await fs.readFile(companiesPath, "utf8");
     const normalized = raw.replace(/^\uFEFF/, "");
@@ -932,11 +1192,9 @@ async function loadCompanies(companiesPath, examplePath) {
     return parsed;
   } catch (err) {
     if (err && err.code === "ENOENT") {
-      const example = await fs.readFile(examplePath, "utf8");
-      await fs.writeFile(companiesPath, example, "utf8");
-      throw new Error(
-        `Missing companies.json. Created ${companiesPath} from companies.example.json. Please review it and run again.`
-      );
+      const empty = { companies: [] };
+      await fs.writeFile(companiesPath, JSON.stringify(empty, null, 2), "utf8");
+      return empty;
     }
     throw err;
   }
@@ -1135,19 +1393,27 @@ Output ONLY JSON matching the schema.`;
   return data.companies;
 }
 
-async function autoDiscoverCompanies({ client, config, companiesPath, baseDir, disabled }) {
+async function autoDiscoverCompanies({
+  client,
+  config,
+  companiesPath,
+  baseDir,
+  disabled,
+  companiesData = null,
+  queryStartIndex = 0,
+  queryBudget = Infinity,
+  maxNewCompanies = null
+}) {
   if (disabled || !config.companyDiscovery.enableAutoDiscovery) {
-    return { added: 0, total: 0 };
+    return { added: 0, total: 0, nextQueryIndex: queryStartIndex, newCompanies: [] };
   }
-  const examplePath = path.join(baseDir, "companies.example.json");
-  const companiesData = await loadCompanies(companiesPath, examplePath);
-  const companies = Array.isArray(companiesData.companies) ? companiesData.companies : [];
+  const data = companiesData || (await loadCompanies(companiesPath));
+  const companies = Array.isArray(data.companies) ? data.companies : [];
 
   const nameSet = new Set(companies.map((c) => normalizeCompanyName(c.name)));
   const domainSet = new Set(companies.map((c) => companyDomain(c.website)));
   const newCompanies = [];
-
-  const queries =
+  const allQueries =
     Array.isArray(config.companyDiscovery.queries) && config.companyDiscovery.queries.length > 0
       ? config.companyDiscovery.queries
       : [
@@ -1158,51 +1424,593 @@ async function autoDiscoverCompanies({ client, config, companiesPath, baseDir, d
           "hydrogen system controls and balance of plant companies",
           "electrochemical diagnostics and testing companies"
         ];
+  const startIndex = Math.max(0, Math.floor(toFiniteNumber(queryStartIndex, 0)));
+  const limit = Number.isFinite(queryBudget)
+    ? Math.max(0, Math.floor(toFiniteNumber(queryBudget, 0)))
+    : allQueries.length;
+  const endIndex = Math.min(allQueries.length, startIndex + limit);
+  const queries = allQueries.slice(startIndex, endIndex);
+  const newCompanyCap =
+    Number.isFinite(maxNewCompanies) && maxNewCompanies !== null
+      ? Math.max(0, Math.floor(toFiniteNumber(maxNewCompanies, 0)))
+      : config.companyDiscovery.maxNewCompaniesPerRun;
 
-  for (const query of queries) {
-    let found = [];
-    try {
-      found = await discoverCompaniesFromQuery({ client, config, query });
-    } catch (err) {
-      console.log(
-        `[${nowIso()}] Company query failed, skip: ${query} | ${String(err?.message || err)}`
-      );
-      continue;
+  const queryConcurrency = Math.max(
+    1,
+    Math.floor(toFiniteNumber(config?.companyDiscovery?.queryConcurrency, 3))
+  );
+
+  for (let start = 0; start < queries.length; start += queryConcurrency) {
+    const batch = queries.slice(start, start + queryConcurrency);
+    const batchResults = await Promise.all(
+      batch.map(async (query) => {
+        try {
+          return await discoverCompaniesFromQuery({ client, config, query });
+        } catch (err) {
+          console.log(
+            `[${nowIso()}] Company query failed, skip: ${query} | ${String(err?.message || err)}`
+          );
+          return [];
+        }
+      })
+    );
+    for (const found of batchResults) {
+      for (const item of found) {
+        const name = String(item.name || "").trim();
+        if (!name) continue;
+        const normName = normalizeCompanyName(name);
+        const website = String(item.website || "").trim();
+        const domain = companyDomain(website);
+        if (nameSet.has(normName)) continue;
+        if (domain && domainSet.has(domain)) continue;
+
+        const tags = Array.isArray(item.tags) ? item.tags.filter(Boolean) : [];
+        const region = String(item.region || "").trim();
+        const regionTag = region ? `region:${region.toUpperCase()}` : "";
+        if (regionTag && !tags.includes(regionTag)) tags.push(regionTag);
+
+        newCompanies.push({
+          name,
+          website,
+          careersUrl: "",
+          tags
+        });
+        nameSet.add(normName);
+        if (domain) domainSet.add(domain);
+        if (newCompanies.length >= newCompanyCap) break;
+      }
+      if (newCompanies.length >= newCompanyCap) break;
     }
-    for (const item of found) {
-      const name = String(item.name || "").trim();
-      if (!name) continue;
-      const normName = normalizeCompanyName(name);
-      const website = String(item.website || "").trim();
-      const domain = companyDomain(website);
-      if (nameSet.has(normName)) continue;
-      if (domain && domainSet.has(domain)) continue;
-
-      const tags = Array.isArray(item.tags) ? item.tags.filter(Boolean) : [];
-      const region = String(item.region || "").trim();
-      const regionTag = region ? `region:${region.toUpperCase()}` : "";
-      if (regionTag && !tags.includes(regionTag)) tags.push(regionTag);
-
-      newCompanies.push({
-        name,
-        website,
-        careersUrl: "",
-        tags
-      });
-      nameSet.add(normName);
-      if (domain) domainSet.add(domain);
-      if (newCompanies.length >= config.companyDiscovery.maxNewCompaniesPerRun) break;
-    }
-    if (newCompanies.length >= config.companyDiscovery.maxNewCompaniesPerRun) break;
+    if (newCompanies.length >= newCompanyCap) break;
   }
 
   if (newCompanies.length > 0) {
     companies.push(...newCompanies);
-    companiesData.companies = companies;
-    await writeCompanies(companiesPath, companiesData);
+    data.companies = companies;
+    await writeCompanies(companiesPath, data);
   }
 
-  return { added: newCompanies.length, total: companies.length };
+  return {
+    added: newCompanies.length,
+    total: companies.length,
+    nextQueryIndex: endIndex,
+    newCompanies
+  };
+}
+
+async function processCompanySource({
+  company,
+  companyIndex,
+  toProcessLength,
+  client,
+  config,
+  args,
+  forceDiscover,
+  allowCompanySearchFallback,
+  maxFallbackSearches,
+  state,
+  seenJobUrls,
+  adaptiveSearch
+}) {
+  const name = String(company.name || "").trim();
+  if (!name) return { jobs: [], changed: false };
+  if (companyIndex > 0 && companyIndex % 25 === 0) {
+    console.log(
+      `[${nowIso()}] Company sources progress: ${companyIndex}/${toProcessLength} processed.`
+    );
+  }
+
+  let changed = false;
+  if ((forceDiscover || args.discoverCompanies) && !args.offline) {
+    if (!company.website || !company.careersUrl) {
+      if (company.website && !company.careersUrl) {
+        try {
+          const guessedCareersUrl = await discoverCareersFromWebsite({
+            website: company.website,
+            config
+          });
+          if (guessedCareersUrl) {
+            company.careersUrl = guessedCareersUrl;
+            changed = true;
+          }
+        } catch {
+          // ignore guess failures
+        }
+      }
+      try {
+        if (!company.website || !company.careersUrl) {
+          const found = await discoverCompanyCareers({
+            client,
+            config,
+            companyName: name
+          });
+          if (found.website && !company.website) {
+            company.website = found.website;
+            changed = true;
+          }
+          if (found.careersUrl && !company.careersUrl) {
+            company.careersUrl = found.careersUrl;
+            changed = true;
+          }
+        }
+      } catch {
+        // ignore discovery failures per company
+      }
+    }
+  }
+
+  let atsType = company.atsType || "";
+  let atsId = company.atsId || "";
+  if (!atsType || !atsId) {
+    const detected = detectAtsFromUrl(company.careersUrl || company.website || "");
+    if (detected && !atsType) {
+      atsType = detected.type;
+      atsId = detected.id;
+      if (args.discoverCompanies) {
+        company.atsType = atsType;
+        company.atsId = atsId;
+        changed = true;
+      }
+    }
+  }
+
+  let jobs = [];
+  try {
+    if (atsType === "greenhouse" && atsId) {
+      jobs = await fetchGreenhouseJobs(atsId, config);
+    } else if (atsType === "lever" && atsId) {
+      jobs = await fetchLeverJobs(atsId, config);
+    } else if (atsType === "smartrecruiters" && atsId) {
+      jobs = await fetchSmartRecruitersJobs(atsId, config);
+    } else if (company.careersUrl) {
+      jobs = await fetchCareersPageJobs({
+        url: company.careersUrl,
+        maxLinks: config.sources.maxJobLinksPerCompany,
+        config
+      });
+    }
+  } catch {
+    jobs = [];
+  }
+
+  const sourceLabel = `company:${name}${atsType ? `:${atsType}` : ""}`;
+  const tags = Array.isArray(company.tags) ? company.tags.filter(Boolean) : [];
+  const filtered = jobs
+    .filter((job) => job && job.url)
+    .filter((job) => !isStale(job.datePosted, config.filters.maxPostAgeDays))
+    .slice(0, config.sources.maxJobsPerCompany)
+    .map((job) => ({
+      title: job.title || "",
+      company: name,
+      location: job.location || "",
+      url: job.url,
+      datePosted: job.datePosted || "",
+      summary: job.summary || "",
+      source: sourceLabel,
+      sourceType: "company",
+      companyTags: tags
+    }));
+
+  const results = [...filtered];
+  if (
+    filtered.length === 0 &&
+    allowCompanySearchFallback &&
+    state.fallbackSearchesUsed < maxFallbackSearches &&
+    companySearchFallbackEnabled(company, config)
+  ) {
+    const fallbackQuery = buildCompanySearchFallbackQuery(company, config);
+    if (fallbackQuery) {
+      state.fallbackSearchesUsed += 1;
+      try {
+        console.log(`[${nowIso()}] Company search fallback: ${name} | ${fallbackQuery}`);
+        const fallbackJobs = await openaiSearchJobs({
+          client,
+          config,
+          query: fallbackQuery
+        });
+        const fallbackSource = `company_search:${name}`;
+        const normalizedFallbackJobs = fallbackJobs
+          .filter((job) => job && job.url)
+          .filter((job) => !isStale(job.datePosted, config.filters.maxPostAgeDays))
+          .slice(0, config.sources.maxJobsPerCompany)
+          .map((job) => ({
+            title: job.title || "",
+            company: job.company || name,
+            location: job.location || "",
+            url: job.url,
+            datePosted: job.datePosted || "",
+            summary: job.summary || "",
+            source: fallbackSource,
+            sourceType: "company_search",
+            companyTags: tags
+          }));
+        results.push(...normalizedFallbackJobs);
+      } catch (err) {
+        console.log(
+          `[${nowIso()}] Company search fallback failed for ${name}: ${String(err?.message || err)}`
+        );
+      }
+    }
+  }
+
+  const uniqueJobs = [];
+  const jobUrlSet = new Set();
+  for (const job of results) {
+    const normalizedUrl = normalizeJobUrl(job?.url || "");
+    if (!normalizedUrl || jobUrlSet.has(normalizedUrl)) continue;
+    jobUrlSet.add(normalizedUrl);
+    uniqueJobs.push({ ...job, url: normalizedUrl });
+  }
+
+  const jobsFoundCount = uniqueJobs.length;
+  let newJobsCount = 0;
+  const knownUrls = seenJobUrls instanceof Set ? seenJobUrls : null;
+  if (knownUrls) {
+    for (const job of uniqueJobs) {
+      if (!knownUrls.has(job.url)) newJobsCount += 1;
+      knownUrls.add(job.url);
+    }
+  } else {
+    newJobsCount = jobsFoundCount;
+  }
+
+  const now = nowIso();
+  company.lastSearchedAt = now;
+  company.lastJobsFoundCount = jobsFoundCount;
+  company.lastNewJobsCount = newJobsCount;
+  company.cooldownUntil = getCompanyCooldownUntil(
+    adaptiveSearch,
+    jobsFoundCount,
+    newJobsCount,
+    Date.now()
+  );
+  changed = true;
+
+  return {
+    jobs: uniqueJobs,
+    changed,
+    stats: {
+      jobsFoundCount,
+      newJobsCount,
+      cooldownUntil: company.cooldownUntil,
+      searchedAt: now
+    }
+  };
+}
+
+async function collectCompanyJobs({
+  client,
+  config,
+  args,
+  baseDir,
+  forceDiscover = false,
+  disableCompanyDiscovery = false,
+  runStartedAt = Date.now(),
+  seenJobUrls = new Set()
+}) {
+  if (!config.sources.enableCompanySources || args.offline) return [];
+
+  const companiesPath = path.resolve(
+    baseDir,
+    args.companiesPath || config.sources.companiesPath
+  );
+  const companiesData = await loadCompanies(companiesPath);
+  if (!Array.isArray(companiesData.companies)) companiesData.companies = [];
+  const companies = companiesData.companies;
+
+  const adaptiveSearch = config.adaptiveSearch || {};
+  const adaptiveEnabled = adaptiveSearch.enabled !== false;
+  const allowDiscovery =
+    !disableCompanyDiscovery &&
+    (forceDiscover || adaptiveEnabled) &&
+    config.companyDiscovery.enableAutoDiscovery !== false;
+
+  const maxCompanies =
+    typeof args.maxCompanies === "number" && Number.isFinite(args.maxCompanies)
+      ? Math.max(0, args.maxCompanies)
+      : config.sources.maxCompaniesPerRun;
+
+  const baseRoundMs = Math.max(0, Math.floor(toFiniteNumber(adaptiveSearch.baseRoundSeconds, 300))) * 1000;
+  const extendRoundMs =
+    Math.max(0, Math.floor(toFiniteNumber(adaptiveSearch.extendRoundSeconds, 480))) * 1000;
+  const deepRoundMs = Math.max(0, Math.floor(toFiniteNumber(adaptiveSearch.deepRoundSeconds, 720))) * 1000;
+  const minNewJobsToContinue = Math.max(
+    1,
+    Math.floor(toFiniteNumber(adaptiveSearch.minNewJobsToContinue, 3))
+  );
+  const baseExistingBatchSize = Math.max(
+    1,
+    Math.floor(toFiniteNumber(adaptiveSearch.baseExistingCompanyBatchSize, 8))
+  );
+  const extendExistingBatchSize = Math.max(
+    1,
+    Math.floor(toFiniteNumber(adaptiveSearch.extendExistingCompanyBatchSize, 4))
+  );
+  const coldStartQueryBudget = Math.max(
+    1,
+    Math.floor(toFiniteNumber(adaptiveSearch.coldStartQueryBudget, 6))
+  );
+  const coldStartMaxNewCompanies = Math.max(
+    1,
+    Math.floor(toFiniteNumber(adaptiveSearch.coldStartMaxNewCompanies, 6))
+  );
+  const coldStartImmediateProcessBatchSize = Math.max(
+    1,
+    Math.floor(toFiniteNumber(adaptiveSearch.coldStartImmediateProcessBatchSize, 4))
+  );
+  const deepSearchQueryBudget = Math.max(
+    1,
+    Math.floor(toFiniteNumber(adaptiveSearch.deepSearchQueryBudget, 4))
+  );
+  const deepSearchMaxNewCompanies = Math.max(
+    1,
+    Math.floor(toFiniteNumber(adaptiveSearch.deepSearchMaxNewCompanies, 4))
+  );
+  const deepSearchImmediateProcessBatchSize = Math.max(
+    1,
+    Math.floor(toFiniteNumber(adaptiveSearch.deepSearchImmediateProcessBatchSize, 4))
+  );
+
+  const prioritizedCompanies = prioritizeCompaniesForRun(companies, config);
+  const initialSelection = buildCompanyRunSelection(prioritizedCompanies, maxCompanies, config);
+  let orderedCompanies = initialSelection.companies;
+  if (prioritizedCompanies.length && maxCompanies > 0 && config.sources.preferMajorCompanies) {
+    const sample = orderedCompanies
+      .slice(0, Math.min(12, orderedCompanies.length))
+      .map((c) => String(c?.name || "").trim())
+      .filter(Boolean)
+      .join(" | ");
+    console.log(
+      `[${nowIso()}] Company priority enabled. Processing ${orderedCompanies.length}/${prioritizedCompanies.length} companies (${initialSelection.pinnedCount} pinned${
+        initialSelection.rotated ? ` + rotated tail offset ${initialSelection.rotationOffset}` : ""
+      }). Sample: ${sample}`
+    );
+  }
+
+  const knownJobUrls = seenJobUrls instanceof Set ? seenJobUrls : new Set();
+  const processedCompanyKeys = new Set();
+  const state = { fallbackSearchesUsed: 0 };
+  const allowCompanySearchFallback = Boolean(
+    client &&
+      config?.sources?.enableWebSearch !== false &&
+      config?.sources?.enableCompanySearchFallback !== false &&
+      !args.disableWebSearch &&
+      !args.offline
+  );
+  const maxFallbackSearches = Math.max(
+    0,
+    Math.floor(toFiniteNumber(config?.sources?.maxCompanySearchFallbacksPerRun, 18))
+  );
+  const companyLimit = pLimit(
+    Math.max(1, Math.floor(toFiniteNumber(config?.sources?.companyConcurrency, 4)))
+  );
+  const results = [];
+  let nextDiscoveryQueryIndex = 0;
+  let totalNewJobs = 0;
+  let totalJobsFound = 0;
+  let totalDiscoveredCompanies = 0;
+
+  const runElapsedMs = () => Date.now() - runStartedAt;
+  const canStartRound = (budgetMs) => runElapsedMs() < budgetMs;
+
+  function refreshOrderedCompanies(preferredKeys = new Set()) {
+    const prioritized = prioritizeCompaniesForRun(companies, config);
+    const selection = buildCompanyRunSelection(prioritized, maxCompanies, config);
+    const base = selection.companies;
+    if (!preferredKeys || preferredKeys.size === 0) return base;
+    const preferred = [];
+    const rest = [];
+    for (const company of base) {
+      const key = companyRecordKey(company);
+      if (key && preferredKeys.has(key)) preferred.push(company);
+      else rest.push(company);
+    }
+    return preferred.concat(rest);
+  }
+
+  function pickEligibleCompanies(limit, preferredKeys = new Set()) {
+    orderedCompanies = refreshOrderedCompanies(preferredKeys);
+    const batch = [];
+    const batchKeys = new Set();
+    for (const company of orderedCompanies) {
+      if (batch.length >= limit) break;
+      const key = companyRecordKey(company);
+      if (!key || processedCompanyKeys.has(key) || batchKeys.has(key)) continue;
+      if (isCompanyInCooldown(company, Date.now())) continue;
+      batch.push(company);
+      batchKeys.add(key);
+    }
+    return batch;
+  }
+
+  async function processCompanyBatch(label, batch, discoveryAdded = 0) {
+    if (!Array.isArray(batch) || batch.length === 0) {
+      console.log(
+        `[${nowIso()}] Adaptive round ${label}: processed 0 existing companies, discovered ${discoveryAdded} companies, found 0 jobs, new 0 jobs.`
+      );
+      return { jobs: [], jobsFoundCount: 0, newJobsCount: 0, processedCount: 0 };
+    }
+
+    const batchJobs = [];
+    const batchResults = await Promise.all(
+      batch.map((company, companyIndex) =>
+        companyLimit(async () => {
+          try {
+            return await processCompanySource({
+              company,
+              companyIndex,
+              toProcessLength: batch.length,
+              client,
+              config,
+              args,
+              forceDiscover,
+              allowCompanySearchFallback,
+              maxFallbackSearches,
+              state,
+              seenJobUrls: knownJobUrls,
+              adaptiveSearch
+            });
+          } catch (err) {
+            console.log(
+              `[${nowIso()}] Adaptive round ${label}: company failed, skip ${String(
+                company?.name || ""
+              )} | ${String(err?.message || err)}`
+            );
+            return { jobs: [], changed: false, stats: { jobsFoundCount: 0, newJobsCount: 0 } };
+          }
+        })
+      )
+    );
+
+    let changed = false;
+    let jobsFoundCount = 0;
+    let newJobsCount = 0;
+    for (let index = 0; index < batch.length; index += 1) {
+      const company = batch[index];
+      const key = companyRecordKey(company);
+      if (key) processedCompanyKeys.add(key);
+      const item = batchResults[index];
+      if (!item) continue;
+      if (item.changed) changed = true;
+      jobsFoundCount += Math.max(0, Math.floor(toFiniteNumber(item.stats?.jobsFoundCount, 0)));
+      newJobsCount += Math.max(0, Math.floor(toFiniteNumber(item.stats?.newJobsCount, 0)));
+      if (Array.isArray(item.jobs) && item.jobs.length > 0) {
+        results.push(...item.jobs);
+        batchJobs.push(...item.jobs);
+      }
+    }
+    totalJobsFound += jobsFoundCount;
+    totalNewJobs += newJobsCount;
+    if (changed) {
+      await writeCompanies(companiesPath, companiesData);
+    }
+    console.log(
+      `[${nowIso()}] Adaptive round ${label}: processed ${batch.length} existing companies, discovered ${discoveryAdded} companies, found ${jobsFoundCount} jobs, new ${newJobsCount} jobs.`
+    );
+    return { jobs: batchJobs, jobsFoundCount, newJobsCount, processedCount: batch.length };
+  }
+
+  async function runDiscoveryRound(label, queryBudget, maxNewCompanies, immediateBatchSize) {
+    if (!allowDiscovery) {
+      console.log(
+        `[${nowIso()}] Adaptive round ${label}: company discovery disabled, skip discovery.`
+      );
+      return {
+        added: 0,
+        total: companies.length,
+        nextQueryIndex: nextDiscoveryQueryIndex,
+        newCompanies: [],
+        jobsFoundCount: 0,
+        newJobsCount: 0,
+        processedCount: 0
+      };
+    }
+
+    const discovery = await autoDiscoverCompanies({
+      client,
+      config,
+      companiesPath,
+      baseDir,
+      disabled: !allowDiscovery,
+      companiesData,
+      queryStartIndex: nextDiscoveryQueryIndex,
+      queryBudget,
+      maxNewCompanies
+    });
+    nextDiscoveryQueryIndex =
+      typeof discovery.nextQueryIndex === "number" ? discovery.nextQueryIndex : nextDiscoveryQueryIndex;
+    totalDiscoveredCompanies += Math.max(
+      0,
+      Math.floor(toFiniteNumber(discovery.added, 0))
+    );
+    const preferredKeys = new Set(
+      Array.isArray(discovery.newCompanies)
+        ? discovery.newCompanies.map((company) => companyRecordKey(company)).filter(Boolean)
+        : []
+    );
+    orderedCompanies = refreshOrderedCompanies(preferredKeys);
+    const batch = pickEligibleCompanies(immediateBatchSize, preferredKeys);
+    const batchResult = await processCompanyBatch(label, batch, discovery.added || 0);
+    return {
+      ...discovery,
+      ...batchResult
+    };
+  }
+
+  async function runAdaptiveRounds() {
+    const companyPoolEmpty = companies.length === 0;
+    if (!canStartRound(baseRoundMs)) {
+      return;
+    }
+
+    if (companyPoolEmpty) {
+      await runDiscoveryRound(
+        "base",
+        coldStartQueryBudget,
+        coldStartMaxNewCompanies,
+        coldStartImmediateProcessBatchSize
+      );
+      if (totalNewJobs >= minNewJobsToContinue) return;
+    } else {
+      const baseBatch = pickEligibleCompanies(baseExistingBatchSize);
+      await processCompanyBatch("base", baseBatch, 0);
+      if (totalNewJobs >= minNewJobsToContinue) return;
+    }
+
+    if (!canStartRound(extendRoundMs)) {
+      return;
+    }
+
+    const extendBatch = pickEligibleCompanies(extendExistingBatchSize);
+    await processCompanyBatch("extend", extendBatch, 0);
+    if (totalNewJobs >= minNewJobsToContinue) return;
+
+    if (!canStartRound(deepRoundMs)) {
+      return;
+    }
+
+    await runDiscoveryRound(
+      "deep",
+      deepSearchQueryBudget,
+      deepSearchMaxNewCompanies,
+      deepSearchImmediateProcessBatchSize
+    );
+    if (totalNewJobs >= minNewJobsToContinue) return;
+  }
+
+  await runAdaptiveRounds();
+
+  if (totalDiscoveredCompanies > 0) {
+    console.log(
+      `[${nowIso()}] Adaptive search summary: discovered ${totalDiscoveredCompanies} new companies, found ${totalJobsFound} jobs, new ${totalNewJobs} jobs.`
+    );
+  } else {
+    console.log(
+      `[${nowIso()}] Adaptive search summary: found ${totalJobsFound} jobs, new ${totalNewJobs} jobs.`
+    );
+  }
+
+  return results;
 }
 
 async function fetchGreenhouseJobs(board, config) {
@@ -2148,6 +2956,42 @@ function buildCompanyRunSelection(companies, maxCompanies, config) {
   };
 }
 
+function companyRecordKey(company) {
+  const name = normalizeCompanyName(company?.name || "");
+  const website = String(company?.website || "").trim();
+  const domain = companyDomain(website);
+  if (name) return name;
+  return domain || String(company?.name || "").trim().toLowerCase();
+}
+
+function isCompanyInCooldown(company, nowMs = Date.now()) {
+  const cooldownUntil = new Date(String(company?.cooldownUntil || "")).getTime();
+  return Number.isFinite(cooldownUntil) && cooldownUntil > nowMs;
+}
+
+function getCompanyCooldownUntil(adaptiveSearch, jobsFoundCount, newJobsCount, nowMs = Date.now()) {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const noJobsDays = Math.max(
+    1,
+    Math.floor(toFiniteNumber(adaptiveSearch?.companyCooldownDaysNoJobs, 7))
+  );
+  const someJobsNoNewDays = Math.max(
+    1,
+    Math.floor(toFiniteNumber(adaptiveSearch?.companyCooldownDaysSomeJobsNoNew, 3))
+  );
+  const withNewDays = Math.max(
+    1,
+    Math.floor(toFiniteNumber(adaptiveSearch?.companyCooldownDaysWithNew, 2))
+  );
+  const days =
+    newJobsCount > 0
+      ? withNewDays
+      : jobsFoundCount > 0
+        ? someJobsNoNewDays
+        : noJobsDays;
+  return new Date(nowMs + days * dayMs).toISOString();
+}
+
 function companySearchFallbackEnabled(company, config) {
   if (config?.sources?.enableCompanySearchFallback === false) return false;
   if (companyMatchesMajorKeyword(company, config)) return true;
@@ -2258,202 +3102,6 @@ function buildCompanySearchFallbackQuery(company, config) {
   }
 
   return `${name} careers ${focus}`;
-}
-
-async function collectCompanyJobs({ client, config, args, baseDir, forceDiscover }) {
-  if (!config.sources.enableCompanySources || args.offline) return [];
-
-  const companiesPath = path.resolve(
-    baseDir,
-    args.companiesPath || config.sources.companiesPath
-  );
-  const examplePath = path.join(baseDir, "companies.example.json");
-  const companiesData = await loadCompanies(companiesPath, examplePath);
-  const companies = Array.isArray(companiesData.companies) ? companiesData.companies : [];
-
-  const maxCompanies =
-    typeof args.maxCompanies === "number" && Number.isFinite(args.maxCompanies)
-      ? Math.max(0, args.maxCompanies)
-      : config.sources.maxCompaniesPerRun;
-
-  const prioritizedCompanies = prioritizeCompaniesForRun(companies, config);
-  const selection = buildCompanyRunSelection(prioritizedCompanies, maxCompanies, config);
-  const toProcess = selection.companies;
-  if (prioritizedCompanies.length && maxCompanies > 0 && config.sources.preferMajorCompanies) {
-    const sample = toProcess
-      .slice(0, Math.min(12, toProcess.length))
-      .map((c) => String(c?.name || "").trim())
-      .filter(Boolean)
-      .join(" | ");
-    console.log(
-      `[${nowIso()}] Company priority enabled. Processing ${toProcess.length}/${prioritizedCompanies.length} companies (${selection.pinnedCount} pinned${
-        selection.rotated ? ` + rotated tail offset ${selection.rotationOffset}` : ""
-      }). Sample: ${sample}`
-    );
-  }
-  let changed = false;
-  const results = [];
-  const allowCompanySearchFallback = Boolean(
-    client &&
-      config?.sources?.enableWebSearch !== false &&
-      config?.sources?.enableCompanySearchFallback !== false &&
-      !args.disableWebSearch &&
-      !args.offline
-  );
-  const maxFallbackSearches = Math.max(
-    0,
-    Math.floor(toFiniteNumber(config?.sources?.maxCompanySearchFallbacksPerRun, 18))
-  );
-  let fallbackSearchesUsed = 0;
-
-  for (const [companyIndex, company] of toProcess.entries()) {
-    const name = String(company.name || "").trim();
-    if (!name) continue;
-    if (companyIndex > 0 && companyIndex % 25 === 0) {
-      console.log(
-        `[${nowIso()}] Company sources progress: ${companyIndex}/${toProcess.length} processed.`
-      );
-    }
-
-    if ((forceDiscover || args.discoverCompanies) && !args.offline) {
-      if (!company.website || !company.careersUrl) {
-        if (company.website && !company.careersUrl) {
-          try {
-            const guessedCareersUrl = await discoverCareersFromWebsite({
-              website: company.website,
-              config
-            });
-            if (guessedCareersUrl) {
-              company.careersUrl = guessedCareersUrl;
-              changed = true;
-            }
-          } catch {
-            // ignore guess failures
-          }
-        }
-        try {
-          if (!company.website || !company.careersUrl) {
-            const found = await discoverCompanyCareers({
-              client,
-              config,
-              companyName: name
-            });
-            if (found.website && !company.website) {
-              company.website = found.website;
-              changed = true;
-            }
-            if (found.careersUrl && !company.careersUrl) {
-              company.careersUrl = found.careersUrl;
-              changed = true;
-            }
-          }
-        } catch {
-          // ignore discovery failures per company
-        }
-      }
-    }
-
-    let atsType = company.atsType || "";
-    let atsId = company.atsId || "";
-    if (!atsType || !atsId) {
-      const detected = detectAtsFromUrl(company.careersUrl || company.website || "");
-      if (detected && !atsType) {
-        atsType = detected.type;
-        atsId = detected.id;
-        if (args.discoverCompanies) {
-          company.atsType = atsType;
-          company.atsId = atsId;
-          changed = true;
-        }
-      }
-    }
-
-    let jobs = [];
-    try {
-      if (atsType === "greenhouse" && atsId) {
-        jobs = await fetchGreenhouseJobs(atsId, config);
-      } else if (atsType === "lever" && atsId) {
-        jobs = await fetchLeverJobs(atsId, config);
-      } else if (atsType === "smartrecruiters" && atsId) {
-        jobs = await fetchSmartRecruitersJobs(atsId, config);
-      } else if (company.careersUrl) {
-        jobs = await fetchCareersPageJobs({
-          url: company.careersUrl,
-          maxLinks: config.sources.maxJobLinksPerCompany,
-          config
-        });
-      }
-    } catch {
-      jobs = [];
-    }
-
-    const sourceLabel = `company:${name}${atsType ? `:${atsType}` : ""}`;
-    const tags = Array.isArray(company.tags) ? company.tags.filter(Boolean) : [];
-    const filtered = jobs
-      .filter((job) => job && job.url)
-      .filter((job) => !isStale(job.datePosted, config.filters.maxPostAgeDays))
-      .slice(0, config.sources.maxJobsPerCompany)
-      .map((job) => ({
-        title: job.title || "",
-        company: name,
-        location: job.location || "",
-        url: job.url,
-        datePosted: job.datePosted || "",
-        summary: job.summary || "",
-        source: sourceLabel,
-        sourceType: "company",
-        companyTags: tags
-      }));
-
-    for (const job of filtered) results.push(job);
-
-    if (
-      filtered.length === 0 &&
-      allowCompanySearchFallback &&
-      fallbackSearchesUsed < maxFallbackSearches &&
-      companySearchFallbackEnabled(company, config)
-    ) {
-      const fallbackQuery = buildCompanySearchFallbackQuery(company, config);
-      if (fallbackQuery) {
-        fallbackSearchesUsed += 1;
-        try {
-          console.log(`[${nowIso()}] Company search fallback: ${name} | ${fallbackQuery}`);
-          const fallbackJobs = await openaiSearchJobs({
-            client,
-            config,
-            query: fallbackQuery
-          });
-          const fallbackSource = `company_search:${name}`;
-          const normalizedFallbackJobs = fallbackJobs
-            .filter((job) => job && job.url)
-            .filter((job) => !isStale(job.datePosted, config.filters.maxPostAgeDays))
-            .slice(0, config.sources.maxJobsPerCompany)
-            .map((job) => ({
-              title: job.title || "",
-              company: job.company || name,
-              location: job.location || "",
-              url: job.url,
-              datePosted: job.datePosted || "",
-              summary: job.summary || "",
-              source: fallbackSource,
-              sourceType: "company_search",
-              companyTags: tags
-            }));
-          for (const job of normalizedFallbackJobs) results.push(job);
-        } catch (err) {
-          console.log(
-            `[${nowIso()}] Company search fallback failed for ${name}: ${String(err?.message || err)}`
-          );
-        }
-      }
-    }
-  }
-
-  if (changed) {
-    await writeCompanies(companiesPath, companiesData);
-  }
-
-  return results;
 }
 
 function parseDotEnv(raw) {
@@ -4743,6 +5391,7 @@ async function main() {
   const { config: rawConfig } = await loadConfig(configPath);
   const config = withDefaults(rawConfig);
   const baseDir = path.dirname(configPath);
+  const runStartedAt = Date.now();
 
   const apiKey = (process.env.OPENAI_API_KEY || "").trim();
   const baseURL =
@@ -4794,6 +5443,10 @@ async function main() {
     baseDir,
     config.output.foundJsonPath || "./jobs_found.json"
   );
+  const outputResumePendingJson = path.resolve(
+    baseDir,
+    config.output.resumePendingPath || "./jobs_resume_pending.json"
+  );
   const outputRecommendedJson = path.resolve(
     baseDir,
     config.output.recommendedJsonPath || "./jobs_recommended.json"
@@ -4815,36 +5468,19 @@ async function main() {
     if (!normalizedUrl) continue;
     existingByUrl.set(normalizedUrl, { ...j, url: normalizedUrl });
   }
+  const resumePendingPayload =
+    args.reset || args.dryRun
+      ? { jobs: [] }
+      : (await readJsonIfExists(outputResumePendingJson)) || { jobs: [] };
+  const carryoverPending = uniqueQueuedJobs(
+    extractJobsList(resumePendingPayload).filter((job) => needsAnalysis(job)),
+    config
+  ).filter((job) => needsAnalysis(existingByUrl.get(job.url) || job));
 
   const legacyManualByUrl = args.reset ? new Map() : await readExistingManualFields(outputLegacyXlsx);
   const trackerManualByUrl = args.reset ? new Map() : await readExistingManualFields(outputTrackerXlsx);
   const manualByUrl = mergeManualFields(legacyManualByUrl, trackerManualByUrl);
   const existingRecommendedRows = args.reset ? new Map() : await readExistingRows(outputTrackerXlsx);
-
-  if (!args.offline && client && !args.disableCompanyDiscovery) {
-    try {
-      console.log(`[${nowIso()}] Auto company discovery...`);
-      const result = await autoDiscoverCompanies({
-        client,
-        config,
-        companiesPath,
-        baseDir,
-        disabled: args.disableCompanyDiscovery
-      });
-      console.log(
-        `[${nowIso()}] Auto company discovery added ${result.added} companies (total ${result.total}).`
-      );
-    } catch (err) {
-      if (strictScoring && isQuotaOrRateLimitError(err)) {
-        throw new Error(
-          `[STRICT] Auto company discovery failed due OpenAI quota/rate limit: ${formatOpenAIError(err)}`
-        );
-      }
-      console.log(
-        `[${nowIso()}] Auto company discovery skipped: ${String(err?.message || err)}`
-      );
-    }
-  }
 
   let scoringDisabled = args.offline || args.dryRun || !willScore;
   let translationDisabled = args.offline || args.dryRun || !config.translation.enable;
@@ -4896,40 +5532,60 @@ async function main() {
       }).join(" | ");
       console.log(`[${nowIso()}] Query mix => ${distribution}`);
     }
-
-    for (const query of queries) {
-      try {
-        console.log(`[${nowIso()}] Web search: ${query}`);
-        const jobs = await openaiSearchJobs({ client, config, query });
-        for (const j of jobs) {
-          const platformLabel = platformListingLabelForUrl(j?.url || "", config);
-          discovered.push({
-            ...j,
-            source: platformLabel ? `web_search:${platformLabel}` : "web_search",
-            sourceType: platformLabel ? `platform_listing:${platformLabel.toLowerCase()}` : "web_search"
-          });
-        }
-      } catch (err) {
-        if (strictScoring && isQuotaOrRateLimitError(err)) {
+    const webSearchLimit = pLimit(
+      Math.max(1, Math.floor(toFiniteNumber(config?.search?.webSearchConcurrency, 3)))
+    );
+    const searchResults = await Promise.all(
+      queries.map((query) =>
+        webSearchLimit(async () => {
+          try {
+            console.log(`[${nowIso()}] Web search: ${query}`);
+            const jobs = await openaiSearchJobs({ client, config, query });
+            return { jobs, error: null };
+          } catch (err) {
+            return { jobs: [], error: err };
+          }
+        })
+      )
+    );
+    for (const result of searchResults) {
+      if (result?.error) {
+        if (strictScoring && isQuotaOrRateLimitError(result.error)) {
           throw new Error(
-            `[STRICT] Web search failed due OpenAI quota/rate limit: ${formatOpenAIError(err)}`
+            `[STRICT] Web search failed due OpenAI quota/rate limit: ${formatOpenAIError(result.error)}`
           );
         }
         console.log(
-          `[${nowIso()}] Web search query failed, skip: ${String(err?.message || err)}`
+          `[${nowIso()}] Web search query failed, skip: ${String(result.error?.message || result.error)}`
         );
+        continue;
+      }
+      for (const j of Array.isArray(result?.jobs) ? result.jobs : []) {
+        const platformLabel = platformListingLabelForUrl(j?.url || "", config);
+        discovered.push({
+          ...j,
+          source: platformLabel ? `web_search:${platformLabel}` : "web_search",
+          sourceType: platformLabel ? `platform_listing:${platformLabel.toLowerCase()}` : "web_search"
+        });
       }
     }
   }
 
   if (useCompanySources) {
     console.log(`[${nowIso()}] Company sources: loading company list...`);
+    const discoveredUrlSet = new Set(
+      discovered.map((job) => normalizeJobUrl(job?.url || "")).filter(Boolean)
+    );
+    const knownJobUrls = new Set([...existingByUrl.keys(), ...discoveredUrlSet]);
     const companyJobs = await collectCompanyJobs({
       client,
       config,
       args,
       baseDir,
-      forceDiscover: willDiscoverCompanies
+      forceDiscover: willDiscoverCompanies,
+      disableCompanyDiscovery: args.disableCompanyDiscovery,
+      runStartedAt,
+      seenJobUrls: knownJobUrls
     });
     console.log(`[${nowIso()}] Company sources: collected ${companyJobs.length} jobs.`);
     for (const j of companyJobs) discovered.push(j);
@@ -4989,7 +5645,7 @@ async function main() {
   const limitedNew = args.maxNewJobs ? newJobs.slice(0, args.maxNewJobs) : newJobs;
   const missingAnalysis = Array.from(filteredDedup.values()).filter((j) => {
     const existingJob = existingByUrl.get(j.url);
-    return existingJob && !existingJob.analysis;
+    return existingJob && needsAnalysis(existingJob);
   });
 
   const foundJobsOut = Array.from(filteredDedup.values()).map((j) => ({
@@ -5003,7 +5659,7 @@ async function main() {
     regionTag: j.regionTag || inferRegionTag(j),
     fitTrack: deriveTrackAndSignals(j, config).fitTrack,
     companyTags: j.companyTags || [],
-    alreadyAnalyzed: Boolean(existingByUrl.get(j.url)?.analysis)
+    alreadyAnalyzed: hasCompletedAnalysis(existingByUrl.get(j.url))
   }));
   await writeJsonAtomic(outputFoundJson, {
     generatedAt: nowIso(),
@@ -5019,43 +5675,87 @@ async function main() {
     );
   } else {
     console.log(
-      `[${nowIso()}] Discovered ${filteredDedup.size} unique, ${limitedNew.length} new (existing ${existingByUrl.size}).`
+      `[${nowIso()}] Discovered ${filteredDedup.size} unique, ${limitedNew.length} new, ${carryoverPending.length} pending carryover (existing ${existingByUrl.size}).`
     );
   }
 
   const limit = pLimit(4);
-  const jobsToProcess = args.offline
+  const rawJobsToProcess = args.offline
     ? Array.from(existingByUrl.values())
     : args.reanalyze || args.retranslate
-      ? Array.from(
-          new Map(
-            [
-              ...Array.from(existingByUrl.values()).map((j) => [j.url, j]),
-              ...Array.from(filteredDedup.values()).map((j) => [j.url, j])
-            ].filter(([url]) => url)
-          ).values()
+      ? uniqueQueuedJobs(
+          [
+            ...carryoverPending,
+            ...Array.from(existingByUrl.values()),
+            ...Array.from(filteredDedup.values())
+          ],
+          config
         )
-      : Array.from(
-          new Map(
-            [...limitedNew, ...missingAnalysis].map((j) => [j.url, j])
-          ).values()
-        );
+      : uniqueQueuedJobs([...carryoverPending, ...limitedNew, ...missingAnalysis], config);
   const analysisBudget =
     typeof config.analysis.maxJobsToAnalyzePerRun === "number" &&
     Number.isFinite(config.analysis.maxJobsToAnalyzePerRun)
       ? Math.max(0, config.analysis.maxJobsToAnalyzePerRun)
       : Infinity;
+  const jdFetchBudget = Math.max(
+    0,
+    Math.floor(toFiniteNumber(config?.analysis?.jdFetchMaxJobsPerRun, 10))
+  );
+  const normalizedJobsToProcess = args.reanalyze || args.retranslate
+    ? rawJobsToProcess
+    : uniqueQueuedJobs(
+        [
+          ...rawJobsToProcess.filter((job) => !isSignalOnlyJob(job)),
+          ...rawJobsToProcess.filter((job) => isPromotableSignalJob(job)).slice(
+            0,
+            Math.min(3, analysisBudget, jdFetchBudget)
+          ),
+          ...rawJobsToProcess.filter((job) => isSignalOnlyJob(job) && !isPromotableSignalJob(job))
+        ],
+        config
+      );
+  const promotedSignalUrls = new Set(
+    normalizedJobsToProcess.filter((job) => isSignalOnlyJob(job) && isPromotableSignalJob(job)).map((job) => job.url)
+  );
+  const promotedSignalJobs = rawJobsToProcess.filter((job) => promotedSignalUrls.has(job.url));
+  const analysisEligibleJobs = args.reanalyze
+    ? normalizedJobsToProcess
+    : uniqueQueuedJobs(
+        [
+          ...rawJobsToProcess.filter((job) => !isSignalOnlyJob(job)),
+          ...promotedSignalJobs
+        ],
+        config
+      );
+  if (!args.offline && !args.reanalyze && !args.retranslate) {
+    console.log(
+      `[${nowIso()}] Main-stage queue: ${analysisEligibleJobs.length} analysis candidates, promoted signal jobs: ${promotedSignalUrls.size}.`
+    );
+  }
+  const analysisCandidates = args.reanalyze
+    ? normalizedJobsToProcess
+    : analysisEligibleJobs.filter((job) => needsAnalysis(existingByUrl.get(job.url) || job));
   const analyzeUrls =
     args.offline || args.dryRun
       ? new Set()
       : args.reanalyze
-        ? new Set(jobsToProcess.map((j) => j.url))
-        : new Set(jobsToProcess.slice(0, analysisBudget).map((j) => j.url));
+        ? new Set(normalizedJobsToProcess.map((j) => j.url))
+        : new Set(analysisCandidates.slice(0, analysisBudget).map((j) => j.url));
+  const jdFetchUrls =
+    args.offline || args.dryRun
+      ? new Set()
+      : args.reanalyze
+        ? new Set(normalizedJobsToProcess.slice(0, jdFetchBudget).map((j) => j.url))
+        : new Set(
+            analysisCandidates
+              .slice(0, Math.min(analysisBudget, jdFetchBudget))
+              .map((j) => j.url)
+          );
   let runtimeScoringDisabled = scoringDisabled;
   let runtimeTranslationDisabled = translationDisabled;
 
   const processed = await Promise.all(
-    jobsToProcess.map((j) =>
+    normalizedJobsToProcess.map((j) =>
       limit(async () => {
         const base = existingByUrl.get(j.url) || {
           url: j.url,
@@ -5124,7 +5824,8 @@ async function main() {
           !args.offline &&
           !merged.analysis?.prefilterRejected &&
           !isLimitedPlatformListingJob(merged, config) &&
-          (!merged.jd || !merged.jd.rawText)
+          (!merged.jd || !merged.jd.rawText) &&
+          jdFetchUrls.has(merged.url)
         ) {
           const details = await fetchJobDetails({ url: merged.url, config });
           const extracted = details.extracted || {};
@@ -5157,7 +5858,7 @@ async function main() {
           !args.offline &&
           !merged.analysis?.prefilterRejected &&
           analyzeUrls.has(merged.url) &&
-          (args.reanalyze || !merged.analysis)
+          (args.reanalyze || needsAnalysis(merged))
         ) {
           if (runtimeScoringDisabled) {
             if (strictScoring) {
@@ -5252,16 +5953,70 @@ async function main() {
     )
   );
 
+  let suppressedSignalOnlyCount = 0;
+  if (!args.offline && !args.reanalyze && !args.retranslate) {
+    for (const job of processed) {
+      if (!isSignalOnlyJob(job)) continue;
+      if (promotedSignalUrls.has(job.url)) continue;
+      if (hasCompletedAnalysis(job)) continue;
+      job.analysis = {
+        ...(job.analysis || {}),
+        updatedAt: nowIso(),
+        fallback: true,
+        prefilterRejected: true,
+        signalOnlyNoise: true
+      };
+      suppressedSignalOnlyCount += 1;
+    }
+  }
+
   const prefilterRejectedCount = processed.filter(
-    (job) => job?.analysis?.prefilterRejected === true
+    (job) => job?.analysis?.prefilterRejected === true && !job?.analysis?.signalOnlyNoise
   ).length;
   if (prefilterRejectedCount > 0) {
     console.log(
       `[${nowIso()}] Local prefilter skipped GPT scoring for ${prefilterRejectedCount} jobs.`
     );
   }
+  if (suppressedSignalOnlyCount > 0) {
+    console.log(
+      `[${nowIso()}] Suppressed ${suppressedSignalOnlyCount} signal-only jobs from resume queue.`
+    );
+  }
 
   for (const j of processed) existingByUrl.set(j.url, j);
+
+  if (!args.offline && !args.dryRun) {
+    const mainStagePendingJobs = sortResumePendingJobs(
+      Array.from(existingByUrl.values()).filter(
+        (job) => !hasCompletedAnalysis(job) && !isSignalOnlyJob(job)
+      )
+    );
+    const signalOnlyPendingJobs = Array.from(existingByUrl.values()).filter(
+      (job) => !hasCompletedAnalysis(job) && isSignalOnlyJob(job)
+    );
+    const resumePendingMeta =
+      resumePendingPayload &&
+      typeof resumePendingPayload === "object" &&
+      !Array.isArray(resumePendingPayload)
+        ? resumePendingPayload
+        : {};
+    const resumePendingVersion = Number.isFinite(Number(resumePendingMeta.version))
+      ? Number(resumePendingMeta.version)
+      : 2;
+    await writeJsonAtomic(outputResumePendingJson, {
+      ...resumePendingMeta,
+      version: resumePendingVersion,
+      generatedAt: nowIso(),
+      jobs: mainStagePendingJobs,
+      summary: {
+        mainStagePendingCount: mainStagePendingJobs.length,
+        signalOnlyPendingCount: signalOnlyPendingJobs.length,
+        signalOnlySuppressedCount: suppressedSignalOnlyCount,
+        promotedSignalCount: promotedSignalUrls.size
+      }
+    });
+  }
 
   const filteredJobs = Array.from(existingByUrl.values()).filter(
     (job) =>

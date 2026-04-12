@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import threading
 from datetime import datetime
 from html import escape
 from pathlib import Path
@@ -53,7 +54,7 @@ from ...services.location_structured import (
     normalize_location_entry,
     preferred_locations_plain_text,
 )
-from ...services.model_catalog import fetch_available_models, filter_response_usable_models
+from ...services.model_catalog import fetch_available_models
 from ...services.role_recommendations import (
     OpenAIRoleRecommendationService,
     RoleRecommendationError,
@@ -67,6 +68,11 @@ from ...services.role_recommendations import (
     select_bilingual_role_name,
     select_bilingual_description,
 )
+
+
+SUPPORT_PAYPAL_EMAIL_ENV = "JOBFLOW_SUPPORT_PAYPAL_EMAIL"
+SUPPORT_PAYPAL_EMAIL_SETTING_KEY = "support_paypal_email"
+SUPPORT_PAYPAL_EMAIL_DEFAULT = "liu.yingxu.vka@gmail.com"
 
 
 def styled_button(text: str, variant: str = "secondary") -> QPushButton:
@@ -147,23 +153,26 @@ def run_busy_task(
     on_error: Callable[[Exception], None] | None = None,
     on_finally: Callable[[], None] | None = None,
     timeout_ms: int | None = None,
+    show_dialog: bool = True,
 ) -> bool:
     running_thread = getattr(owner, "_busy_task_thread", None)
     if isinstance(running_thread, QThread) and running_thread.isRunning():
         return False
 
-    dialog = QProgressDialog(message, "", 0, 0, owner)
-    dialog.setWindowTitle(title)
-    dialog.setWindowModality(Qt.NonModal)
-    dialog.setWindowFlag(Qt.WindowStaysOnTopHint, True)
-    dialog.setCancelButton(None)
-    dialog.setAutoClose(False)
-    dialog.setAutoReset(False)
-    dialog.setMinimumDuration(0)
-    dialog.setRange(0, 0)
-    dialog.setValue(0)
-    dialog.show()
-    QApplication.processEvents()
+    dialog: QProgressDialog | None = None
+    if show_dialog:
+        dialog = QProgressDialog(message, "", 0, 0, owner)
+        dialog.setWindowTitle(title)
+        dialog.setWindowModality(Qt.NonModal)
+        dialog.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+        dialog.setCancelButton(None)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.setMinimumDuration(0)
+        dialog.setRange(0, 0)
+        dialog.setValue(0)
+        dialog.show()
+        QApplication.processEvents()
 
     worker = _BackgroundTaskWorker(task)
     thread = QThread(owner)
@@ -179,8 +188,9 @@ def run_busy_task(
         completed = True
         if timeout_timer is not None:
             timeout_timer.stop()
-        dialog.close()
-        dialog.deleteLater()
+        if dialog is not None:
+            dialog.close()
+            dialog.deleteLater()
         setattr(owner, "_busy_task_thread", None)
         setattr(owner, "_busy_task_worker", None)
         setattr(owner, "_busy_task_dialog", None)
@@ -205,8 +215,9 @@ def run_busy_task(
             if completed:
                 return
             completed = True
-            dialog.close()
-            dialog.deleteLater()
+            if dialog is not None:
+                dialog.close()
+                dialog.deleteLater()
             setattr(owner, "_busy_task_thread", None)
             setattr(owner, "_busy_task_worker", None)
             setattr(owner, "_busy_task_dialog", None)
@@ -312,14 +323,24 @@ class AISettingsDialog(QDialog):
         model_row_layout.addWidget(self.refresh_models_button)
 
         self.ui_language_combo = QComboBox()
-        self.ui_language_combo.addItem("中文", "zh")
-        self.ui_language_combo.addItem("English", "en")
+        self.ui_language_combo.addItem("🌐 中文 / Chinese", "zh")
+        self.ui_language_combo.addItem("🌐 English", "en")
+        self.ui_language_combo.setToolTip(
+            _t(
+                self.ui_language,
+                "切换桌面应用界面语言。",
+                "Switch the desktop app interface language.",
+            )
+        )
 
         form.addRow(_t(self.ui_language, "API Key 来源", "API Key Source"), self.api_key_source_combo)
         form.addRow(_t(self.ui_language, "API Key", "API Key"), self.api_key_input)
         form.addRow(_t(self.ui_language, "环境变量", "Environment Variable"), self.api_key_env_combo)
         form.addRow(_t(self.ui_language, "模型", "Model"), model_row)
-        form.addRow(_t(self.ui_language, "界面语言", "UI Language"), self.ui_language_combo)
+        form.addRow(
+            _t(self.ui_language, "🌐 语言 / Language", "🌐 Language / 语言"),
+            self.ui_language_combo,
+        )
         layout.addLayout(form)
 
         self.model_status_label = QLabel("")
@@ -372,6 +393,8 @@ class AISettingsDialog(QDialog):
 
         self._ui_loading = False
         self._on_key_source_changed()
+        if self._restore_saved_model_selection(settings):
+            return
         self._lock_model_selector(
             _t(
                 self.ui_language,
@@ -406,8 +429,8 @@ class AISettingsDialog(QDialog):
                 _t(self.ui_language, "AI 设置", "AI Settings"),
                 _t(
                     self.ui_language,
-                    "请先点击“检测并加载模型”，并从可用模型下拉中选择一个模型。",
-                    "Please click 'Detect & Load Models' first and choose one model from the available-model dropdown.",
+                    "请先点击“检测并加载模型”，并从模型下拉列表中选择一个模型。",
+                    "Please click 'Detect & Load Models' first and choose one model from the dropdown list.",
                 ),
             )
             return
@@ -417,8 +440,8 @@ class AISettingsDialog(QDialog):
                 _t(self.ui_language, "AI 设置", "AI Settings"),
                 _t(
                     self.ui_language,
-                    "当前模型不在已检测可用模型列表中，请重新检测后选择。",
-                    "The selected model is not in the detected available-model list. Please detect again and reselect.",
+                    "当前模型不在已加载的模型列表中，请重新检测后选择。",
+                    "The selected model is not in the loaded model list. Please detect again and reselect.",
                 ),
             )
             return
@@ -532,23 +555,7 @@ class AISettingsDialog(QDialog):
         self.api_key_env_combo.blockSignals(False)
 
     def _populate_model_options(self, models: list[str], selected_model: str = "") -> None:
-        ordered: list[str] = []
-        seen: set[str] = set()
-
-        def push(raw: str) -> None:
-            text = str(raw or "").strip()
-            if not text:
-                return
-            key = text.casefold()
-            if key in seen:
-                return
-            seen.add(key)
-            ordered.append(text)
-
-        for item in models:
-            push(item)
-        if selected_model:
-            push(selected_model)
+        ordered = self._ordered_model_ids(models, selected_model)
 
         active = str(selected_model or "").strip()
         self.model_input.blockSignals(True)
@@ -568,6 +575,50 @@ class AISettingsDialog(QDialog):
             )
             self.model_input.setCurrentIndex(0)
         self.model_input.blockSignals(False)
+
+    @staticmethod
+    def _ordered_model_ids(models: list[str], selected_model: str = "") -> list[str]:
+        ordered: list[str] = []
+        seen: set[str] = set()
+
+        def push(raw: str) -> None:
+            text = str(raw or "").strip()
+            if not text:
+                return
+            key = text.casefold()
+            if key in seen:
+                return
+            seen.add(key)
+            ordered.append(text)
+
+        for item in models:
+            push(item)
+        if selected_model:
+            push(selected_model)
+        ordered.sort(key=lambda item: item.casefold())
+        return ordered
+
+    def _restore_saved_model_selection(self, settings: OpenAISettings) -> bool:
+        saved_model = str(settings.model or "").strip()
+        saved_catalog = self.context.settings.get_openai_model_catalog()
+        if saved_model and saved_model.casefold() not in {item.casefold() for item in saved_catalog}:
+            saved_catalog = [*saved_catalog, saved_model]
+        if not saved_catalog:
+            return False
+
+        saved_catalog = self._ordered_model_ids(saved_catalog)
+        preferred = saved_model or self._default_low_cost_model(saved_catalog)
+        self._detected_model_ids = list(saved_catalog)
+        self._populate_model_options(saved_catalog, preferred)
+        self._set_model_selector_enabled(True)
+        self.model_status_label.setText(
+            _t(
+                self.ui_language,
+                f"已恢复上次保存的模型设置：{preferred}。如需刷新完整模型列表，可点击“检测并加载模型”；当前模型可用性会在工作台后台自动校验。",
+                f"Restored the previously saved model selection: {preferred}. Click 'Detect & Load Models' to refresh the full model list; model availability is checked automatically in the workspace.",
+            )
+        )
+        return True
 
     def _set_model_selector_enabled(self, enabled: bool) -> None:
         self.model_input.setEnabled(enabled)
@@ -710,9 +761,21 @@ class AISettingsDialog(QDialog):
                 self.api_key_env_combo.setFocus(Qt.OtherFocusReason)
         self._on_api_credential_changed()
 
-    def _refresh_models(self, auto: bool = False) -> None:
+    def _refresh_models(self, auto: bool = False, preserve_existing: bool = False) -> None:
+        restored_models = list(self._detected_model_ids)
+        restored_model = self.model_input.currentText().strip()
         api_key, api_key_error = self._resolve_api_key_for_actions()
         if not api_key:
+            if preserve_existing and restored_models:
+                self._set_model_selector_enabled(True)
+                self.model_status_label.setText(
+                    _t(
+                        self.ui_language,
+                        f"未能完成本次验证：{api_key_error}。当前先保留上次保存的模型选择：{restored_model or self._default_low_cost_model(restored_models)}。",
+                        f"Could not revalidate now: {api_key_error}. Keeping the previously saved model selection for now: {restored_model or self._default_low_cost_model(restored_models)}.",
+                    )
+                )
+                return
             self._lock_model_selector(
                 _t(
                     self.ui_language,
@@ -731,102 +794,72 @@ class AISettingsDialog(QDialog):
         current_model = self.model_input.currentText().strip()
         base_url = self.context.settings.get_openai_base_url()
         stored_model = self.context.settings.get_openai_settings().model.strip()
-        detection_hints = [
-            os.getenv("AZURE_OPENAI_DEPLOYMENT", ""),
-            os.getenv("AZURE_OPENAI_MODEL", ""),
-            os.getenv("JOBFLOW_OPENAI_MODEL", ""),
-            current_model,
-            stored_model,
-        ]
         self.refresh_models_button.setEnabled(False)
         request_title = _t(self.ui_language, "AI 设置", "AI Settings")
         request_message = _t(
             self.ui_language,
-            "正在检测可用模型，请稍候...",
-            "Detecting usable models, please wait...",
+            "正在加载模型列表，请稍候...",
+            "Loading model list, please wait...",
         )
+        model_list_timeout_seconds = 12 if auto else 20
 
         def _task() -> dict[str, Any]:
             result = fetch_available_models(
                 api_key=api_key,
                 api_base_url=base_url,
-                timeout_seconds=5,
+                timeout_seconds=model_list_timeout_seconds,
             )
-            usable_models: list[str] = []
-            if result.models:
-                usable_models = filter_response_usable_models(
-                    api_key=api_key,
-                    models=result.models,
-                    api_base_url=base_url,
-                    timeout_seconds=4,
-                    max_probe=4,
-                    preferred_models=detection_hints,
-                    stop_after=1,
-                    probe_fallback=False,
-                )
-            return {
-                "result": result,
-                "usable_models": usable_models,
-            }
+            return {"result": result}
 
         def _on_success(payload: Any) -> None:
             data = payload if isinstance(payload, dict) else {}
             result = data.get("result")
-            usable_models = data.get("usable_models") if isinstance(data.get("usable_models"), list) else []
             if result is not None and getattr(result, "models", None):
-                if not usable_models:
-                    self._detected_model_ids = []
-                    self._populate_model_options([], "")
-                    self._lock_model_selector(
-                        _t(
-                            self.ui_language,
-                            "模型探测到列表，但未验证出可用模型。请检查 API 权限、区域和部署配置。",
-                            "Models were listed, but none were verified as usable. Check API permission, region, and deployment configuration.",
-                        )
-                    )
-                    if not auto:
-                        QMessageBox.warning(
-                            self,
-                            request_title,
-                            _t(
-                                self.ui_language,
-                                "未验证到可用模型，模型栏保持锁定。请检查 API 凭据后重试。",
-                                "No usable model could be verified. Model selector remains locked. Check API credentials and retry.",
-                            ),
-                        )
-                    return
-
-                current_available = {item.casefold() for item in usable_models}
-                fallback_default = self._default_low_cost_model(usable_models)
-                if (not current_model) or (current_model.casefold() not in current_available) or (
-                    current_model.casefold() in {"gpt-5", "gpt5", "default"}
-                ):
+                loaded_models = self._ordered_model_ids(result.models)
+                current_available = {item.casefold() for item in loaded_models}
+                fallback_default = loaded_models[0] if loaded_models else ""
+                preferred = ""
+                for candidate in (current_model, stored_model):
+                    text = str(candidate or "").strip()
+                    if text and text.casefold() in current_available:
+                        preferred = text
+                        break
+                if not preferred:
                     preferred = fallback_default
-                else:
-                    preferred = current_model
-                self._detected_model_ids = usable_models
-                self._populate_model_options(usable_models, preferred)
-                self.context.settings.save_openai_model_catalog(usable_models)
-                self.model_status_label.setText(
-                    _t(
-                        self.ui_language,
-                        f"检测完成：发现 {len(result.models)} 个模型，验证可用 {len(usable_models)} 个。默认已选择低成本模型：{preferred}",
-                        f"Detection completed: {len(result.models)} discovered, {len(usable_models)} verified usable. Low-cost default selected: {preferred}",
-                    )
+                self._detected_model_ids = loaded_models
+                self._populate_model_options(loaded_models, preferred)
+                self.context.settings.save_openai_model_catalog(loaded_models)
+                status_text = _t(
+                    self.ui_language,
+                    f"模型列表已更新：共加载 {len(loaded_models)} 个模型，已按字母顺序排序。当前选择：{preferred or '未选择'}。模型可用性会在工作台后台自动校验。",
+                    f"Model list updated: {len(loaded_models)} models loaded and sorted alphabetically. Current selection: {preferred or 'none'}. Model availability is checked automatically in the workspace.",
                 )
+                self.model_status_label.setText(status_text)
                 self._set_model_selector_enabled(True)
                 return
 
             error_text = ""
             if result is not None:
                 error_text = str(getattr(result, "error", "") or "")
+            if preserve_existing and restored_models:
+                self._detected_model_ids = restored_models
+                self._populate_model_options(restored_models, restored_model)
+                self._set_model_selector_enabled(True)
+                self.model_status_label.setText(
+                    _t(
+                        self.ui_language,
+                        f"本次未能获取模型列表：{error_text or '未知错误'}。当前先保留上次保存的模型选择。",
+                        f"Could not load the model list this time: {error_text or 'unknown error'}. Keeping the previously saved model selection for now.",
+                    )
+                )
+                return
             self._detected_model_ids = []
             self._populate_model_options([], "")
             self._lock_model_selector(
                 _t(
                     self.ui_language,
-                    f"模型探测失败：{error_text or '未知错误'}",
-                    f"Model discovery failed: {error_text or 'unknown error'}",
+                    f"模型列表加载失败：{error_text or '未知错误'}",
+                    f"Model list loading failed: {error_text or 'unknown error'}",
                 )
             )
             if not auto:
@@ -836,18 +869,30 @@ class AISettingsDialog(QDialog):
                     _t(
                         self.ui_language,
                         "未获取到模型列表，模型栏保持锁定。请检查 API 凭据后重试。",
-                        "Could not fetch model list. Model selector remains locked. Check API credentials and try again.",
+                        "Could not load the model list. Model selector remains locked. Check API credentials and try again.",
                     ),
                 )
 
         def _on_error(exc: Exception) -> None:
+            if preserve_existing and restored_models:
+                self._detected_model_ids = restored_models
+                self._populate_model_options(restored_models, restored_model)
+                self._set_model_selector_enabled(True)
+                self.model_status_label.setText(
+                    _t(
+                        self.ui_language,
+                        f"本次加载模型列表失败：{exc}。当前先保留上次保存的模型选择。",
+                        f"Loading the model list failed this time: {exc}. Keeping the previously saved model selection for now.",
+                    )
+                )
+                return
             self._detected_model_ids = []
             self._populate_model_options([], "")
             self._lock_model_selector(
                 _t(
                     self.ui_language,
-                    f"模型探测失败：{exc}",
-                    f"Model discovery failed: {exc}",
+                    f"模型列表加载失败：{exc}",
+                    f"Model list loading failed: {exc}",
                 )
             )
             if not auto:
@@ -868,7 +913,6 @@ class AISettingsDialog(QDialog):
             on_success=_on_success,
             on_error=_on_error,
             on_finally=_on_finally,
-            timeout_ms=25000,
         )
         if not started:
             self.refresh_models_button.setEnabled(True)
@@ -1454,11 +1498,18 @@ class CandidateDirectoryPage(QWidget):
         language_row = QHBoxLayout()
         language_row.setContentsMargins(0, 0, 0, 0)
         language_row.setSpacing(8)
-        self.language_label = QLabel(_t(self.ui_language, "界面语言", "UI Language"))
+        self.language_label = QLabel(_t(self.ui_language, "🌐 语言 / Language", "🌐 Language / 语言"))
         self.language_label.setObjectName("MutedLabel")
         self.language_combo = QComboBox()
-        self.language_combo.addItem("中文", "zh")
-        self.language_combo.addItem("English", "en")
+        self.language_combo.addItem("🌐 中文 / Chinese", "zh")
+        self.language_combo.addItem("🌐 English", "en")
+        self.language_combo.setToolTip(
+            _t(
+                self.ui_language,
+                "切换桌面应用界面语言。",
+                "Switch the desktop app interface language.",
+            )
+        )
         self.language_combo.blockSignals(True)
         self.language_combo.setCurrentIndex(1 if self.ui_language == "en" else 0)
         self.language_combo.blockSignals(False)
@@ -1857,12 +1908,6 @@ class StrategyStep(QWidget):
         )
         self.keyword_focus_input.setMinimumHeight(72)
 
-        self.company_seed_input = QPlainTextEdit()
-        self.company_seed_input.setPlaceholderText(
-            "可选。AI 或你手动确认后的初始公司清单，一行一个，例如：\nSiemens Energy\nLinde\nToyota"
-        )
-        self.company_seed_input.setMinimumHeight(72)
-
         self.queries_input = QPlainTextEdit()
         self.queries_input.setPlaceholderText(
             "公开岗位搜索语句，一行一个。例如：\nsite:careers.company.com systems engineer job"
@@ -1874,7 +1919,6 @@ class StrategyStep(QWidget):
         form.addRow("目标公司类型", self.company_focus_input)
         form.addRow("搜索公司的关键词", self.company_keyword_input)
         form.addRow("搜索岗位的关键词", self.keyword_focus_input)
-        form.addRow("初始公司清单（可选）", self.company_seed_input)
         form.addRow("公开岗位搜索语句", self.queries_input)
         direction_layout.addLayout(form)
         layout.addWidget(direction_card, 1)
@@ -1919,7 +1963,6 @@ class StrategyStep(QWidget):
             self.company_focus_input,
             self.company_keyword_input,
             self.keyword_focus_input,
-            self.company_seed_input,
             self.queries_input,
         ):
             widget.setEnabled(enabled)
@@ -1959,7 +2002,6 @@ class StrategyStep(QWidget):
         self.company_focus_input.setPlainText(profile.company_focus)
         self.company_keyword_input.setPlainText(profile.company_keyword_focus)
         self.keyword_focus_input.setPlainText(profile.keyword_focus)
-        self.company_seed_input.setPlainText(profile.company_seed_list)
         self.queries_input.setPlainText("\n".join(profile.queries))
         self.profile_meta_label.setText(
             f"当前路线：{scope_label(profile.scope_profile)}    ·    最近更新：{profile.updated_at or '-'}"
@@ -1972,7 +2014,6 @@ class StrategyStep(QWidget):
         self.company_focus_input.clear()
         self.company_keyword_input.clear()
         self.keyword_focus_input.clear()
-        self.company_seed_input.clear()
         self.queries_input.clear()
         if self.current_candidate_id is not None:
             self.profile_meta_label.setText(
@@ -2032,7 +2073,6 @@ class StrategyStep(QWidget):
                     company_keyword_focus=self.company_keyword_input.toPlainText(),
                     role_name_i18n=existing_profile.role_name_i18n if existing_profile is not None else "",
                     keyword_focus=self.keyword_focus_input.toPlainText(),
-                    company_seed_list=self.company_seed_input.toPlainText(),
                     is_active=True,
                     queries=self.queries_input.toPlainText().splitlines(),
                 )
@@ -2495,7 +2535,6 @@ class TargetDirectionStep(QWidget):
                 company_keyword_focus=profile.company_keyword_focus,
                 role_name_i18n=updated_role_name_i18n,
                 keyword_focus=updated_keyword_focus,
-                company_seed_list=profile.company_seed_list,
                 is_active=profile.is_active,
                 queries=profile.queries,
             )
@@ -2513,7 +2552,6 @@ class TargetDirectionStep(QWidget):
                 company_keyword_focus=profile.company_keyword_focus,
                 role_name_i18n=updated_role_name_i18n,
                 keyword_focus=updated_keyword_focus,
-                company_seed_list=profile.company_seed_list,
                 is_active=profile.is_active,
                 queries=profile.queries,
                 created_at=profile.created_at,
@@ -2570,7 +2608,6 @@ class TargetDirectionStep(QWidget):
                 company_keyword_focus=profile.company_keyword_focus,
                 role_name_i18n=profile.role_name_i18n,
                 keyword_focus=profile.keyword_focus,
-                company_seed_list=profile.company_seed_list,
                 is_active=item.checkState() == Qt.Checked,
                 queries=profile.queries,
             )
@@ -2682,7 +2719,6 @@ class TargetDirectionStep(QWidget):
                             suggestion.description_zh,
                             suggestion.description_en,
                         ),
-                        company_seed_list="",
                         is_active=True,
                         queries=[],
                     )
@@ -2875,7 +2911,6 @@ class TargetDirectionStep(QWidget):
                     company_keyword_focus="",
                     role_name_i18n=role_name_i18n,
                     keyword_focus=keyword_focus,
-                    company_seed_list="",
                     is_active=True,
                     queries=[],
                 )
@@ -3041,7 +3076,6 @@ class TargetDirectionStep(QWidget):
                         company_keyword_focus=existing_profile.company_keyword_focus if existing_profile is not None else "",
                         role_name_i18n=role_name_i18n,
                         keyword_focus=keyword_focus,
-                        company_seed_list=existing_profile.company_seed_list if existing_profile is not None else "",
                         is_active=is_active,
                         queries=existing_profile.queries if existing_profile is not None else [],
                     )
@@ -3167,6 +3201,17 @@ class SearchResultsStep(QWidget):
         self.target_role_candidates: list[str] = []
         self.status_by_job_key: dict[str, str] = {}
         self.hidden_job_keys: set[str] = set()
+        self._live_results_timer = QTimer(self)
+        self._live_results_timer.setInterval(2500)
+        self._live_results_timer.timeout.connect(self._refresh_live_results)
+        self._live_results_candidate_id: int | None = None
+        self._live_results_last_count = -1
+        self._live_results_signature: tuple[tuple[object, ...], ...] = ()
+        self._search_cancel_event: threading.Event | None = None
+        self._notification_toast: QFrame | None = None
+        self._notification_timer = QTimer(self)
+        self._notification_timer.setSingleShot(True)
+        self._notification_timer.timeout.connect(self._hide_notification_toast)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -3197,12 +3242,25 @@ class SearchResultsStep(QWidget):
         self.results_meta_label.setWordWrap(True)
         control_layout.addWidget(self.results_meta_label)
 
+        self.results_stats_label = QLabel(
+            _t(
+                self.ui_language,
+                "内部统计：未选择求职者。",
+                "Internal stats: no candidate selected.",
+            )
+        )
+        self.results_stats_label.setObjectName("MutedLabel")
+        self.results_stats_label.setWordWrap(True)
+        control_layout.addWidget(self.results_stats_label)
+
         button_row = QHBoxLayout()
         button_row.setContentsMargins(0, 0, 0, 0)
         button_row.setSpacing(10)
         self.refresh_button = styled_button(_t(self.ui_language, "寻找更多岗位", "Find More Jobs"), "primary")
+        self.stop_button = styled_button(_t(self.ui_language, "停止搜索", "Stop Search"), "secondary")
         self.delete_button = styled_button(_t(self.ui_language, "删除所选岗位", "Delete Selected Jobs"), "danger")
         button_row.addWidget(self.refresh_button)
+        button_row.addWidget(self.stop_button)
         button_row.addWidget(self.delete_button)
         button_row.addStretch(1)
         control_layout.addLayout(button_row)
@@ -3219,31 +3277,39 @@ class SearchResultsStep(QWidget):
                 _t(self.ui_language, "针对岗位", "Target Role"),
                 _t(self.ui_language, "公司", "Company"),
                 _t(self.ui_language, "地点", "Location"),
-                _t(self.ui_language, "官网链接", "Official Link"),
+                _t(self.ui_language, "职位详情链接", "Job Details Link"),
                 _t(self.ui_language, "发现时间", "Found Time"),
                 _t(self.ui_language, "匹配性评分", "Match Score"),
                 _t(self.ui_language, "状态", "Status"),
             ]
         )
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeToContents)
+        header = self.table.horizontalHeader()
+        header.setStretchLastSection(False)
+        for column in range(self.table.columnCount()):
+            header.setSectionResizeMode(column, QHeaderView.Interactive)
+        self.table.setColumnWidth(0, 300)
+        self.table.setColumnWidth(1, 240)
+        self.table.setColumnWidth(2, 200)
+        self.table.setColumnWidth(3, 160)
+        self.table.setColumnWidth(4, 320)
+        self.table.setColumnWidth(5, 150)
+        self.table.setColumnWidth(6, 120)
+        self.table.setColumnWidth(7, 130)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.ExtendedSelection)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)
         table_layout.addWidget(self.table)
         layout.addWidget(table_card, 1)
 
         self.refresh_button.clicked.connect(self._run_search)
+        self.stop_button.clicked.connect(self._stop_search)
         self.delete_button.clicked.connect(self._delete_selected_rows)
 
     def set_candidate(self, candidate: CandidateRecord | None) -> None:
+        self._stop_live_results_updates()
         self.table.setRowCount(0)
+        self._live_results_signature = ()
         if candidate is None or candidate.candidate_id is None:
             self.current_candidate_id = None
             self.current_candidate_name = ""
@@ -3258,7 +3324,10 @@ class SearchResultsStep(QWidget):
                 )
             )
             self.refresh_button.setEnabled(False)
+            self.stop_button.setEnabled(False)
             self.delete_button.setEnabled(False)
+            self._search_cancel_event = None
+            self._refresh_results_stats_label()
             return
 
         self.current_candidate_id = candidate.candidate_id
@@ -3267,6 +3336,7 @@ class SearchResultsStep(QWidget):
         self.target_role_candidates = self._build_target_role_candidates(profiles)
         self._load_review_state(candidate.candidate_id)
         self.refresh_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
         self.delete_button.setEnabled(True)
         self.results_meta_label.setText(
             _t(
@@ -3275,19 +3345,57 @@ class SearchResultsStep(QWidget):
                 f"Current candidate: {candidate.name}. Click 'Find More Jobs' to continue discovery, with newest results shown first.",
             )
         )
+        self._refresh_results_stats_label()
         self._reload_existing_results(candidate.candidate_id)
 
     def _reload_existing_results(self, candidate_id: int) -> None:
         jobs = self.runner.load_recommended_jobs(candidate_id)
         visible_count = self._render_jobs(jobs)
+        pending_count = self._main_pending_analysis_count(candidate_id)
         if visible_count > 0:
             self.results_meta_label.setText(
                 _t(
                     self.ui_language,
-                    f"当前求职者：{self.current_candidate_name}。已加载最近一次运行结果，共 {visible_count} 条。",
-                    f"Current candidate: {self.current_candidate_name}. Loaded latest run results: {visible_count} item(s).",
+                    (
+                        f"当前求职者：{self.current_candidate_name}。已加载最近一次运行结果，共 {visible_count} 条；"
+                        f"另有 {pending_count} 条上次未补完，只有再次点击“寻找更多岗位”时才会继续处理。"
+                        if pending_count > 0
+                        else f"当前求职者：{self.current_candidate_name}。已加载最近一次运行结果，共 {visible_count} 条。"
+                    ),
+                    (
+                        f"Current candidate: {self.current_candidate_name}. Loaded latest run results: {visible_count} item(s); "
+                        f"{pending_count} unfinished main-stage job(s) from the last run will resume only after you click 'Find More Jobs' again."
+                        if pending_count > 0
+                        else f"Current candidate: {self.current_candidate_name}. Loaded latest run results: {visible_count} item(s)."
+                    ),
                 )
             )
+        elif pending_count > 0:
+            self.results_meta_label.setText(
+                _t(
+                    self.ui_language,
+                    f"当前求职者：{self.current_candidate_name}。当前还没有可展示结果；另有 {pending_count} 条上次未补完，只有再次点击“寻找更多岗位”时才会继续处理。",
+                    f"Current candidate: {self.current_candidate_name}. There are no displayable results yet; {pending_count} unfinished main-stage job(s) from the last run will resume only after you click 'Find More Jobs' again.",
+                )
+            )
+        self._refresh_results_stats_label()
+        self._live_results_last_count = visible_count
+
+    def _stop_search(self) -> None:
+        cancel_event = self._search_cancel_event
+        running_thread = getattr(self, "_busy_task_thread", None)
+        if cancel_event is None or not isinstance(running_thread, QThread) or not running_thread.isRunning():
+            self.stop_button.setEnabled(False)
+            return
+        cancel_event.set()
+        self.stop_button.setEnabled(False)
+        self.results_meta_label.setText(
+            _t(
+                self.ui_language,
+                f"当前求职者：{self.current_candidate_name}。已请求停止后台搜索，正在等待当前子阶段安全结束。",
+                f"Current candidate: {self.current_candidate_name}. Stop requested. Waiting for the current background stage to end safely.",
+            )
+        )
 
     def _run_search(self) -> None:
         if self.current_candidate_id is None:
@@ -3321,12 +3429,24 @@ class SearchResultsStep(QWidget):
             return
 
         candidate_id = int(self.current_candidate_id)
+        pending_before_run = self._main_pending_analysis_count(candidate_id)
+        self._search_cancel_event = threading.Event()
         self.refresh_button.setEnabled(False)
+        self.stop_button.setEnabled(True)
+        self._live_results_last_count = -1
         self.results_meta_label.setText(
             _t(
                 self.ui_language,
-                f"当前求职者：{candidate.name}。正在搜索岗位，请稍候...",
-                f"Current candidate: {candidate.name}. Searching jobs, please wait...",
+                (
+                    f"当前求职者：{candidate.name}。正在搜索岗位；会先补完上次未完成的 {pending_before_run} 条主流程岗位，再继续寻找新的岗位。"
+                    if pending_before_run > 0
+                    else f"当前求职者：{candidate.name}。正在后台搜索岗位；只有找到新岗位或结果发生变化时才会刷新列表。你可以继续操作，搜索会在后台持续运行。"
+                ),
+                (
+                    f"Current candidate: {candidate.name}. Searching jobs; {pending_before_run} unfinished main-stage job(s) from the last run will be completed first, then discovery continues."
+                    if pending_before_run > 0
+                    else f"Current candidate: {candidate.name}. Searching jobs in the background; the list refreshes only when new jobs or updated results appear. You can keep working while search continues."
+                ),
             )
         )
 
@@ -3336,6 +3456,7 @@ class SearchResultsStep(QWidget):
                 profiles=active_profiles,
                 settings=self.context.settings.get_effective_openai_settings(),
                 api_base_url=self.context.settings.get_openai_base_url(),
+                cancel_event=self._search_cancel_event,
             )
 
         def _on_success(result: Any) -> None:
@@ -3346,6 +3467,27 @@ class SearchResultsStep(QWidget):
                     self,
                     _t(self.ui_language, "岗位搜索结果", "Search Results"),
                     _t(self.ui_language, "运行结果格式异常。", "Unexpected run result payload."),
+                )
+                return
+            if getattr(result, "cancelled", False):
+                jobs = self.runner.load_recommended_jobs(candidate_id)
+                visible_count = self._render_jobs(jobs)
+                self._refresh_results_stats_label()
+                self.results_meta_label.setText(
+                    _t(
+                        self.ui_language,
+                        f"当前求职者：{candidate.name}。后台搜索已停止，当前保留已完成落盘的结果（{visible_count} 条）。",
+                        f"Current candidate: {candidate.name}. Background search stopped. Any fully persisted results have been kept ({visible_count} item(s)).",
+                    )
+                )
+                self._show_notification_toast(
+                    _t(
+                        self.ui_language,
+                        f"岗位搜索已停止，当前保留 {visible_count} 条结果。",
+                        f"Job search stopped. Kept {visible_count} result(s).",
+                    ),
+                    level="warning",
+                    duration_ms=4500,
                 )
                 return
             if not result.success:
@@ -3366,21 +3508,41 @@ class SearchResultsStep(QWidget):
 
             jobs = self.runner.load_recommended_jobs(candidate_id)
             visible_count = self._render_jobs(jobs)
+            self._refresh_results_stats_label()
+            pending_after_run = self._main_pending_analysis_count(candidate_id)
             self.results_meta_label.setText(
                 _t(
                     self.ui_language,
-                    f"当前求职者：{candidate.name}。搜索已完成，当前展示 {visible_count} 条结果。",
-                    f"Current candidate: {candidate.name}. Search finished, now showing {visible_count} result(s).",
+                    (
+                        f"当前求职者：{candidate.name}。搜索已完成，当前展示 {visible_count} 条结果；"
+                        f"仍有 {pending_after_run} 条主流程岗位待补完，下次点击“寻找更多岗位”时会优先继续处理。"
+                        if pending_after_run > 0
+                        else f"当前求职者：{candidate.name}。搜索已完成，当前展示 {visible_count} 条结果。"
+                    ),
+                    (
+                        f"Current candidate: {candidate.name}. Search finished, now showing {visible_count} result(s); "
+                        f"{pending_after_run} main-stage job(s) are still pending and will resume first the next time you click 'Find More Jobs'."
+                        if pending_after_run > 0
+                        else f"Current candidate: {candidate.name}. Search finished, now showing {visible_count} result(s)."
+                    ),
                 )
             )
-            QMessageBox.information(
-                self,
-                _t(self.ui_language, "岗位搜索结果", "Search Results"),
-                _t(
-                    self.ui_language,
-                    f"搜索执行完成，已刷新结果列表（{visible_count} 条）。",
-                    f"Search completed. Refreshed result list ({visible_count} item(s)).",
+            self._show_notification_toast(
+                (
+                    _t(
+                        self.ui_language,
+                        f"岗位搜索已完成，当前展示 {visible_count} 条结果。",
+                        f"Job search finished. Showing {visible_count} result(s).",
+                    )
+                    if visible_count > 0
+                    else _t(
+                        self.ui_language,
+                        "岗位搜索已完成，当前没有可展示结果。",
+                        "Job search finished. No displayable results yet.",
+                    )
                 ),
+                level="success",
+                duration_ms=5000,
             )
 
         def _on_error(exc: Exception) -> None:
@@ -3392,6 +3554,7 @@ class SearchResultsStep(QWidget):
                         f"Current candidate: {candidate.name}. Run failed: {exc}",
                     )
                 )
+                self._refresh_results_stats_label()
             QMessageBox.warning(
                 self,
                 _t(self.ui_language, "岗位搜索结果", "Search Results"),
@@ -3399,34 +3562,201 @@ class SearchResultsStep(QWidget):
             )
 
         def _on_finally() -> None:
+            self._stop_live_results_updates()
             self.refresh_button.setEnabled(self.current_candidate_id is not None)
+            self.stop_button.setEnabled(False)
+            self._search_cancel_event = None
+            self._refresh_results_stats_label()
 
         started = run_busy_task(
             self,
             title=_t(self.ui_language, "岗位搜索结果", "Search Results"),
             message=_t(
                 self.ui_language,
-                "系统正在后台搜索岗位，请稍候...",
-                "Searching jobs in background, please wait...",
+                "系统正在后台搜索岗位；只有发现新岗位或结果变化时才会刷新列表。你可以继续操作，搜索会在后台持续运行。",
+                "Searching jobs in the background; the list refreshes only when new jobs or updated results appear. You can keep working while search continues.",
             ),
             task=_task,
             on_success=_on_success,
             on_error=_on_error,
             on_finally=_on_finally,
+            show_dialog=False,
         )
         if not started:
             self.refresh_button.setEnabled(self.current_candidate_id is not None)
+            self.stop_button.setEnabled(False)
+            self._search_cancel_event = None
+            self._stop_live_results_updates()
+            return
+        self._start_live_results_updates(candidate_id)
 
-    def _render_jobs(self, jobs: list[LegacyJobResult]) -> int:
-        self.table.setRowCount(0)
+    def _visible_jobs(self, jobs: list[LegacyJobResult]) -> list[LegacyJobResult]:
         sorted_jobs = sorted(
             jobs,
             key=lambda item: self._parse_date_found(item.date_found),
             reverse=True,
         )
-        visible_jobs = [item for item in sorted_jobs if self._job_key(item) not in self.hidden_job_keys]
+        return [item for item in sorted_jobs if self._job_key(item) not in self.hidden_job_keys]
+
+    def _job_render_signature(self, job: LegacyJobResult) -> tuple[object, ...]:
+        detail_url, final_url, link_status = self._job_link_details(job)
+        return (
+            str(job.url or "").strip().casefold(),
+            detail_url.casefold(),
+            final_url.casefold(),
+            link_status.casefold(),
+            str(job.title or "").strip(),
+            str(job.company or "").strip(),
+            str(job.location or "").strip(),
+            str(job.date_found or "").strip(),
+            job.match_score,
+            bool(job.recommend),
+            str(job.fit_level_cn or "").strip(),
+            str(job.fit_track or "").strip(),
+            str(job.adjacent_direction_cn or "").strip(),
+        )
+
+    def _jobs_signature(self, jobs: list[LegacyJobResult]) -> tuple[tuple[object, ...], ...]:
+        return tuple(self._job_render_signature(job) for job in jobs)
+
+    def _sync_live_results_signature(self) -> None:
+        if self.current_candidate_id is None:
+            self._live_results_signature = ()
+            return
+        jobs = self.runner.load_live_jobs(self.current_candidate_id)
+        if not jobs:
+            jobs = self.runner.load_recommended_jobs(self.current_candidate_id)
+        self._live_results_signature = self._jobs_signature(self._visible_jobs(jobs))
+
+    def _main_pending_analysis_count(self, candidate_id: int | None = None) -> int:
+        target_candidate_id = candidate_id if candidate_id is not None else self.current_candidate_id
+        if target_candidate_id is None:
+            return 0
+        try:
+            stats = self.runner.load_search_stats(int(target_candidate_id))
+        except Exception:
+            return 0
+        return max(0, int(getattr(stats, "main_pending_analysis_count", 0) or 0))
+
+    @staticmethod
+    def _format_elapsed_text(seconds: int) -> str:
+        total = max(0, int(seconds or 0))
+        minutes, remaining_seconds = divmod(total, 60)
+        hours, remaining_minutes = divmod(minutes, 60)
+        if hours > 0:
+            return f"{hours}h {remaining_minutes}m {remaining_seconds}s"
+        if minutes > 0:
+            return f"{minutes}m {remaining_seconds}s"
+        return f"{remaining_seconds}s"
+
+    def _search_progress_text(self, candidate_id: int | None) -> tuple[str, str]:
+        if candidate_id is None:
+            return "", ""
+        try:
+            progress = self.runner.load_search_progress(int(candidate_id))
+        except Exception:
+            return "", ""
+        if str(getattr(progress, "status", "") or "").strip().lower() != "running":
+            return "", ""
+
+        stage = str(getattr(progress, "stage", "") or "").strip().lower()
+        stage_label = {
+            "preparing": _t(self.ui_language, "准备环境", "Preparing"),
+            "resume_pending": _t(self.ui_language, "补完待处理岗位", "Resuming pending jobs"),
+            "web_signal": _t(self.ui_language, "初始信号搜索", "Web signal"),
+            "main": _t(self.ui_language, "主流程分析", "Main stage"),
+            "completed": _t(self.ui_language, "已完成", "Completed"),
+        }.get(stage, _t(self.ui_language, "后台处理中", "Background work"))
+        elapsed_text = self._format_elapsed_text(int(getattr(progress, "elapsed_seconds", 0) or 0))
+        detail = str(getattr(progress, "last_event", "") or getattr(progress, "message", "") or "").strip()
+        dialog_text = _t(
+            self.ui_language,
+            f"系统正在后台搜索岗位，当前阶段：{stage_label}，已运行 {elapsed_text}。你可以继续操作，搜索会在后台持续运行。",
+            f"Searching jobs in the background. Current stage: {stage_label}, elapsed {elapsed_text}. You can keep working while search continues.",
+        )
+        if detail:
+            page_text = _t(
+                self.ui_language,
+                f"当前求职者：{self.current_candidate_name}。后台正在{stage_label}，已运行 {elapsed_text}。最新进度：{detail}",
+                f"Current candidate: {self.current_candidate_name}. Background work is in {stage_label}, elapsed {elapsed_text}. Latest progress: {detail}",
+            )
+        else:
+            page_text = _t(
+                self.ui_language,
+                f"当前求职者：{self.current_candidate_name}。后台正在{stage_label}，已运行 {elapsed_text}。",
+                f"Current candidate: {self.current_candidate_name}. Background work is in {stage_label}, elapsed {elapsed_text}.",
+            )
+        return page_text, dialog_text
+
+    def _set_busy_task_message(self, text: str) -> None:
+        dialog = getattr(self, "_busy_task_dialog", None)
+        if isinstance(dialog, QProgressDialog) and str(text or "").strip():
+            dialog.setLabelText(text)
+
+    def _hide_notification_toast(self) -> None:
+        toast = self._notification_toast
+        self._notification_toast = None
+        if isinstance(toast, QFrame):
+            toast.hide()
+            toast.deleteLater()
+
+    def _show_notification_toast(self, text: str, level: str = "info", duration_ms: int = 5000) -> None:
+        message = str(text or "").strip()
+        if not message:
+            return
+        self._notification_timer.stop()
+        self._hide_notification_toast()
+
+        host = self.window() if isinstance(self.window(), QWidget) else self
+        background = "#102a43"
+        border = "#1f7a8c"
+        if level == "success":
+            background = "#0f5132"
+            border = "#198754"
+        elif level == "warning":
+            background = "#5c3900"
+            border = "#f59f00"
+        elif level == "error":
+            background = "#58151c"
+            border = "#dc3545"
+
+        toast = QFrame(host)
+        toast.setFrameShape(QFrame.StyledPanel)
+        toast.setStyleSheet(
+            f"background: {background}; border: 1px solid {border}; border-radius: 12px; color: #f8fafc;"
+        )
+        layout = QVBoxLayout(toast)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(0)
+        label = QLabel(message, toast)
+        label.setWordWrap(True)
+        label.setStyleSheet("color: #f8fafc; background: transparent;")
+        layout.addWidget(label)
+        toast.setMaximumWidth(420)
+        toast.adjustSize()
+        host_rect = host.rect()
+        x = max(16, host_rect.width() - toast.width() - 20)
+        y = max(16, host_rect.height() - toast.height() - 28)
+        toast.move(x, y)
+        toast.show()
+        toast.raise_()
+        self._notification_toast = toast
+        self._notification_timer.start(max(1500, int(duration_ms)))
+
+        if hasattr(host, "statusBar"):
+            try:
+                host.statusBar().showMessage(message, max(1500, int(duration_ms)))
+            except Exception:
+                pass
+
+    def _render_jobs(self, jobs: list[LegacyJobResult]) -> int:
+        return self._render_visible_jobs(self._visible_jobs(jobs))
+
+    def _render_visible_jobs(self, visible_jobs: list[LegacyJobResult]) -> int:
+        self.table.setRowCount(0)
         for row_index, job in enumerate(visible_jobs):
             job_key = self._job_key(job)
+            detail_url, _final_url, _link_status = self._job_link_details(job)
             self.table.insertRow(row_index)
             title_item = QTableWidgetItem(job.title)
             title_item.setData(Qt.UserRole, job_key)
@@ -3435,19 +3765,7 @@ class SearchResultsStep(QWidget):
             self.table.setItem(row_index, 2, QTableWidgetItem(job.company))
             self.table.setItem(row_index, 3, QTableWidgetItem(job.location))
 
-            if job.url.strip():
-                link_host = (
-                    urlparse(job.url.strip()).netloc.replace("www.", "").strip()
-                    or _t(self.ui_language, "打开链接", "Open link")
-                )
-                link_widget = QLabel(f'<a href="{escape(job.url.strip(), quote=True)}">{escape(link_host)}</a>')
-                link_widget.setOpenExternalLinks(True)
-                link_widget.setTextInteractionFlags(Qt.TextBrowserInteraction)
-                link_widget.setAlignment(Qt.AlignCenter)
-                self.table.setCellWidget(row_index, 4, link_widget)
-            else:
-                self.table.setItem(row_index, 4, QTableWidgetItem("-"))
-
+            self.table.setCellWidget(row_index, 4, self._make_link_cell(detail_url, True))
             self.table.setItem(row_index, 5, QTableWidgetItem(job.date_found))
             self.table.setItem(row_index, 6, QTableWidgetItem(self._format_score(job)))
 
@@ -3463,7 +3781,198 @@ class SearchResultsStep(QWidget):
                 lambda text, key=job_key, combo=status_combo: self._on_status_changed(key, text, combo)
             )
             self.table.setCellWidget(row_index, 7, status_combo)
+        self._live_results_signature = self._jobs_signature(visible_jobs)
         return len(visible_jobs)
+
+    @staticmethod
+    def _first_non_empty(*values: Any) -> str:
+        for value in values:
+            text = str(value or "").strip()
+            if text:
+                return text
+        return ""
+
+    @staticmethod
+    def _link_host_text(url: str, fallback: str) -> str:
+        text = str(url or "").strip()
+        if not text:
+            return fallback
+        parsed = urlparse(text)
+        host = str(parsed.netloc or "").replace("www.", "").strip()
+        if host:
+            return host if len(host) <= 32 else f"{host[:31]}…"
+        path = str(parsed.path or "").strip("/")
+        if path:
+            tail = path.rsplit("/", 1)[-1].strip()
+            if tail:
+                return tail if len(tail) <= 32 else f"{tail[:31]}…"
+        return fallback
+
+    @staticmethod
+    def _make_link_widget(url: str, label: str) -> QLabel:
+        safe_url = str(url or "").strip()
+        safe_label = str(label or "").strip() or safe_url
+        if safe_url:
+            widget = QLabel(f'<a href="{escape(safe_url, quote=True)}">{escape(safe_label)}</a>')
+            widget.setOpenExternalLinks(True)
+            widget.setTextFormat(Qt.RichText)
+        else:
+            widget = QLabel(safe_label)
+            widget.setTextFormat(Qt.PlainText)
+        widget.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        widget.setAlignment(Qt.AlignCenter)
+        widget.setToolTip(safe_url or safe_label)
+        return widget
+
+    def _make_link_cell(self, url: str, prefer_detail_label: bool) -> QLabel:
+        if not str(url or "").strip():
+            return self._make_link_widget("", "-")
+        fallback_label = _t(self.ui_language, "打开链接", "Open link")
+        label = self._link_host_text(url, fallback_label)
+        if prefer_detail_label:
+            label = _t(self.ui_language, f"详情 · {label}", f"Details · {label}")
+        return self._make_link_widget(url, label)
+
+    def _job_link_details(self, job: LegacyJobResult) -> tuple[str, str, str]:
+        detail_url = self._first_non_empty(
+            getattr(job, "source_url", ""),
+            getattr(job, "sourceUrl", ""),
+            getattr(job, "original_url", ""),
+            getattr(job, "originalUrl", ""),
+            getattr(job, "canonicalUrl", ""),
+            getattr(job, "url", ""),
+        )
+        final_url = self._first_non_empty(
+            getattr(job, "final_url", ""),
+            getattr(job, "finalUrl", ""),
+            getattr(job, "apply_url", ""),
+            getattr(job, "applyUrl", ""),
+            getattr(job, "apply_link", ""),
+            getattr(job, "applyLink", ""),
+            getattr(job, "application_url", ""),
+            getattr(job, "applicationUrl", ""),
+            getattr(job, "canonicalUrl", ""),
+            getattr(job, "url", ""),
+            detail_url,
+        )
+        if not detail_url:
+            detail_url = final_url
+        if not final_url:
+            final_url = detail_url
+        link_status = self._first_non_empty(
+            getattr(job, "link_status", ""),
+            getattr(job, "linkStatus", ""),
+            getattr(job, "final_url_status", ""),
+            getattr(job, "finalUrlStatus", ""),
+            getattr(job, "apply_url_status", ""),
+            getattr(job, "applyUrlStatus", ""),
+            getattr(job, "source_url_status", ""),
+            getattr(job, "sourceUrlStatus", ""),
+            getattr(job, "url_status", ""),
+            getattr(job, "urlStatus", ""),
+            getattr(job, "link_state", ""),
+            getattr(job, "linkState", ""),
+            getattr(job, "link_state_cn", ""),
+            getattr(job, "linkStateCn", ""),
+            getattr(job, "link_state_label", ""),
+            getattr(job, "linkStateLabel", ""),
+        )
+        return detail_url, final_url, link_status
+
+    def _start_live_results_updates(self, candidate_id: int) -> None:
+        self._live_results_candidate_id = candidate_id
+        self._live_results_last_count = -1
+        self._refresh_live_results()
+        self._live_results_timer.start()
+
+    def _stop_live_results_updates(self) -> None:
+        self._live_results_timer.stop()
+        self._live_results_candidate_id = None
+
+    def _refresh_live_results(self) -> None:
+        candidate_id = self._live_results_candidate_id
+        if candidate_id is None or self.current_candidate_id != candidate_id:
+            return
+        self._refresh_results_stats_label()
+        progress_page_text, progress_dialog_text = self._search_progress_text(candidate_id)
+        if progress_dialog_text:
+            self._set_busy_task_message(progress_dialog_text)
+        jobs = self.runner.load_live_jobs(candidate_id)
+        visible_jobs = self._visible_jobs(jobs)
+        if visible_jobs:
+            signature = self._jobs_signature(visible_jobs)
+            visible_count = len(visible_jobs)
+            if signature != self._live_results_signature:
+                visible_count = self._render_visible_jobs(visible_jobs)
+                self._live_results_last_count = visible_count
+            message = progress_page_text or _t(
+                self.ui_language,
+                f"当前求职者：{self.current_candidate_name}。后台正在搜索与分析，已发现 {visible_count} 条临时结果；只有出现新增或内容变化时才会刷新列表。",
+                f"Current candidate: {self.current_candidate_name}. Search and analysis are still running in the background; {visible_count} interim result(s) found so far, and the list will refresh only when something changes.",
+            )
+            if self.results_meta_label.text() != message:
+                self.results_meta_label.setText(message)
+            return
+        if self._live_results_last_count > 0:
+            return
+        message = progress_page_text or _t(
+            self.ui_language,
+            f"当前求职者：{self.current_candidate_name}。后台正在搜索；若暂时没有新增岗位，通常表示系统仍在抓取、分析或收尾。只要搜索提示框还在，后台任务就仍在运行。",
+            f"Current candidate: {self.current_candidate_name}. Search is still running in the background; if no new jobs appear yet, the system is usually still collecting, analyzing, or finishing. As long as the search dialog remains open, the background task is still running.",
+        )
+        if self.results_meta_label.text() != message:
+            self.results_meta_label.setText(message)
+
+    def _refresh_results_stats_label(self) -> None:
+        candidate_id = self.current_candidate_id
+        if candidate_id is None:
+            text = _t(
+                self.ui_language,
+                "内部统计：未选择求职者。",
+                "Internal stats: no candidate selected.",
+            )
+        else:
+            try:
+                stats = self.runner.load_search_stats(candidate_id)
+            except Exception as exc:
+                text = _t(
+                    self.ui_language,
+                    f"内部统计读取失败：{exc}",
+                    f"Failed to read internal stats: {exc}",
+                )
+            else:
+                summary = _t(
+                    self.ui_language,
+                    (
+                        f"内部统计：当前候选公司池 {stats.candidate_company_pool_count} 家。\n"
+                        f"Signal 命中 {stats.signal_hit_job_count} 条；"
+                        f"主流程已发现 {stats.main_discovered_job_count} 条，"
+                        f"已评分 {stats.main_scored_job_count} 条，"
+                        f"当前展示 {stats.displayable_result_count} 条，"
+                        f"待补完 {stats.main_pending_analysis_count} 条。"
+                    ),
+                    (
+                        f"Internal stats: current candidate pool {stats.candidate_company_pool_count}.\n"
+                        f"Signal hits {stats.signal_hit_job_count}; "
+                        f"main-stage discovered {stats.main_discovered_job_count}, "
+                        f"scored {stats.main_scored_job_count}, "
+                        f"displayed {stats.displayable_result_count}, "
+                        f"pending completion {stats.main_pending_analysis_count}."
+                    ),
+                )
+                if (
+                    stats.signal_hit_job_count == 0
+                    and stats.main_discovered_job_count == 0
+                    and stats.main_pending_analysis_count == 0
+                ):
+                    summary = summary + _t(
+                        self.ui_language,
+                        " 当前运行目录里还没有已落盘的岗位结果。",
+                        " No persisted job results in the current run directory yet.",
+                    )
+                text = summary
+        if self.results_stats_label.text() != text:
+            self.results_stats_label.setText(text)
 
     def _build_target_role_candidates(self, profiles: list[SearchProfileRecord]) -> list[str]:
         candidates: list[str] = []
@@ -3628,6 +4137,8 @@ class SearchResultsStep(QWidget):
                 self.status_by_job_key.pop(job_key, None)
             self.table.removeRow(row)
         self._save_review_state()
+        self._live_results_last_count = self.table.rowCount()
+        self._sync_live_results_signature()
         self.results_meta_label.setText(
             _t(
                 self.ui_language,
@@ -3724,6 +4235,7 @@ class CandidateWorkspacePage(QWidget):
         on_data_changed: Callable[[], None] | None = None,
         on_back_to_candidates: Callable[[], None] | None = None,
         on_ui_language_changed: Callable[[str], None] | None = None,
+        on_ai_settings_changed: Callable[[], None] | None = None,
     ) -> None:
         super().__init__()
         self.context = context
@@ -3731,6 +4243,7 @@ class CandidateWorkspacePage(QWidget):
         self.on_data_changed = on_data_changed
         self.on_back_to_candidates = on_back_to_candidates
         self.on_ui_language_changed = on_ui_language_changed
+        self.on_ai_settings_changed = on_ai_settings_changed
         self.current_candidate_id: int | None = None
         self.step_buttons: list[QPushButton] = []
         self.step_titles = [
@@ -3802,9 +4315,13 @@ class CandidateWorkspacePage(QWidget):
         self.hero_meta = QLabel("")
         self.hero_meta.setObjectName("HeroMeta")
         self.hero_meta.setWordWrap(True)
+        self.ai_validation_status_label = QLabel("")
+        self.ai_validation_status_label.setObjectName("HeroAiStatus")
+        self.ai_validation_status_label.setWordWrap(True)
         hero_text_layout.addWidget(self.hero_eyebrow)
         hero_text_layout.addWidget(self.hero_title)
         hero_text_layout.addWidget(self.hero_meta)
+        hero_text_layout.addWidget(self.ai_validation_status_label)
         hero_layout.addWidget(hero_text, 1)
 
         self.switch_candidate_button = styled_button(
@@ -3815,10 +4332,22 @@ class CandidateWorkspacePage(QWidget):
             _t(self.ui_language, "AI 设置", "AI Settings"),
             "hero",
         )
+        self.support_button = styled_button(
+            _t(self.ui_language, "☕ 支持开发", "☕ Support Dev"),
+            "hero",
+        )
+        self.support_button.setToolTip(
+            _t(
+                self.ui_language,
+                "如果这个工具帮到了你，可以给开发者买杯咖啡。",
+                "If this tool helps you, you can buy the developer a coffee.",
+            )
+        )
         hero_actions = QWidget()
         hero_actions_layout = QVBoxLayout(hero_actions)
         hero_actions_layout.setContentsMargins(0, 0, 0, 0)
         hero_actions_layout.setSpacing(8)
+        hero_actions_layout.addWidget(self.support_button)
         hero_actions_layout.addWidget(self.workspace_settings_button)
         hero_actions_layout.addWidget(self.switch_candidate_button)
         hero_actions_layout.addStretch(1)
@@ -3860,8 +4389,34 @@ class CandidateWorkspacePage(QWidget):
         self.go_candidates_button.clicked.connect(self._go_back_to_candidates)
         self.switch_candidate_button.clicked.connect(self._go_back_to_candidates)
         self.workspace_settings_button.clicked.connect(self._open_ai_settings)
+        self.support_button.clicked.connect(self._show_support_dialog)
         self._set_step(0)
+        self.set_ai_validation_status(
+            _t(self.ui_language, "AI 状态：等待验证", "AI status: waiting for validation"),
+            "idle",
+        )
         self.set_candidate(None)
+
+    def set_ai_validation_status(self, message: str, level: str = "idle") -> None:
+        dot_palette = {
+            "idle": "#94a3b8",
+            "checking": "#2563eb",
+            "ready": "#15803d",
+            "switched": "#15803d",
+            "missing": "#b91c1c",
+            "warning": "#b91c1c",
+            "invalid": "#b91c1c",
+            "model_unverified": "#b91c1c",
+            "success": "#15803d",
+            "error": "#b91c1c",
+        }
+        dot_color = dot_palette.get(level, dot_palette["idle"])
+        safe_message = escape(str(message or "").strip())
+        self.ai_validation_status_label.setText(
+            f'<span style="color: {dot_color}; font-size: 15px;">●</span> '
+            f'<span style="color: #ffffff;">{safe_message}</span>'
+        )
+        self.ai_validation_status_label.setStyleSheet("color: #ffffff;")
 
     def set_candidate(self, candidate_id: int | None) -> None:
         self.current_candidate_id = candidate_id
@@ -3922,12 +4477,83 @@ class CandidateWorkspacePage(QWidget):
         if self.on_back_to_candidates:
             self.on_back_to_candidates()
 
+    def _support_paypal_email(self) -> str:
+        env_email = os.environ.get(SUPPORT_PAYPAL_EMAIL_ENV, "").strip()
+        if env_email:
+            return env_email
+        saved_email = self.context.settings.get_value(SUPPORT_PAYPAL_EMAIL_SETTING_KEY, "").strip()
+        if saved_email:
+            return saved_email
+        return SUPPORT_PAYPAL_EMAIL_DEFAULT
+
+    def _show_support_dialog(self) -> None:
+        paypal_email = self._support_paypal_email()
+        title = _t(self.ui_language, "支持开发", "Support Development")
+        message = _t(
+            self.ui_language,
+            "这个工具的开发和维护用了大量 Codex 与本地调试成本。如果它真的帮到了你，欢迎给开发者买杯咖啡。",
+            "Building and maintaining this tool takes substantial Codex usage and local debugging cost. If it genuinely helps you, you are welcome to buy the developer a coffee.",
+        )
+        info_lines = [
+            message,
+            "",
+        ]
+        if paypal_email:
+            info_lines.extend(
+                [
+                    _t(
+                        self.ui_language,
+                        "可通过 PayPal 向下面这个账号转账：",
+                        "You can send support via PayPal to this account:",
+                    ),
+                    paypal_email,
+                ]
+            )
+        else:
+            info_lines.append(
+                _t(
+                    self.ui_language,
+                    "PayPal 账号暂未配置。你之后给我邮箱地址后，我可以再帮你直接写进去。",
+                    "PayPal account is not configured yet. Once you provide the email address, I can wire it in directly.",
+                )
+            )
+
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.NoIcon)
+        dialog.setWindowTitle(title)
+        dialog.setText("\n".join(info_lines))
+        copy_button = None
+        if paypal_email:
+            copy_button = dialog.addButton(
+                _t(self.ui_language, "复制 PayPal 账号", "Copy PayPal Account"),
+                QMessageBox.ActionRole,
+            )
+        dialog.addButton(_t(self.ui_language, "关闭", "Close"), QMessageBox.RejectRole)
+        dialog.exec()
+
+        if copy_button is not None and dialog.clickedButton() is copy_button:
+            QApplication.clipboard().setText(paypal_email)
+            copied_dialog = QMessageBox(self)
+            copied_dialog.setIcon(QMessageBox.NoIcon)
+            copied_dialog.setWindowTitle(title)
+            copied_dialog.setText(
+                _t(
+                    self.ui_language,
+                    f"PayPal 账号已复制到剪贴板：{paypal_email}",
+                    f"PayPal account copied to clipboard: {paypal_email}",
+                )
+            )
+            copied_dialog.addButton(_t(self.ui_language, "关闭", "Close"), QMessageBox.AcceptRole)
+            copied_dialog.exec()
+
     def _open_ai_settings(self) -> None:
         previous_language = self.context.settings.get_ui_language()
         dialog = AISettingsDialog(self.context, ui_language=self.ui_language, parent=self)
         accepted = dialog.exec() == QDialog.Accepted
         if not accepted:
             return
+        if self.on_ai_settings_changed:
+            self.on_ai_settings_changed()
         latest_language = self.context.settings.get_ui_language()
         if latest_language != previous_language and self.on_ui_language_changed:
             self.on_ui_language_changed(latest_language)

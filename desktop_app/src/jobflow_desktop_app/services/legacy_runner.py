@@ -6,15 +6,18 @@ import os
 import re
 import shutil
 import subprocess
+import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urlparse
 
 from ..db.repositories.candidates import CandidateRecord
 from ..db.repositories.profiles import SearchProfileRecord
 from ..db.repositories.settings import OpenAISettings
-from .location_structured import candidate_location_preference_text, candidate_location_query_terms
+from .location_structured import candidate_location_preference_text
 from .role_recommendations import description_query_lines, role_name_query_lines
 
 
@@ -28,6 +31,7 @@ class LegacyRunResult:
     run_dir: Path
     config_path: Path
     recommended_json_path: Path
+    cancelled: bool = False
 
 
 @dataclass(frozen=True)
@@ -42,6 +46,35 @@ class LegacyJobResult:
     fit_level_cn: str
     fit_track: str
     adjacent_direction_cn: str
+    source_url: str = ""
+    final_url: str = ""
+    link_status: str = "source"
+
+
+@dataclass(frozen=True)
+class LegacySearchStats:
+    discovered_job_count: int = 0
+    discovered_company_count: int = 0
+    scored_job_count: int = 0
+    recommended_job_count: int = 0
+    pending_resume_count: int = 0
+    candidate_company_pool_count: int = 0
+    signal_hit_job_count: int = 0
+    main_discovered_job_count: int = 0
+    main_scored_job_count: int = 0
+    displayable_result_count: int = 0
+    main_pending_analysis_count: int = 0
+
+
+@dataclass(frozen=True)
+class LegacySearchProgress:
+    status: str = "idle"
+    stage: str = "idle"
+    message: str = ""
+    last_event: str = ""
+    started_at: str = ""
+    updated_at: str = ""
+    elapsed_seconds: int = 0
 
 
 @dataclass(frozen=True)
@@ -51,6 +84,7 @@ class LegacyStageRunResult:
     message: str
     stdout_tail: str
     stderr_tail: str
+    cancelled: bool = False
 
 
 class LegacyJobflowRunner:
@@ -68,32 +102,86 @@ class LegacyJobflowRunner:
         profiles: list[SearchProfileRecord],
         settings: OpenAISettings | None = None,
         api_base_url: str = "",
-        max_queries: int = 10,
-        max_companies: int = 90,
-        timeout_seconds: int = 1800,
+        max_queries: int = 6,
+        max_companies: int = 16,
+        timeout_seconds: int = 900,
+        cancel_event: threading.Event | None = None,
     ) -> LegacyRunResult:
         if candidate.candidate_id is None:
             raise ValueError("Candidate ID is required.")
-        if not self.legacy_root.exists():
-            return self._error_result(
-                candidate.candidate_id,
-                "legacy_jobflow_reference directory not found.",
-            )
-
-        node_bin = self._resolve_node_binary()
-        if not node_bin:
-            return self._error_result(
-                candidate.candidate_id,
-                "Node.js is not available. Set JOBFLOW_NODE_PATH or place node.exe under runtime/tools/node/",
-            )
-
         run_dir = self._candidate_run_dir(candidate.candidate_id)
         run_dir.mkdir(parents=True, exist_ok=True)
         config_path = run_dir / "config.generated.json"
         web_signal_config_path = run_dir / "config.generated.web_signal.json"
+        resume_config_path = run_dir / "config.generated.resume.json"
         recommended_json_path = run_dir / "jobs_recommended.json"
+        progress_started_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        current_stage = "preparing"
+        progress_lock = threading.Lock()
+
+        def write_progress(
+            *,
+            status: str,
+            stage: str | None = None,
+            message: str = "",
+            last_event: str = "",
+        ) -> None:
+            with progress_lock:
+                self._write_search_progress(
+                    run_dir,
+                    status=status,
+                    stage=stage or current_stage,
+                    message=message,
+                    last_event=last_event,
+                    started_at=progress_started_at,
+                )
+
+        def error_result(message: str, stdout_tail: str = "", stderr_tail: str = "") -> LegacyRunResult:
+            detail = self._tail(stderr_tail or stdout_tail or message, max_lines=8, max_chars=1200)
+            write_progress(status="error", message=message, last_event=detail)
+            return self._error_result(
+                candidate.candidate_id,
+                message,
+                stdout_tail=stdout_tail,
+                stderr_tail=stderr_tail,
+            )
+
+        def cancelled_result(message: str, stdout_tail: str = "", stderr_tail: str = "") -> LegacyRunResult:
+            detail = self._tail(stderr_tail or stdout_tail or message, max_lines=8, max_chars=1200)
+            write_progress(status="cancelled", stage="completed", message=message, last_event=detail)
+            return LegacyRunResult(
+                success=False,
+                exit_code=-2,
+                message=message,
+                stdout_tail=self._tail(stdout_tail),
+                stderr_tail=self._tail(stderr_tail),
+                run_dir=run_dir,
+                config_path=config_path,
+                recommended_json_path=recommended_json_path,
+                cancelled=True,
+            )
+
+        write_progress(
+            status="running",
+            stage=current_stage,
+            message="Preparing search runtime and validating dependencies.",
+            last_event="Initializing search workspace.",
+        )
+        if cancel_event is not None and cancel_event.is_set():
+            return cancelled_result("Search cancelled before start.")
+        if not self.legacy_root.exists():
+            return error_result("legacy_jobflow_reference directory not found.")
+
+        node_bin = self._resolve_node_binary()
+        if not node_bin:
+            return error_result(
+                "Node.js is not available. Set JOBFLOW_NODE_PATH or place node.exe under runtime/tools/node/",
+            )
         pipeline_mode = self._resolve_pipeline_mode()
         source_companies_path: Path | None = None
+        analysis_budget = 0
+        stage_stdout: list[tuple[str, str]] = []
+        stage_stderr: list[tuple[str, str]] = []
 
         try:
             base_config = self._load_base_config()
@@ -115,6 +203,29 @@ class LegacyJobflowRunner:
                 json.dumps(runtime_config, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            analysis_budget = max(
+                1,
+                int(
+                    self._ensure_dict(runtime_config, "analysis").get(
+                        "maxJobsToAnalyzePerRun",
+                        4,
+                    )
+                ),
+            )
+
+            resume_config = self._build_runtime_config(
+                base_config=base_config,
+                candidate=candidate,
+                profiles=profiles,
+                run_dir=run_dir,
+                model_override=self._resolve_model_override(settings),
+                source_companies_path=source_companies_path,
+                pipeline_stage="resume_pending",
+            )
+            resume_config_path.write_text(
+                json.dumps(resume_config, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
 
             if pipeline_mode == self.PIPELINE_MODE_COMPANY_PLUS_WEB_SIGNAL:
                 web_signal_config = self._build_runtime_config(
@@ -131,19 +242,99 @@ class LegacyJobflowRunner:
                     encoding="utf-8",
                 )
         except Exception as exc:
-            return self._error_result(
-                candidate.candidate_id,
-                f"Failed to generate runtime config: {exc}",
-            )
+            return error_result(f"Failed to generate runtime config: {exc}")
 
         env = self._build_runtime_env(settings=settings, api_base_url=api_base_url)
         if not env.get("OPENAI_API_KEY", "").strip():
-            return self._error_result(
-                candidate.candidate_id,
+            return error_result(
                 "OpenAI API key is missing. Set OPENAI_API_KEY or save it in AI settings.",
             )
+        dependency_check = self._ensure_legacy_dependencies(node_bin=node_bin)
+        if not dependency_check.success:
+            return error_result(
+                dependency_check.message,
+                stdout_tail=dependency_check.stdout_tail,
+                stderr_tail=dependency_check.stderr_tail,
+            )
+        if cancel_event is not None and cancel_event.is_set():
+            return cancelled_result("Search cancelled before execution.")
 
         stage_notes: list[str] = []
+        try:
+            resume_pending_count = self._write_resume_pending_jobs(run_dir)
+        except Exception as exc:
+                stage_notes.append(f"Resume queue refresh skipped: {exc}")
+        else:
+            if resume_pending_count > 0:
+                stage_notes.append(
+                    f"Resume queue: {resume_pending_count} unfinished jobs will be processed before discovery continues."
+                )
+
+        def run_resume_stage(message: str, start_event: str) -> LegacyStageRunResult | None:
+            nonlocal current_stage
+            if not resume_config_path.exists():
+                return None
+            current_stage = "resume_pending"
+            write_progress(
+                status="running",
+                message=message,
+                last_event=start_event,
+            )
+            return self._run_legacy_stage(
+                command=[
+                    node_bin,
+                    "jobflow.mjs",
+                    "--config",
+                    str(resume_config_path),
+                    "--max-queries",
+                    str(max(1, int(max_queries))),
+                    "--max-companies",
+                    str(max(1, int(max_companies))),
+                ],
+                env=env,
+                timeout_seconds=max(240, min(timeout_seconds, 900)),
+                cancel_event=cancel_event,
+                progress_callback=lambda line: write_progress(
+                    status="running",
+                    message=message,
+                    last_event=line,
+                ),
+            )
+
+        auto_resume_threshold = max(1, min(4, analysis_budget))
+        if resume_pending_count > 0:
+            resume_result = run_resume_stage(
+                "Completing unfinished main-stage jobs from the last run before new discovery.",
+                "Starting pending-job resume pass.",
+            )
+            if resume_result is not None:
+                if resume_result.stdout_tail:
+                    stage_stdout.append(("resume_pending", resume_result.stdout_tail))
+                if resume_result.stderr_tail:
+                    stage_stderr.append(("resume_pending", resume_result.stderr_tail))
+                if resume_result.cancelled:
+                    return cancelled_result(
+                        "Search cancelled while resuming unfinished jobs.",
+                        stdout_tail=resume_result.stdout_tail,
+                        stderr_tail=resume_result.stderr_tail,
+                    )
+                if resume_result.success:
+                    try:
+                        resume_pending_count = self._write_resume_pending_jobs(run_dir)
+                    except Exception as exc:
+                        stage_notes.append(f"Resume queue finalize skipped: {exc}")
+                    else:
+                        if resume_pending_count > 0:
+                            stage_notes.append(
+                                f"Resume-only stage left {resume_pending_count} unfinished job(s)."
+                            )
+                        else:
+                            stage_notes.append("Resume-only stage completed all unfinished jobs.")
+                else:
+                    stage_notes.append(
+                        f"Resume-only stage failed (exit {resume_result.exit_code}); continue with discovery pipeline."
+                    )
+
         signal_stdout = ""
         signal_stderr = ""
         if (
@@ -151,6 +342,12 @@ class LegacyJobflowRunner:
             and source_companies_path is not None
             and web_signal_config_path.exists()
         ):
+            current_stage = "web_signal"
+            write_progress(
+                status="running",
+                message="Running web signal discovery before main-stage job analysis.",
+                last_event="Starting web signal queries.",
+            )
             signal_command = [
                 node_bin,
                 "jobflow.mjs",
@@ -166,9 +363,25 @@ class LegacyJobflowRunner:
                 command=signal_command,
                 env=env,
                 timeout_seconds=max(300, min(timeout_seconds, 900)),
+                cancel_event=cancel_event,
+                progress_callback=lambda line: write_progress(
+                    status="running",
+                    message="Running web signal discovery before main-stage job analysis.",
+                    last_event=line,
+                ),
             )
+            if signal_result.cancelled:
+                return cancelled_result(
+                    "Search cancelled during web signal stage.",
+                    stdout_tail=signal_result.stdout_tail,
+                    stderr_tail=signal_result.stderr_tail,
+                )
             signal_stdout = signal_result.stdout_tail
             signal_stderr = signal_result.stderr_tail
+            if signal_stdout:
+                stage_stdout.append(("web_signal", signal_stdout))
+            if signal_stderr:
+                stage_stderr.append(("web_signal", signal_stderr))
             if signal_result.success:
                 try:
                     added = self._ingest_web_signal_companies(
@@ -177,13 +390,36 @@ class LegacyJobflowRunner:
                     )
                     if added > 0:
                         stage_notes.append(f"Web signal intake: +{added} companies.")
+                    write_progress(
+                        status="running",
+                        message="Web signal discovery finished; candidate company pool updated.",
+                        last_event=f"Web signal intake completed with {added} added companies.",
+                    )
                 except Exception as exc:
                     stage_notes.append(f"Web signal intake skipped: {exc}")
+                    write_progress(
+                        status="running",
+                        message="Web signal discovery finished; candidate company pool update skipped.",
+                        last_event=f"Web signal intake skipped: {exc}",
+                    )
             else:
                 stage_notes.append(
                     f"Web signal stage failed (exit {signal_result.exit_code}); continue with company-first stage."
                 )
+                write_progress(
+                    status="running",
+                    message="Web signal stage failed; falling back to main-stage company processing.",
+                    last_event=signal_result.stderr_tail or signal_result.stdout_tail or signal_result.message,
+                )
+        if cancel_event is not None and cancel_event.is_set():
+            return cancelled_result("Search cancelled before main-stage analysis.")
 
+        current_stage = "main"
+        write_progress(
+            status="running",
+            message="Running main-stage company search, scoring, and post-verification.",
+            last_event="Starting main-stage job collection.",
+        )
         main_command = [
             node_bin,
             "jobflow.mjs",
@@ -198,7 +434,65 @@ class LegacyJobflowRunner:
             command=main_command,
             env=env,
             timeout_seconds=timeout_seconds,
+            cancel_event=cancel_event,
+            progress_callback=lambda line: write_progress(
+                status="running",
+                message="Running main-stage company search, scoring, and post-verification.",
+                last_event=line,
+            ),
         )
+        if main_result.cancelled:
+            return cancelled_result(
+                "Search cancelled during main-stage analysis.",
+                stdout_tail=main_result.stdout_tail,
+                stderr_tail=main_result.stderr_tail,
+            )
+        if main_result.stdout_tail:
+            stage_stdout.append(("main", main_result.stdout_tail))
+        if main_result.stderr_tail:
+            stage_stderr.append(("main", main_result.stderr_tail))
+        pending_after_main = 0
+        try:
+            pending_after_main = self._write_resume_pending_jobs(run_dir)
+        except Exception as exc:
+            stage_notes.append(f"Resume queue finalize skipped: {exc}")
+        else:
+            if (
+                main_result.success
+                and pending_after_main > 0
+                and pending_after_main <= auto_resume_threshold
+            ):
+                resume_result = run_resume_stage(
+                    "Finishing the last few unfinished main-stage jobs before wrapping up.",
+                    "Starting final pending-job pass.",
+                )
+                if resume_result is not None:
+                    if resume_result.stdout_tail:
+                        stage_stdout.append(("resume_finalize", resume_result.stdout_tail))
+                    if resume_result.stderr_tail:
+                        stage_stderr.append(("resume_finalize", resume_result.stderr_tail))
+                    if resume_result.cancelled:
+                        return cancelled_result(
+                            "Search cancelled while finalizing unfinished jobs.",
+                            stdout_tail=resume_result.stdout_tail,
+                            stderr_tail=resume_result.stderr_tail,
+                        )
+                    if resume_result.success:
+                        try:
+                            pending_after_main = self._write_resume_pending_jobs(run_dir)
+                        except Exception as exc:
+                            stage_notes.append(f"Resume queue final check skipped: {exc}")
+                        else:
+                            if pending_after_main > 0:
+                                stage_notes.append(
+                                    f"Final pending pass still left {pending_after_main} unfinished job(s)."
+                                )
+                            else:
+                                stage_notes.append("Final pending pass cleared the remaining unfinished jobs.")
+                    else:
+                        stage_notes.append(
+                            f"Final pending pass failed (exit {resume_result.exit_code}); remaining unfinished jobs stay queued."
+                        )
         success = main_result.success
         if success:
             message = "Legacy engine completed."
@@ -207,16 +501,14 @@ class LegacyJobflowRunner:
         if stage_notes:
             message = f"{message} {' '.join(stage_notes)}"
 
-        combined_stdout = []
-        combined_stderr = []
-        if signal_stdout:
-            combined_stdout.append(f"[web_signal]\n{signal_stdout}")
-        if main_result.stdout_tail:
-            combined_stdout.append(f"[main]\n{main_result.stdout_tail}")
-        if signal_stderr:
-            combined_stderr.append(f"[web_signal]\n{signal_stderr}")
-        if main_result.stderr_tail:
-            combined_stderr.append(f"[main]\n{main_result.stderr_tail}")
+        combined_stdout = [f"[{label}]\n{text}" for label, text in stage_stdout if text]
+        combined_stderr = [f"[{label}]\n{text}" for label, text in stage_stderr if text]
+        write_progress(
+            status="success" if success else "error",
+            stage="completed" if success else "main",
+            message=message,
+            last_event=main_result.stderr_tail or main_result.stdout_tail or message,
+        )
         return LegacyRunResult(
             success=success,
             exit_code=main_result.exit_code,
@@ -230,57 +522,136 @@ class LegacyJobflowRunner:
 
     def load_recommended_jobs(self, candidate_id: int) -> list[LegacyJobResult]:
         run_dir = self._candidate_run_dir(candidate_id)
-        recommended = self._load_jobs_from_file(run_dir / "jobs_recommended.json")
+        recommended = self._filter_review_ready_jobs(self._load_jobs_from_file(run_dir / "jobs_recommended.json"))
         jobs: list[dict] = recommended
 
         if not jobs:
             all_jobs = self._load_jobs_from_file(run_dir / "jobs.json")
             if all_jobs:
+                ready_all_jobs = self._filter_review_ready_jobs(all_jobs)
                 recommended_in_all = [
                     item
                     for item in all_jobs
                     if bool((item.get("analysis") or {}).get("recommend"))
                 ]
-                if recommended_in_all:
-                    jobs = recommended_in_all
+                recommended_ready = self._filter_review_ready_jobs(recommended_in_all)
+                if recommended_ready:
+                    jobs = recommended_ready
                 else:
-                    scored = [
-                        item
-                        for item in all_jobs
-                        if isinstance((item.get("analysis") or {}).get("matchScore"), int)
-                    ]
-                    scored.sort(
-                        key=lambda item: int((item.get("analysis") or {}).get("matchScore") or 0),
+                    ready_all_jobs.sort(
+                        key=lambda item: int(self._extract_match_score(item.get("analysis")) or 0),
                         reverse=True,
                     )
-                    jobs = scored[:20]
+                    jobs = ready_all_jobs[:20]
 
-        records: list[LegacyJobResult] = []
-        for item in jobs:
-            if not isinstance(item, dict):
+        return self._build_job_records(jobs)
+
+    def load_live_jobs(self, candidate_id: int) -> list[LegacyJobResult]:
+        run_dir = self._candidate_run_dir(candidate_id)
+        jobs = self._merge_job_items_from_paths(
+            [
+                run_dir / "jobs_found.signal.json",
+                run_dir / "jobs.signal.json",
+                run_dir / "jobs_found.json",
+                run_dir / "jobs.json",
+                run_dir / "jobs_recommended.json",
+            ]
+        )
+        return self._build_job_records(self._filter_review_ready_jobs(jobs))
+
+    def load_search_stats(self, candidate_id: int) -> LegacySearchStats:
+        run_dir = self._candidate_run_dir(candidate_id)
+        candidate_companies_payload = self._load_companies_payload(run_dir / "companies.candidate.json")
+        # Keep signal-stage hits and main-stage jobs separate so the UI can
+        # show what was only discovered by web signal versus what reached the
+        # company-first analysis pipeline.
+        signal_paths = [
+            run_dir / "jobs_found.signal.json",
+            run_dir / "jobs.signal.json",
+        ]
+        main_paths = [
+            run_dir / "jobs_found.json",
+            run_dir / "jobs.json",
+            run_dir / "jobs_recommended.json",
+        ]
+        signal_jobs = self._merge_job_items_from_paths(signal_paths)
+        main_jobs = self._merge_job_items_from_paths(main_paths)
+        merged_jobs = self._merge_job_items_from_paths(signal_paths + main_paths)
+        discovered_companies: set[str] = set()
+        for item in merged_jobs:
+            company = self._clean_company_name(item.get("company"))
+            if company:
+                discovered_companies.add(company.casefold())
+
+        pending_jobs = self._load_resume_pending_jobs(run_dir)
+        recommended_jobs = self.load_recommended_jobs(candidate_id)
+        scored_jobs = self._filter_review_ready_jobs(merged_jobs)
+        main_scored_jobs = self._filter_review_ready_jobs(main_jobs)
+
+        candidate_company_pool_count = self._count_unique_companies_in_payload(candidate_companies_payload)
+        signal_hit_job_count = len(signal_jobs)
+        main_discovered_job_count = len(main_jobs)
+        main_scored_job_count = len(main_scored_jobs)
+        displayable_result_count = len(recommended_jobs)
+        main_pending_analysis_count = len(pending_jobs)
+        return LegacySearchStats(
+            discovered_job_count=len(merged_jobs),
+            discovered_company_count=len(discovered_companies),
+            scored_job_count=len(scored_jobs),
+            recommended_job_count=displayable_result_count,
+            pending_resume_count=main_pending_analysis_count,
+            candidate_company_pool_count=candidate_company_pool_count,
+            signal_hit_job_count=signal_hit_job_count,
+            main_discovered_job_count=main_discovered_job_count,
+            main_scored_job_count=main_scored_job_count,
+            displayable_result_count=displayable_result_count,
+            main_pending_analysis_count=main_pending_analysis_count,
+        )
+
+    def load_search_progress(self, candidate_id: int) -> LegacySearchProgress:
+        return self._load_search_progress_from_run_dir(self._candidate_run_dir(candidate_id))
+
+    @classmethod
+    def _merge_job_items_from_paths(cls, paths: list[Path]) -> list[dict]:
+        merged_jobs: dict[str, dict] = {}
+        for path in paths:
+            for item in cls._load_jobs_from_file(path):
+                key = cls._job_item_key(item)
+                if not key:
+                    continue
+                existing = merged_jobs.get(key)
+                if existing is None:
+                    merged_jobs[key] = dict(item)
+                    continue
+                merged_jobs[key] = cls._merge_job_item(existing, item)
+        return list(merged_jobs.values())
+
+    @classmethod
+    def _count_unique_companies_in_payload(cls, payload: dict) -> int:
+        companies = payload.get("companies", [])
+        if not isinstance(companies, list):
+            return 0
+        seen_keys: set[str] = set()
+        unique_count = 0
+        for raw in companies:
+            if not isinstance(raw, dict):
                 continue
-            analysis = item.get("analysis", {})
-            if not isinstance(analysis, dict):
-                analysis = {}
-            recommend = bool(analysis.get("recommend"))
-            score_raw = analysis.get("matchScore")
-            score = int(score_raw) if isinstance(score_raw, int) else None
-
-            records.append(
-                LegacyJobResult(
-                    title=str(item.get("title") or "").strip(),
-                    company=str(item.get("company") or "").strip(),
-                    location=str(item.get("location") or "").strip(),
-                    url=str(item.get("url") or item.get("canonicalUrl") or "").strip(),
-                    date_found=str(item.get("dateFound") or "").strip(),
-                    match_score=score,
-                    recommend=recommend,
-                    fit_level_cn=str(analysis.get("fitLevelCn") or "").strip(),
-                    fit_track=str(analysis.get("fitTrack") or "").strip(),
-                    adjacent_direction_cn=str(analysis.get("adjacentDirectionCn") or "").strip(),
-                )
-            )
-        return records
+            company_keys: list[str] = []
+            name = cls._clean_company_name(raw.get("name"))
+            if name:
+                company_keys.append(f"name:{name.casefold()}")
+            for url in (str(raw.get("website") or "").strip(), str(raw.get("careersUrl") or "").strip()):
+                domain = cls._domain_from_url(url)
+                if domain:
+                    company_keys.append(f"domain:{domain}")
+            if not company_keys:
+                continue
+            if any(key in seen_keys for key in company_keys):
+                seen_keys.update(company_keys)
+                continue
+            unique_count += 1
+            seen_keys.update(company_keys)
+        return unique_count
 
     @staticmethod
     def _load_jobs_from_file(path: Path) -> list[dict]:
@@ -294,6 +665,317 @@ class LegacyJobflowRunner:
         if not isinstance(jobs, list):
             return []
         return [item for item in jobs if isinstance(item, dict)]
+
+    @staticmethod
+    def _job_item_key(item: dict) -> str:
+        url = str(item.get("url") or item.get("canonicalUrl") or "").strip()
+        if url:
+            return url.casefold()
+        title = str(item.get("title") or "").strip().casefold()
+        company = str(item.get("company") or "").strip().casefold()
+        date_found = str(item.get("dateFound") or "").strip()
+        return f"{title}|{company}|{date_found}"
+
+    @staticmethod
+    def _merge_job_item(existing: dict, incoming: dict) -> dict:
+        merged = dict(existing)
+        for key, value in incoming.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                nested = dict(merged.get(key) or {})
+                for nested_key, nested_value in value.items():
+                    if nested_value not in ("", None, [], {}):
+                        nested[nested_key] = nested_value
+                merged[key] = nested
+                continue
+            if value not in ("", None, [], {}):
+                merged[key] = value
+        return merged
+
+    @staticmethod
+    def _extract_match_score(analysis: object) -> int | None:
+        if not isinstance(analysis, dict):
+            return None
+        raw_score = analysis.get("matchScore")
+        if isinstance(raw_score, bool):
+            return None
+        if isinstance(raw_score, int):
+            return raw_score
+        if isinstance(raw_score, float) and raw_score.is_integer():
+            return int(raw_score)
+        try:
+            text = str(raw_score or "").strip()
+            if not text:
+                return None
+            return int(text)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _filter_review_ready_jobs(cls, jobs: list[dict]) -> list[dict]:
+        ready_jobs: list[dict] = []
+        for item in jobs:
+            if not isinstance(item, dict):
+                continue
+            analysis = item.get("analysis", {})
+            if cls._extract_match_score(analysis) is None:
+                continue
+            ready_jobs.append(item)
+        return ready_jobs
+
+    @classmethod
+    def _analysis_completed(cls, analysis: object) -> bool:
+        if not isinstance(analysis, dict):
+            return False
+        if cls._extract_match_score(analysis) is not None:
+            return True
+        return bool(analysis.get("prefilterRejected"))
+
+    @classmethod
+    def _collect_resume_pending_jobs(cls, run_dir: Path) -> list[dict]:
+        merged_jobs: dict[str, dict] = {}
+        paths = [
+            run_dir / "jobs_found.json",
+            run_dir / "jobs.json",
+            run_dir / "jobs_recommended.json",
+        ]
+        for path in paths:
+            for item in cls._load_jobs_from_file(path):
+                key = cls._job_item_key(item)
+                if not key:
+                    continue
+                existing = merged_jobs.get(key)
+                if existing is None:
+                    merged_jobs[key] = dict(item)
+                    continue
+                merged_jobs[key] = cls._merge_job_item(existing, item)
+
+        pending_jobs: list[dict] = []
+        for item in merged_jobs.values():
+            if not isinstance(item, dict):
+                continue
+            job = dict(item)
+            job_url = str(job.get("url") or job.get("canonicalUrl") or "").strip()
+            if not job_url:
+                continue
+            job["url"] = job_url
+            if cls._analysis_completed(job.get("analysis")):
+                continue
+            pending_jobs.append(job)
+
+        pending_jobs.sort(
+            key=lambda item: (
+                str(item.get("dateFound") or ""),
+                str(item.get("company") or "").casefold(),
+                str(item.get("title") or "").casefold(),
+                str(item.get("url") or "").casefold(),
+            )
+        )
+        return pending_jobs
+
+    @classmethod
+    def _merge_resume_pending_job_lists(cls, run_dir: Path, *job_lists: list[dict]) -> list[dict]:
+        merged_jobs: dict[str, dict] = {}
+        for jobs in job_lists:
+            normalized_jobs = cls._normalize_resume_pending_jobs(
+                jobs if isinstance(jobs, list) else [],
+                run_dir,
+            )
+            for item in normalized_jobs:
+                key = cls._job_item_key(item)
+                if not key:
+                    continue
+                existing = merged_jobs.get(key)
+                if existing is None:
+                    merged_jobs[key] = dict(item)
+                    continue
+                merged_jobs[key] = cls._merge_job_item(existing, item)
+        return cls._normalize_resume_pending_jobs(list(merged_jobs.values()), run_dir)
+
+    @classmethod
+    def _load_resume_pending_payload(cls, run_dir: Path) -> dict:
+        payload_path = run_dir / "jobs_resume_pending.json"
+        if not payload_path.exists():
+            return {}
+        try:
+            payload = json.loads(payload_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    @classmethod
+    def _normalize_resume_pending_jobs(cls, jobs: list[dict], run_dir: Path) -> list[dict]:
+        merged_details = {
+            cls._job_item_key(item): item
+            for item in cls._merge_job_items_from_paths(
+                [
+                    run_dir / "jobs_found.json",
+                    run_dir / "jobs.json",
+                    run_dir / "jobs_recommended.json",
+                ]
+            )
+            if cls._job_item_key(item)
+        }
+        pending_jobs: list[dict] = []
+        for raw in jobs:
+            if not isinstance(raw, dict):
+                continue
+            job = dict(raw)
+            key = cls._job_item_key(job)
+            if key:
+                detail = merged_details.get(key)
+                if detail is not None:
+                    job = cls._merge_job_item(job, detail)
+            job_url = str(job.get("url") or job.get("canonicalUrl") or "").strip()
+            if not job_url:
+                continue
+            job["url"] = job_url
+            if cls._analysis_completed(job.get("analysis")):
+                continue
+            pending_jobs.append(job)
+
+        pending_jobs.sort(
+            key=lambda item: (
+                str(item.get("dateFound") or ""),
+                str(item.get("company") or "").casefold(),
+                str(item.get("title") or "").casefold(),
+                str(item.get("url") or "").casefold(),
+            )
+        )
+        return pending_jobs
+
+    @classmethod
+    def _load_resume_pending_jobs(cls, run_dir: Path, include_fallback: bool = True) -> list[dict]:
+        payload = cls._load_resume_pending_payload(run_dir)
+        payload_jobs = payload.get("jobs", [])
+        if isinstance(payload_jobs, list) and not include_fallback:
+            return cls._normalize_resume_pending_jobs(payload_jobs, run_dir)
+        if not include_fallback:
+            return []
+        current_jobs = cls._collect_resume_pending_jobs(run_dir)
+        return cls._merge_resume_pending_job_lists(
+            run_dir,
+            current_jobs,
+            payload_jobs if isinstance(payload_jobs, list) else [],
+        )
+
+    @classmethod
+    def _build_resume_pending_payload(cls, run_dir: Path) -> dict:
+        existing_payload = cls._load_resume_pending_payload(run_dir)
+        payload_jobs = existing_payload.get("jobs", [])
+        pending_jobs = cls._merge_resume_pending_job_lists(
+            run_dir,
+            cls._collect_resume_pending_jobs(run_dir),
+            payload_jobs if isinstance(payload_jobs, list) else [],
+        )
+        existing_version = existing_payload.get("version")
+        try:
+            version = max(2, int(existing_version))
+        except (TypeError, ValueError):
+            version = 2
+
+        preserved_meta = {
+            key: value
+            for key, value in existing_payload.items()
+            if key not in {"version", "generatedAt", "jobs", "summary"}
+        }
+        payload = {
+            **preserved_meta,
+            "version": version,
+            "generatedAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "jobs": pending_jobs,
+        }
+        existing_summary = existing_payload.get("summary")
+        if isinstance(existing_summary, dict):
+            summary = dict(existing_summary)
+            summary["mainStagePendingCount"] = len(pending_jobs)
+            payload["summary"] = summary
+        return payload
+
+    @classmethod
+    def _write_resume_pending_jobs(cls, run_dir: Path) -> int:
+        payload = cls._build_resume_pending_payload(run_dir)
+        output_path = run_dir / "jobs_resume_pending.json"
+        output_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return len(payload["jobs"])
+
+    @staticmethod
+    def _build_job_records(jobs: list[dict]) -> list[LegacyJobResult]:
+        records: list[LegacyJobResult] = []
+        for item in jobs:
+            if not isinstance(item, dict):
+                continue
+            analysis = item.get("analysis", {})
+            if not isinstance(analysis, dict):
+                analysis = {}
+            recommend = bool(analysis.get("recommend"))
+            score = LegacyJobflowRunner._extract_match_score(analysis)
+            source_url, final_url, link_status = LegacyJobflowRunner._resolve_job_links(item)
+            canonical_url = str(item.get("canonicalUrl") or "").strip()
+
+            records.append(
+                LegacyJobResult(
+                    title=str(item.get("title") or "").strip(),
+                    company=str(item.get("company") or "").strip(),
+                    location=str(item.get("location") or "").strip(),
+                    url=source_url or canonical_url,
+                    date_found=str(item.get("dateFound") or "").strip(),
+                    match_score=score,
+                    recommend=recommend,
+                    fit_level_cn=str(analysis.get("fitLevelCn") or "").strip(),
+                    fit_track=str(analysis.get("fitTrack") or "").strip(),
+                    adjacent_direction_cn=str(analysis.get("adjacentDirectionCn") or "").strip(),
+                    source_url=source_url,
+                    final_url=final_url,
+                    link_status=link_status,
+                )
+            )
+        return records
+
+    @staticmethod
+    def _resolve_job_links(item: dict) -> tuple[str, str, str]:
+        source_url = str(item.get("url") or "").strip()
+        canonical_url = str(item.get("canonicalUrl") or "").strip()
+        analysis = item.get("analysis")
+        if not isinstance(analysis, dict):
+            analysis = {}
+        post_verify = analysis.get("postVerify")
+        if not isinstance(post_verify, dict):
+            post_verify = {}
+        jd = item.get("jd")
+        if not isinstance(jd, dict):
+            jd = {}
+
+        verified_final_url = str(post_verify.get("finalUrl") or "").strip()
+        if verified_final_url and LegacyJobflowRunner._coerce_bool(post_verify.get("isValidJobPage")):
+            return source_url, verified_final_url, "verified_final"
+
+        apply_url = str(jd.get("applyUrl") or item.get("applyUrl") or "").strip()
+        if apply_url:
+            return source_url, apply_url, "apply"
+
+        final_url = str(jd.get("finalUrl") or item.get("finalUrl") or "").strip()
+        if final_url:
+            return source_url, final_url, "final"
+
+        if canonical_url:
+            return source_url, canonical_url, "canonical"
+
+        if source_url:
+            return source_url, source_url, "source"
+
+        return "", "", "source"
+
+    @staticmethod
+    def _coerce_bool(value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        text = str(value or "").strip().casefold()
+        return text in {"1", "true", "yes", "y", "on"}
 
     def _load_base_config(self) -> dict:
         candidates = [
@@ -380,6 +1062,129 @@ class LegacyJobflowRunner:
                     return str(binary)
         return ""
 
+    def _resolve_npm_binary(self, node_bin: str = "") -> str:
+        for candidate in ("npm.cmd", "npm", "npm.exe"):
+            from_path = shutil.which(candidate)
+            if from_path:
+                return from_path
+
+        custom = os.getenv("JOBFLOW_NPM_PATH", "").strip()
+        if custom and Path(custom).exists():
+            return str(Path(custom))
+
+        if node_bin:
+            node_path = Path(node_bin)
+            sibling_candidates = (
+                node_path.with_name("npm.cmd"),
+                node_path.with_name("npm"),
+                node_path.with_name("npm.exe"),
+            )
+            for path in sibling_candidates:
+                if path.exists():
+                    return str(path)
+        return ""
+
+    def _ensure_legacy_dependencies(self, node_bin: str) -> LegacyStageRunResult:
+        if self._legacy_dependencies_ready():
+            return LegacyStageRunResult(
+                success=True,
+                exit_code=0,
+                message="Legacy Node dependencies are ready.",
+                stdout_tail="",
+                stderr_tail="",
+            )
+
+        npm_bin = self._resolve_npm_binary(node_bin=node_bin)
+        if not npm_bin:
+            return LegacyStageRunResult(
+                success=False,
+                exit_code=-1,
+                message=(
+                    "Legacy Node dependencies are missing, and npm is not available. "
+                    "Install dependencies in legacy_jobflow_reference or provide npm via PATH / JOBFLOW_NPM_PATH."
+                ),
+                stdout_tail="",
+                stderr_tail="",
+            )
+
+        install_result = self._install_legacy_dependencies(npm_bin=npm_bin)
+        if not install_result.success:
+            return install_result
+        if self._legacy_dependencies_ready():
+            return LegacyStageRunResult(
+                success=True,
+                exit_code=0,
+                message="Legacy Node dependencies are ready.",
+                stdout_tail=install_result.stdout_tail,
+                stderr_tail=install_result.stderr_tail,
+            )
+        return LegacyStageRunResult(
+            success=False,
+            exit_code=-1,
+            message=(
+                "Legacy Node dependencies were installed, but required packages are still missing. "
+                "Please check legacy_jobflow_reference/node_modules."
+            ),
+            stdout_tail=install_result.stdout_tail,
+            stderr_tail=install_result.stderr_tail,
+        )
+
+    def _install_legacy_dependencies(self, npm_bin: str) -> LegacyStageRunResult:
+        package_lock = self.legacy_root / "package-lock.json"
+        commands: list[list[str]] = []
+        if package_lock.exists():
+            commands.append([npm_bin, "ci", "--no-audit", "--no-fund"])
+        commands.append([npm_bin, "install", "--no-audit", "--no-fund"])
+
+        last_result: LegacyStageRunResult | None = None
+        for command in commands:
+            result = self._run_process_stage(
+                command=command,
+                cwd=self.legacy_root,
+                env=os.environ.copy(),
+                timeout_seconds=600,
+                success_message="Legacy dependency installation completed.",
+                failure_message="Legacy dependency installation failed.",
+            )
+            if result.success:
+                return result
+            last_result = result
+        return last_result or LegacyStageRunResult(
+            success=False,
+            exit_code=-1,
+            message="Legacy dependency installation failed.",
+            stdout_tail="",
+            stderr_tail="",
+        )
+
+    def _legacy_dependencies_ready(self) -> bool:
+        node_modules_dir = self.legacy_root / "node_modules"
+        if not node_modules_dir.exists():
+            return False
+
+        required_packages = self._legacy_dependency_names()
+        if not required_packages:
+            return True
+        for package_name in required_packages:
+            if not (node_modules_dir / package_name / "package.json").exists():
+                return False
+        return True
+
+    def _legacy_dependency_names(self) -> list[str]:
+        package_json_path = self.legacy_root / "package.json"
+        fallback = ["cheerio", "exceljs", "openai", "p-limit"]
+        if not package_json_path.exists():
+            return fallback
+        try:
+            payload = json.loads(package_json_path.read_text(encoding="utf-8"))
+        except Exception:
+            return fallback
+        dependencies = payload.get("dependencies")
+        if not isinstance(dependencies, dict):
+            return fallback
+        names = [str(name or "").strip() for name in dependencies.keys()]
+        return [name for name in names if name] or fallback
+
     def _build_runtime_config(
         self,
         base_config: dict,
@@ -464,6 +1269,23 @@ class LegacyJobflowRunner:
             max(20, int(analysis_config.get("maxJobsToAnalyzePerRun", 60))),
         )
 
+        if pipeline_stage == "resume_pending":
+            # Resume-only stage processes unfinished main-stage jobs before
+            # launching any fresh discovery work.
+            sources_config["enableWebSearch"] = False
+            sources_config["enableCompanySources"] = False
+            sources_config["requireCompanyDiscovery"] = False
+            sources_config["enableCompanySearchFallback"] = False
+            company_discovery_config["enableAutoDiscovery"] = False
+            company_discovery_config["queries"] = []
+            analysis_config["scoringUseWebSearch"] = False
+            analysis_config["postVerifyEnabled"] = True
+            analysis_config["postVerifyUseWebSearch"] = True
+            analysis_config["postVerifyRequireChecked"] = True
+
+            output_config["foundJsonPath"] = "./jobs_found.resume_pending.json"
+            return config
+
         if pipeline_stage == "web_signal":
             # Web signal stage only collects potential hiring company hints from web job hits.
             sources_config["enableWebSearch"] = True
@@ -488,33 +1310,68 @@ class LegacyJobflowRunner:
             output_config["recommendedXlsxPath"] = "./jobs_recommended.signal.xlsx"
             output_config["recommendedJsonPath"] = "./jobs_recommended.signal.json"
             output_config["cnEuropeJsonPath"] = "./jobs_cn_europe.signal.json"
+            output_config["resumePendingPath"] = "./jobs_resume_pending.json"
             return config
 
         # Main stage: company pool first, company sources as final job channel.
+        adaptive_search_config = self._ensure_dict(config, "adaptiveSearch")
+        fetch_config = self._ensure_dict(config, "fetch")
+
         sources_config["enableWebSearch"] = False
         sources_config["enableCompanySources"] = True
         sources_config["requireCompanyDiscovery"] = True
-        sources_config["maxCompaniesPerRun"] = min(
-            max(60, int(sources_config.get("maxCompaniesPerRun", 180))),
-            260,
-        )
+        sources_config["maxCompaniesPerRun"] = 16
+        sources_config["maxJobsPerCompany"] = 5
+        sources_config["maxJobLinksPerCompany"] = 12
         sources_config["enableCompanySearchFallback"] = True
-        sources_config["maxCompanySearchFallbacksPerRun"] = min(
-            80,
-            max(24, int(sources_config.get("maxCompanySearchFallbacksPerRun", 24))),
-        )
+        sources_config["maxCompanySearchFallbacksPerRun"] = 2
 
         company_discovery_config["enableAutoDiscovery"] = True
         company_discovery_config["queries"] = company_discovery_queries
-        company_discovery_config["maxNewCompaniesPerRun"] = min(
-            max(40, int(company_discovery_config.get("maxNewCompaniesPerRun", 100))),
-            260,
-        )
+        company_discovery_config["maxNewCompaniesPerRun"] = 6
         analysis_config["scoringUseWebSearch"] = False
         # Ask AI to post-verify link validity/expiry signals before final recommendation.
         analysis_config["postVerifyEnabled"] = True
         analysis_config["postVerifyUseWebSearch"] = True
         analysis_config["postVerifyRequireChecked"] = True
+        analysis_config["maxJobsToAnalyzePerRun"] = 8
+        analysis_config["jdFetchMaxJobsPerRun"] = 10
+        analysis_config["postVerifyMaxJobsPerRun"] = 5
+        fetch_config["timeoutMs"] = 12000
+        adaptive_search_config.update(
+            {
+                "enabled": True,
+                "targetNewJobs": 3,
+                "minNewJobsToContinue": 3,
+                "baseBudgetSeconds": 300,
+                "baseRoundSeconds": 300,
+                "extendBudgetSeconds": 480,
+                "extendRoundSeconds": 480,
+                "deepBudgetSeconds": 720,
+                "deepRoundSeconds": 720,
+                "baseExistingCompanies": 8,
+                "baseExistingCompanyBatchSize": 8,
+                "extendCompanyBatchSize": 4,
+                "extendExistingCompanyBatchSize": 4,
+                "maxExistingCompaniesPerRun": 12,
+                "coldDiscoveryQueryBudget": 6,
+                "coldStartQueryBudget": 6,
+                "warmDiscoveryQueryBudget": 4,
+                "deepSearchQueryBudget": 4,
+                "coldDiscoveryCompanyBudget": 6,
+                "coldStartMaxNewCompanies": 6,
+                "warmDiscoveryCompanyBudget": 4,
+                "deepSearchMaxNewCompanies": 4,
+                "processDiscoveredCompaniesPerRound": 4,
+                "coldStartImmediateProcessBatchSize": 4,
+                "deepSearchImmediateProcessBatchSize": 4,
+                "companyCooldownDaysNoJobs": 7,
+                "companyCooldownDaysNoNewJobs": 3,
+                "companyCooldownDaysSomeJobsNoNew": 3,
+                "companyCooldownDaysWithNewJobs": 2,
+                "companyCooldownDaysWithNew": 2,
+            }
+        )
         translation_config["enable"] = False
 
         output_config["trackerXlsxPath"] = "./jobs_recommended.xlsx"
@@ -524,17 +1381,8 @@ class LegacyJobflowRunner:
         output_config["recommendedXlsxPath"] = "./jobs_recommended.xlsx"
         output_config["recommendedJsonPath"] = "./jobs_recommended.json"
         output_config["cnEuropeJsonPath"] = "./jobs_cn_europe.json"
+        output_config["resumePendingPath"] = "./jobs_resume_pending.json"
         return config
-
-    def _resolve_companies_path(self) -> Path:
-        candidates = [
-            self.legacy_root / "companies.json",
-            self.legacy_root / "companies.example.json",
-        ]
-        for path in candidates:
-            if path.exists():
-                return path.resolve()
-        raise FileNotFoundError("No companies file found in legacy directory.")
 
     def _prepare_candidate_companies_path(
         self,
@@ -544,74 +1392,18 @@ class LegacyJobflowRunner:
     ) -> Path:
         if candidate.candidate_id is None:
             raise ValueError("Candidate ID is required.")
-        base_companies_path = self._resolve_companies_path()
         candidate_companies_path = run_dir / "companies.candidate.json"
-
-        base_payload = self._load_companies_payload(base_companies_path)
         existing_payload = self._load_companies_payload(candidate_companies_path)
-        seed_payload = self._build_seed_companies_payload(candidate, profiles)
-        merged_payload = self._merge_companies_payloads(existing_payload, base_payload)
-        merged_payload = self._merge_companies_payloads(seed_payload, merged_payload)
+        if candidate_companies_path.exists():
+            payload = existing_payload
+        else:
+            # Cold start: the desktop app should begin from an empty company pool.
+            payload = {"companies": []}
         candidate_companies_path.write_text(
-            json.dumps(merged_payload, ensure_ascii=False, indent=2),
+            json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         return candidate_companies_path.resolve()
-
-    def _build_seed_companies_payload(
-        self,
-        candidate: CandidateRecord,
-        profiles: list[SearchProfileRecord],
-    ) -> dict:
-        seeds: list[dict] = []
-        for profile in profiles:
-            profile_label = str(profile.name or "").strip()
-            focus_tags = [f"profile:{profile_label}"] if profile_label else []
-            for raw in self._split_multivalue_text(profile.company_seed_list):
-                item = self._company_item_from_seed_text(raw)
-                if not item:
-                    continue
-                tags = list(item.get("tags") or [])
-                tags.extend(["pool:seed", "stage:core"])
-                tags.extend(focus_tags)
-                item["tags"] = tags
-                seeds.append(item)
-        if candidate.name.strip():
-            note_tag = f"candidate:{candidate.name.strip()}"
-            for item in seeds:
-                tags = list(item.get("tags") or [])
-                if note_tag not in tags:
-                    tags.append(note_tag)
-                item["tags"] = tags
-        return {"companies": seeds}
-
-    def _company_item_from_seed_text(self, raw: str) -> dict:
-        text = str(raw or "").strip()
-        if not text:
-            return {}
-        if len(text) > 180:
-            text = text[:180].strip()
-        website = ""
-        careers = ""
-        name = text
-        if "http://" in text or "https://" in text:
-            match = re.search(r"https?://[^\s]+", text)
-            if match:
-                url = match.group(0).strip().rstrip(").,;")
-                domain = self._domain_from_url(url)
-                if domain:
-                    website = f"https://{domain}"
-                careers = url
-                prefix = text[: match.start()].strip(" -|,;")
-                suffix = text[match.end() :].strip(" -|,;")
-                name = prefix or suffix or domain or text
-        return {
-            "name": str(name or "").strip(),
-            "website": website,
-            "careersUrl": careers,
-            "tags": [],
-            "source": "profile_seed",
-        }
 
     @staticmethod
     def _load_companies_payload(path: Path) -> dict:
@@ -899,7 +1691,6 @@ class LegacyJobflowRunner:
             role_terms.extend(description_query_lines(profile.keyword_focus))
             role_terms.extend(self._split_multivalue_text(profile.company_focus))
             role_terms.extend(self._split_multivalue_text(profile.company_keyword_focus))
-            role_terms.extend(self._split_multivalue_text(profile.company_seed_list))
         role_terms.extend(candidate.target_directions.splitlines())
 
         normalized_roles: list[str] = []
@@ -908,29 +1699,15 @@ class LegacyJobflowRunner:
             text = str(raw or "").strip()
             if not text:
                 continue
+            if len(text) > 120:
+                continue
+            if len(text) > 80 and re.search(r"[,.，。;；:：]", text):
+                continue
             key = text.casefold()
             if key in seen_roles:
                 continue
             seen_roles.add(key)
             normalized_roles.append(text)
-
-        location_terms: list[str] = candidate_location_query_terms(
-            base_location_struct=candidate.base_location_struct,
-            preferred_locations_struct=candidate.preferred_locations_struct,
-            base_location_text=candidate.base_location,
-            preferred_locations_text=candidate.preferred_locations,
-        )
-        for profile in source:
-            location_terms.extend(self._split_multivalue_text(profile.location_preference))
-
-        dedup_locations: list[str] = []
-        seen_locations: set[str] = set()
-        for raw in location_terms:
-            key = str(raw or "").strip().casefold()
-            if key in seen_locations:
-                continue
-            seen_locations.add(key)
-            dedup_locations.append(str(raw or "").strip())
 
         feedback = self._load_run_feedback(run_dir)
         feedback_companies = list(feedback.get("companies", []))
@@ -955,20 +1732,21 @@ class LegacyJobflowRunner:
             base = re.sub(r"\bcareer(s)?\b", "", base, flags=re.IGNORECASE).strip()
             if not base:
                 continue
+            if len(base) > 120:
+                continue
+            if len(base) > 80 and re.search(r"[,.，。;；:：]", base):
+                continue
             seed_queries.append(f"{base} companies careers")
 
         generated: list[str] = []
-        for role in normalized_roles[:18]:
+        for role in normalized_roles[:6]:
             generated.append(f"{role} companies careers")
-            for location in dedup_locations[:6]:
-                generated.append(f"{role} companies careers {location}")
-                generated.append(f"{role} employers {location}")
-        for company in feedback_companies[:40]:
+            generated.append(f"{role} employers")
+        for company in feedback_companies[:8]:
             generated.append(f"{company} careers")
-            generated.append(f"{company} jobs official")
-        for keyword in feedback_keywords[:24]:
+        for keyword in feedback_keywords[:6]:
             generated.append(f"{keyword} companies careers")
-        generated.extend(seed_queries[:30])
+        generated.extend(seed_queries[:6])
         if not generated:
             generated = ["systems engineer companies careers", "verification engineer companies careers"]
 
@@ -985,7 +1763,7 @@ class LegacyJobflowRunner:
                 continue
             seen.add(key)
             dedup.append(text)
-        return dedup[:120]
+        return dedup[:36]
 
     def _resolve_pipeline_mode(self) -> str:
         raw = str(os.getenv("JOBFLOW_PIPELINE_MODE", "") or "").strip().lower()
@@ -1012,26 +1790,67 @@ class LegacyJobflowRunner:
         command: list[str],
         env: dict[str, str],
         timeout_seconds: int,
+        cancel_event: threading.Event | None = None,
+        progress_callback: Callable[[str], None] | None = None,
     ) -> LegacyStageRunResult:
+        return self._run_process_stage(
+            command=command,
+            cwd=self.legacy_root,
+            env=env,
+            timeout_seconds=timeout_seconds,
+            success_message="Legacy stage completed.",
+            failure_message="Legacy stage failed.",
+            cancel_event=cancel_event,
+            progress_callback=progress_callback,
+        )
+
+    def _run_process_stage(
+        self,
+        command: list[str],
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int,
+        success_message: str,
+        failure_message: str,
+        cancel_event: threading.Event | None = None,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> LegacyStageRunResult:
+        stdout_lines: list[str] = []
+        stderr_lines: list[str] = []
+
+        def reader(pipe: object, sink: list[str], prefix: str = "") -> None:
+            stream = pipe
+            if stream is None:
+                return
+            try:
+                while True:
+                    line = stream.readline()
+                    if line == "":
+                        break
+                    sink.append(line)
+                    text = str(line or "").strip()
+                    if text and progress_callback is not None:
+                        try:
+                            progress_callback(f"{prefix}{text}")
+                        except Exception:
+                            pass
+            finally:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+
         try:
-            completed = subprocess.run(
+            process = subprocess.Popen(
                 command,
-                cwd=self.legacy_root,
-                capture_output=True,
+                cwd=cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
                 env=env,
-                timeout=timeout_seconds,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            return LegacyStageRunResult(
-                success=False,
-                exit_code=-1,
-                message=f"Legacy stage timed out after {timeout_seconds} seconds.",
-                stdout_tail=self._tail(getattr(exc, "stdout", "") or ""),
-                stderr_tail=self._tail(getattr(exc, "stderr", "") or ""),
+                bufsize=1,
             )
         except Exception as exc:
             return LegacyStageRunResult(
@@ -1042,14 +1861,89 @@ class LegacyJobflowRunner:
                 stderr_tail="",
             )
 
-        success = completed.returncode == 0
+        stdout_thread = threading.Thread(target=reader, args=(process.stdout, stdout_lines, ""), daemon=True)
+        stderr_thread = threading.Thread(
+            target=reader,
+            args=(process.stderr, stderr_lines, "[stderr] "),
+            daemon=True,
+        )
+        stdout_thread.start()
+        stderr_thread.start()
+
+        deadline = time.monotonic() + max(1, int(timeout_seconds))
+        try:
+            while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    self._terminate_process_tree(process)
+                    stdout_thread.join(timeout=2)
+                    stderr_thread.join(timeout=2)
+                    return LegacyStageRunResult(
+                        success=False,
+                        exit_code=-2,
+                        message="Legacy stage cancelled.",
+                        stdout_tail=self._tail("".join(stdout_lines)),
+                        stderr_tail=self._tail("".join(stderr_lines)),
+                        cancelled=True,
+                    )
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, timeout_seconds)
+                try:
+                    return_code = process.wait(timeout=min(0.5, remaining))
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+        except subprocess.TimeoutExpired:
+            self._terminate_process_tree(process)
+            stdout_thread.join(timeout=2)
+            stderr_thread.join(timeout=2)
+            return LegacyStageRunResult(
+                success=False,
+                exit_code=-1,
+                message=f"Legacy stage timed out after {timeout_seconds} seconds.",
+                stdout_tail=self._tail("".join(stdout_lines)),
+                stderr_tail=self._tail("".join(stderr_lines)),
+            )
+
+        stdout_thread.join(timeout=2)
+        stderr_thread.join(timeout=2)
+        success = return_code == 0
         return LegacyStageRunResult(
             success=success,
-            exit_code=completed.returncode,
-            message="Legacy stage completed." if success else "Legacy stage failed.",
-            stdout_tail=self._tail(completed.stdout),
-            stderr_tail=self._tail(completed.stderr),
+            exit_code=return_code,
+            message=success_message if success else failure_message,
+            stdout_tail=self._tail("".join(stdout_lines)),
+            stderr_tail=self._tail("".join(stderr_lines)),
         )
+
+    @staticmethod
+    def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+        if process.poll() is not None:
+            return
+        try:
+            process.terminate()
+            process.wait(timeout=2)
+            return
+        except Exception:
+            pass
+        if os.name == "nt":
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=10,
+                )
+                process.wait(timeout=2)
+                return
+            except Exception:
+                pass
+        try:
+            process.kill()
+            process.wait(timeout=2)
+        except Exception:
+            pass
 
     def _ingest_web_signal_companies(self, run_dir: Path, companies_path: Path) -> int:
         signal_jobs = self._load_jobs_from_file(run_dir / "jobs_found.signal.json")
@@ -1311,7 +2205,82 @@ class LegacyJobflowRunner:
     def _candidate_run_dir(self, candidate_id: int) -> Path:
         return self.runtime_root / f"candidate_{candidate_id}"
 
-    def _error_result(self, candidate_id: int, message: str) -> LegacyRunResult:
+    @staticmethod
+    def _search_progress_path(run_dir: Path) -> Path:
+        return run_dir / "search.progress.json"
+
+    @classmethod
+    def _load_search_progress_from_run_dir(cls, run_dir: Path) -> LegacySearchProgress:
+        path = cls._search_progress_path(run_dir)
+        if not path.exists():
+            return LegacySearchProgress()
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return LegacySearchProgress()
+        if not isinstance(payload, dict):
+            return LegacySearchProgress()
+        status = str(payload.get("status") or "idle").strip() or "idle"
+        started_at = str(payload.get("startedAt") or "").strip()
+        elapsed_seconds = max(0, int(payload.get("elapsedSeconds") or 0))
+        if status == "running" and started_at:
+            try:
+                started_dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+                now_dt = datetime.now(timezone.utc)
+                elapsed_seconds = max(0, int((now_dt - started_dt).total_seconds()))
+            except Exception:
+                elapsed_seconds = max(0, int(payload.get("elapsedSeconds") or 0))
+        return LegacySearchProgress(
+            status=status,
+            stage=str(payload.get("stage") or "idle").strip() or "idle",
+            message=str(payload.get("message") or "").strip(),
+            last_event=str(payload.get("lastEvent") or "").strip(),
+            started_at=started_at,
+            updated_at=str(payload.get("updatedAt") or "").strip(),
+            elapsed_seconds=elapsed_seconds,
+        )
+
+    @classmethod
+    def _write_search_progress(
+        cls,
+        run_dir: Path,
+        *,
+        status: str,
+        stage: str,
+        message: str = "",
+        last_event: str = "",
+        started_at: str = "",
+    ) -> None:
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        started = str(started_at or "").strip() or now
+        elapsed_seconds = 0
+        try:
+            started_dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
+            now_dt = datetime.fromisoformat(now.replace("Z", "+00:00"))
+            elapsed_seconds = max(0, int((now_dt - started_dt).total_seconds()))
+        except Exception:
+            elapsed_seconds = 0
+        payload = {
+            "status": str(status or "idle").strip() or "idle",
+            "stage": str(stage or "idle").strip() or "idle",
+            "message": str(message or "").strip(),
+            "lastEvent": str(last_event or "").strip(),
+            "startedAt": started,
+            "updatedAt": now,
+            "elapsedSeconds": elapsed_seconds,
+        }
+        cls._search_progress_path(run_dir).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def _error_result(
+        self,
+        candidate_id: int,
+        message: str,
+        stdout_tail: str = "",
+        stderr_tail: str = "",
+    ) -> LegacyRunResult:
         run_dir = self._candidate_run_dir(candidate_id)
         config_path = run_dir / "config.generated.json"
         recommended_json_path = run_dir / "jobs_recommended.json"
@@ -1319,8 +2288,8 @@ class LegacyJobflowRunner:
             success=False,
             exit_code=-1,
             message=message,
-            stdout_tail="",
-            stderr_tail="",
+            stdout_tail=self._tail(stdout_tail),
+            stderr_tail=self._tail(stderr_tail),
             run_dir=run_dir,
             config_path=config_path,
             recommended_json_path=recommended_json_path,

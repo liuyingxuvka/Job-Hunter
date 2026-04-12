@@ -17,7 +17,6 @@ class SearchProfileRecord:
     company_keyword_focus: str = ""
     role_name_i18n: str = ""
     keyword_focus: str = ""
-    company_seed_list: str = ""
     is_active: bool = True
     queries: list[str] = field(default_factory=list)
     created_at: str = ""
@@ -41,7 +40,6 @@ class SearchProfileRepository:
           sp.company_keyword_focus AS company_keyword_focus,
           sp.role_name_i18n AS role_name_i18n,
           sp.keyword_focus AS keyword_focus,
-          sp.company_seed_list AS company_seed_list,
           sp.is_active AS is_active,
           sp.created_at AS created_at,
           sp.updated_at AS updated_at
@@ -78,7 +76,6 @@ class SearchProfileRepository:
                         company_keyword_focus=str(row["company_keyword_focus"] or ""),
                         role_name_i18n=str(row["role_name_i18n"] or ""),
                         keyword_focus=str(row["keyword_focus"] or ""),
-                        company_seed_list=str(row["company_seed_list"] or ""),
                         is_active=bool(row["is_active"]),
                         queries=queries,
                         created_at=str(row["created_at"] or ""),
@@ -102,7 +99,6 @@ class SearchProfileRepository:
                   company_keyword_focus,
                   role_name_i18n,
                   keyword_focus,
-                  company_seed_list,
                   is_active,
                   created_at,
                   updated_at
@@ -133,7 +129,6 @@ class SearchProfileRepository:
             company_keyword_focus=str(row["company_keyword_focus"] or ""),
             role_name_i18n=str(row["role_name_i18n"] or ""),
             keyword_focus=str(row["keyword_focus"] or ""),
-            company_seed_list=str(row["company_seed_list"] or ""),
             is_active=bool(row["is_active"]),
             queries=[str(item["query_text"] or "") for item in query_rows if str(item["query_text"] or "").strip()],
             created_at=str(row["created_at"] or ""),
@@ -154,10 +149,10 @@ class SearchProfileRepository:
                     """
                     INSERT INTO search_profiles (
                       candidate_id, name, scope_profile, target_role, location_preference,
-                      company_focus, company_keyword_focus, role_name_i18n, keyword_focus, company_seed_list,
+                      company_focus, company_keyword_focus, role_name_i18n, keyword_focus,
                       is_active, created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """,
                     (
                         record.candidate_id,
@@ -169,7 +164,6 @@ class SearchProfileRepository:
                         record.company_keyword_focus.strip(),
                         record.role_name_i18n.strip(),
                         record.keyword_focus.strip(),
-                        record.company_seed_list.strip(),
                         1 if record.is_active else 0,
                     ),
                 )
@@ -181,7 +175,7 @@ class SearchProfileRepository:
                     UPDATE search_profiles
                     SET candidate_id = ?, name = ?, scope_profile = ?, target_role = ?,
                         location_preference = ?, company_focus = ?, company_keyword_focus = ?,
-                        role_name_i18n = ?, keyword_focus = ?, company_seed_list = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
+                        role_name_i18n = ?, keyword_focus = ?, company_seed_list = '', is_active = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
                     (
@@ -194,7 +188,6 @@ class SearchProfileRepository:
                         record.company_keyword_focus.strip(),
                         record.role_name_i18n.strip(),
                         record.keyword_focus.strip(),
-                        record.company_seed_list.strip(),
                         1 if record.is_active else 0,
                         profile_id,
                     ),

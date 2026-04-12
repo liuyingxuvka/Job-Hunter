@@ -61,7 +61,6 @@ def ensure_demo_candidate_seeded(context: AppContext) -> bool:
         ),
         company_focus="Electrolyzer OEMs\nFuel cell system integrators\nIndustrial gas companies",
         company_keyword_focus="electrolyzer careers\nfuel cell systems jobs\nhydrogen integration engineer",
-        company_seed_list="Siemens Energy\nthyssenkrupp nucera\nAir Liquide\nLinde",
         queries=[
             "hydrogen systems integration engineer job germany",
             "electrolyzer system engineer careers europe",
@@ -85,7 +84,6 @@ def ensure_demo_candidate_seeded(context: AppContext) -> bool:
         ),
         company_focus="Energy equipment manufacturers\nAerospace & mobility systems\nIndustrial automation",
         company_keyword_focus="MBSE engineer\nrequirements verification engineer\nSysML systems engineer",
-        company_seed_list="Siemens\nBosch\nAirbus\nAlstom",
         queries=[
             "MBSE requirements verification engineer job germany",
             "SysML systems engineer energy systems careers",
@@ -109,7 +107,6 @@ def ensure_demo_candidate_seeded(context: AppContext) -> bool:
         ),
         company_focus="Grid technology companies\nPower electronics & storage\nIndustrial digital teams",
         company_keyword_focus="digital twin engineer\nPHM engineer\ncondition monitoring engineer",
-        company_seed_list="Siemens Energy\nGE Vernova\nABB\nSchneider Electric",
         queries=[
             "digital twin PHM engineer energy job germany",
             "condition monitoring engineer power systems careers",
@@ -133,7 +130,6 @@ def _save_demo_profile(
     description_zh: str,
     company_focus: str,
     company_keyword_focus: str,
-    company_seed_list: str,
     queries: list[str],
 ) -> None:
     role_name_i18n = encode_bilingual_role_name(role_name_zh, role_name_en)
@@ -150,7 +146,6 @@ def _save_demo_profile(
             company_keyword_focus=company_keyword_focus,
             role_name_i18n=role_name_i18n,
             keyword_focus=description_i18n,
-            company_seed_list=company_seed_list,
             is_active=True,
             queries=queries,
         )

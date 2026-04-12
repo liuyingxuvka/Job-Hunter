@@ -10,6 +10,19 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-12
+
+### Added
+
+- Added staged background search execution with progress reporting, cancellation support, and pending-job resume handling in the desktop workspace.
+- Added adaptive company discovery controls in the legacy search engine, including concurrency limits, company cooldowns, and carryover handling for unfinished analysis.
+
+### Changed
+
+- Added workspace-level AI health feedback so the app can surface API/model readiness and restore saved model choices more clearly.
+- Changed the search workflow to start from a cleaner candidate company pool instead of pre-baked demo company seeds.
+- Removed `company_seed_list` seeding from demo profiles and profile persistence.
+- Improved Windows startup script Python auto-detection for local venv and common local Python installs.
 ## [0.1.3] - 2026-04-12
 
 ### Changed
@@ -48,5 +61,6 @@ This project currently follows a lightweight semantic versioning approach:
 - Initial desktop application scaffold based on PySide6.
 - Local SQLite data model for candidates, search profiles, settings, jobs, analyses, and review states.
 - Legacy job discovery engine integration through `legacy_jobflow_reference/`.
+
 
 

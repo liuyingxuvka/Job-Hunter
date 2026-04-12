@@ -10,6 +10,14 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-04-12
+
+### Changed
+
+- Reissued the semantic-profile-guided search update under a correctly aligned release boundary after the accidental `v0.4.0` tag pointed to the previous commit.
+- Corrected the public release so the source commit, semantic version, changelog entry, and Windows package version all match `0.4.1`.
+- Published the same semantic-profile-guided search improvements behind a correctly versioned Windows package for end users.
+
 ## [0.4.0] - 2026-04-12
 
 ### Added

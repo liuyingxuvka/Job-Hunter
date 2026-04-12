@@ -6,11 +6,21 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$gitExe = "C:\Program Files\Git\cmd\git.exe"
+function Resolve-GitExecutable {
+  $gitCommand = Get-Command git -ErrorAction SilentlyContinue
+  if ($gitCommand -and $gitCommand.Path) {
+    return $gitCommand.Path
+  }
 
-if (-not (Test-Path -LiteralPath $gitExe)) {
-  throw "Git executable not found at $gitExe"
+  $windowsGitExe = "C:\Program Files\Git\cmd\git.exe"
+  if (Test-Path -LiteralPath $windowsGitExe) {
+    return $windowsGitExe
+  }
+
+  throw "Git executable not found in PATH or at $windowsGitExe"
 }
+
+$gitExe = Resolve-GitExecutable
 
 $blockedPathPatterns = @(
   "legacy_jobflow_reference/config.json",
@@ -80,11 +90,11 @@ function Get-GitPaths {
   param([string]$TargetScope)
 
   $command = switch ($TargetScope) {
-    "staged" { "diff --cached --name-only --diff-filter=ACMRTUXB" }
-    default { "ls-files" }
+    "staged" { @("diff", "--cached", "--name-only", "--diff-filter=ACMRTUXB") }
+    default { @("ls-files") }
   }
 
-  $output = & $gitExe -C $repoRoot $command.Split(" ")
+  $output = & $gitExe -C $repoRoot @command
   if (-not $output) {
     return @()
   }
@@ -148,7 +158,11 @@ foreach ($path in $paths) {
     continue
   }
 
-  $absolutePath = Join-Path $repoRoot ($path -replace "/", "\")
+  $absolutePath = $repoRoot
+  foreach ($segment in ($path -split "/")) {
+    $absolutePath = Join-Path -Path $absolutePath -ChildPath $segment
+  }
+
   if (-not (Test-Path -LiteralPath $absolutePath -PathType Leaf)) {
     continue
   }

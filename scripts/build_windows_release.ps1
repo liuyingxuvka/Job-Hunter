@@ -17,6 +17,7 @@ $distRoot = Join-Path $repoRoot "dist\release"
 $pyInstallerWork = Join-Path $buildRoot "pyinstaller-work"
 $pyInstallerDist = Join-Path $buildRoot "pyinstaller-dist"
 $appName = "Jobflow Desktop"
+$iconPath = Join-Path $desktopRoot "assets\app_icon.ico"
 
 function Resolve-PythonExe {
   param([string]$RequestedPath)
@@ -119,6 +120,9 @@ if (-not (Test-Path -LiteralPath $legacyRoot)) {
 if (-not (Test-Path -LiteralPath $privacyAuditPath)) {
   throw "privacy_audit.ps1 not found at $privacyAuditPath"
 }
+if (-not (Test-Path -LiteralPath $iconPath)) {
+  throw "Application icon not found at $iconPath"
+}
 
 Invoke-Python -PythonSpec $pythonSpec -Arguments @("-m", "PyInstaller", "--version") | Out-Null
 
@@ -144,6 +148,8 @@ Invoke-Python -PythonSpec $pythonSpec -Arguments @(
   "--windowed",
   "--name",
   $appName,
+  "--icon",
+  $iconPath,
   "--distpath",
   $pyInstallerDist,
   "--workpath",

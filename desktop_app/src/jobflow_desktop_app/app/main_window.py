@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
 import sys
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
+from PySide6.QtGui import QCloseEvent, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -19,6 +21,20 @@ from .ui.pages import CandidateDirectoryPage, CandidateWorkspacePage
 
 def _t(language: str, zh: str, en: str) -> str:
     return en if language == "en" else zh
+
+
+def _resolve_app_icon(context: AppContext) -> QIcon | None:
+    candidates = (
+        context.paths.project_root / "assets" / "app_icon.png",
+        context.paths.project_root / "assets" / "app_icon.ico",
+    )
+    for path in candidates:
+        if not isinstance(path, Path) or not path.exists():
+            continue
+        icon = QIcon(str(path))
+        if not icon.isNull():
+            return icon
+    return None
 
 
 class _AIValidationWorker(QObject):
@@ -122,6 +138,19 @@ class MainWindow(QMainWindow):
         self.refresh()
         QTimer.singleShot(0, self._warmup_model_catalog)
 
+    def _shutdown_ai_validation(self, wait_ms: int = 2000) -> None:
+        thread = self._ai_validation_thread
+        if isinstance(thread, QThread) and thread.isRunning():
+            thread.wait(max(0, int(wait_ms)))
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        try:
+            if isinstance(getattr(self, "workspace_page", None), CandidateWorkspacePage):
+                self.workspace_page.shutdown_background_work(wait_ms=8000)
+            self._shutdown_ai_validation(wait_ms=2000)
+        finally:
+            super().closeEvent(event)
+
     def _build_pages(self) -> None:
         self.candidate_directory_page = CandidateDirectoryPage(
             self.context,
@@ -199,6 +228,7 @@ class MainWindow(QMainWindow):
 
         old_candidate_page = self.candidate_directory_page
         old_workspace_page = self.workspace_page
+        old_workspace_page.shutdown_background_work(wait_ms=8000)
         self.stack.removeWidget(old_candidate_page)
         self.stack.removeWidget(old_workspace_page)
         old_candidate_page.deleteLater()
@@ -335,7 +365,8 @@ class MainWindow(QMainWindow):
 
         self._set_ai_status("checking")
         worker = _AIValidationWorker(self.context)
-        thread = QThread(self)
+        thread_parent = QApplication.instance()
+        thread = QThread(thread_parent if isinstance(thread_parent, QObject) else None)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.finished.connect(self._on_ai_health_check_finished)
@@ -419,7 +450,12 @@ class MainWindow(QMainWindow):
 
 def run_desktop_app(context: AppContext) -> int:
     app = QApplication.instance() or QApplication(sys.argv)
+    app_icon = _resolve_app_icon(context)
+    if app_icon is not None:
+        app.setWindowIcon(app_icon)
     apply_theme(app)
     window = MainWindow(context)
+    if app_icon is not None:
+        window.setWindowIcon(app_icon)
     window.show()
     return app.exec()

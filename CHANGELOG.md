@@ -10,6 +10,20 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-04-12
+
+### Added
+
+- Added branded Windows application icon assets for the desktop app and packaged executable.
+- Added crash logging for uncaught desktop runtime exceptions so failures leave a local `crash.log` under the runtime logs directory.
+
+### Changed
+
+- Improved desktop shutdown behavior so workspace background tasks and AI validation threads are stopped more cleanly during window close, UI rebuilds, and language switches.
+- Updated Windows runtime resolution to prefer bundled Node and npm binaries before falling back to system PATH, which makes the packaged app more predictable across machines.
+- Changed Windows legacy subprocess launches to avoid flashing console windows during background operations.
+- Updated the Windows release build script to require and embed the application icon into the packaged `Jobflow Desktop.exe`.
+
 ## [0.3.0] - 2026-04-12
 
 ### Added

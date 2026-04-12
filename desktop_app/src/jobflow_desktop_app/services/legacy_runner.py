@@ -1036,10 +1036,6 @@ class LegacyJobflowRunner:
         return env
 
     def _resolve_node_binary(self) -> str:
-        from_path = shutil.which("node")
-        if from_path:
-            return from_path
-
         custom = os.getenv("JOBFLOW_NODE_PATH", "").strip()
         if custom and Path(custom).exists():
             return str(Path(custom))
@@ -1060,14 +1056,13 @@ class LegacyJobflowRunner:
                 binary = folder / "node.exe"
                 if binary.exists():
                     return str(binary)
+
+        from_path = shutil.which("node")
+        if from_path:
+            return from_path
         return ""
 
     def _resolve_npm_binary(self, node_bin: str = "") -> str:
-        for candidate in ("npm.cmd", "npm", "npm.exe"):
-            from_path = shutil.which(candidate)
-            if from_path:
-                return from_path
-
         custom = os.getenv("JOBFLOW_NPM_PATH", "").strip()
         if custom and Path(custom).exists():
             return str(Path(custom))
@@ -1082,7 +1077,30 @@ class LegacyJobflowRunner:
             for path in sibling_candidates:
                 if path.exists():
                     return str(path)
+
+        for candidate in ("npm.cmd", "npm", "npm.exe"):
+            from_path = shutil.which(candidate)
+            if from_path:
+                return from_path
         return ""
+
+    @staticmethod
+    def _windows_subprocess_kwargs() -> dict[str, object]:
+        if os.name != "nt":
+            return {}
+
+        kwargs: dict[str, object] = {}
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        if creationflags:
+            kwargs["creationflags"] = creationflags
+
+        startupinfo_factory = getattr(subprocess, "STARTUPINFO", None)
+        if startupinfo_factory is not None:
+            startupinfo = startupinfo_factory()
+            startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+            startupinfo.wShowWindow = 0
+            kwargs["startupinfo"] = startupinfo
+        return kwargs
 
     def _ensure_legacy_dependencies(self, node_bin: str) -> LegacyStageRunResult:
         if self._legacy_dependencies_ready():
@@ -1880,6 +1898,7 @@ class LegacyJobflowRunner:
                 errors="replace",
                 env=env,
                 bufsize=1,
+                **self._windows_subprocess_kwargs(),
             )
         except Exception as exc:
             return LegacyStageRunResult(
@@ -1963,6 +1982,7 @@ class LegacyJobflowRunner:
                     text=True,
                     check=False,
                     timeout=10,
+                    **LegacyJobflowRunner._windows_subprocess_kwargs(),
                 )
                 process.wait(timeout=2)
                 return

@@ -143,6 +143,11 @@ class _BusyTaskRelay(QObject):
         self._callback(result, error)
 
 
+def _background_thread_parent() -> QObject | None:
+    app = QApplication.instance()
+    return app if isinstance(app, QObject) else None
+
+
 def run_busy_task(
     owner: QWidget,
     *,
@@ -175,7 +180,7 @@ def run_busy_task(
         QApplication.processEvents()
 
     worker = _BackgroundTaskWorker(task)
-    thread = QThread(owner)
+    thread = QThread(_background_thread_parent())
     worker.moveToThread(thread)
     thread.started.connect(worker.run)
     completed = False
@@ -3411,6 +3416,18 @@ class SearchResultsStep(QWidget):
             )
         )
 
+    def shutdown_background_work(self, wait_ms: int = 8000) -> None:
+        self._stop_live_results_updates()
+        self._notification_timer.stop()
+        self._hide_notification_toast()
+        cancel_event = self._search_cancel_event
+        if cancel_event is not None:
+            cancel_event.set()
+        running_thread = getattr(self, "_busy_task_thread", None)
+        if isinstance(running_thread, QThread) and running_thread.isRunning():
+            running_thread.wait(max(0, int(wait_ms)))
+        self._search_cancel_event = None
+
     def _run_search(self) -> None:
         if self.current_candidate_id is None:
             QMessageBox.information(
@@ -4410,6 +4427,10 @@ class CandidateWorkspacePage(QWidget):
             "idle",
         )
         self.set_candidate(None)
+
+    def shutdown_background_work(self, wait_ms: int = 8000) -> None:
+        if hasattr(self, "results_step") and isinstance(self.results_step, SearchResultsStep):
+            self.results_step.shutdown_background_work(wait_ms=wait_ms)
 
     def set_ai_validation_status(self, message: str, level: str = "idle") -> None:
         dot_palette = {

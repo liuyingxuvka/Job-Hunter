@@ -99,12 +99,11 @@ $textExtensions = @(
 function Get-GitPaths {
   param([string]$TargetScope)
 
-  $command = switch ($TargetScope) {
-    "staged" { @("diff", "--cached", "--name-only", "--diff-filter=ACMRTUXB") }
-    default { @("ls-files") }
+  $output = switch ($TargetScope) {
+    "staged" { & $gitExe -C $repoRoot diff --cached --name-only --diff-filter=ACMRTUXB }
+    default { & $gitExe -C $repoRoot ls-files }
   }
 
-  $output = & $gitExe -C $repoRoot @command
   if (-not $output) {
     return @()
   }

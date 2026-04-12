@@ -1,6 +1,10 @@
 @echo off
 setlocal
 set "ROOT=%~dp0"
+if exist "%ROOT%Jobflow Desktop.exe" (
+  start "" "%ROOT%Jobflow Desktop.exe"
+  exit /b 0
+)
 powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%desktop_app\run_release.ps1"
 set "EXIT_CODE=%ERRORLEVEL%"
 if not "%EXIT_CODE%"=="0" (

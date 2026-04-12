@@ -79,6 +79,14 @@ The following should not be interpreted as fully completed yet:
 
 ## 本地运行 / Local Run
 
+如果你是普通 Windows 用户，不打算从源码运行，请优先使用 GitHub Releases 里的 `Job-Hunter-<version>-win64.zip`，解压后直接启动 `Jobflow Desktop.exe`。
+
+If you are a non-developer Windows user, prefer the packaged GitHub Release asset `Job-Hunter-<version>-win64.zip` and launch `Jobflow Desktop.exe` after extracting it.
+
+下面这部分说明的是源码工作树运行方式，不是最终面向普通用户的发布形态。
+
+The instructions below describe source-checkout usage, not the end-user release package.
+
 建议在这个目录下使用独立虚拟环境：
 
 Recommended development setup in this directory:
@@ -116,6 +124,10 @@ cd .\desktop_app
 
 This script locates a usable Python runtime and fills in `PYTHONPATH` and Node-related paths when available.
 
+它更适合源码工作树；GitHub Release 里的发布包会直接提供 `Jobflow Desktop.exe`。
+
+It is intended for the source checkout; the GitHub Release package provides `Jobflow Desktop.exe` directly.
+
 ## 目录说明 / Directory Notes
 
 | Path | 中文说明 | English Description |
@@ -140,3 +152,7 @@ English:
 - `PySide6`
 - OpenAI or a compatible API endpoint configuration
 - Node.js for the legacy engine, or the portable runtime under `runtime/tools/`
+
+下载好的 Windows 发布包已经内置桌面运行时，不需要额外安装本地 Python。
+
+The packaged Windows release already bundles the desktop runtime and does not require a separate local Python installation.

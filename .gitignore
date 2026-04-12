@@ -1,4 +1,6 @@
 .git.broken.*/
+build/
+dist/
 desktop_app/.deps/
 desktop_app/.venv/
 desktop_app/src/*.egg-info/

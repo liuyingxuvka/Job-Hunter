@@ -104,6 +104,23 @@ Things the project should not overclaim today:
 
 ## 快速开始 / Quick Start
 
+### 面向普通用户的下载方式 / Download For Non-Developers
+
+如果你不是开发者，而是想直接双击使用，请优先到 GitHub Releases 下载最新的 Windows 发布包：
+
+If you are not working from source and just want a double-clickable app, download the latest Windows release package from GitHub Releases:
+
+- `Job-Hunter-<version>-win64.zip`
+- 解压后启动 `Jobflow Desktop.exe`
+- 这个发布包会自带桌面运行时、便携 Node、demo 候选人种子和安全模板
+
+- unzip it and launch `Jobflow Desktop.exe`
+- the package ships with the desktop runtime, portable Node, demo candidate seed, and safe templates
+
+发布包不会包含真实候选人数据库、客户数据、搜索历史、导出结果或运行备份。
+
+The release package does not include real candidate databases, customer data, search history, exports, or runtime backups.
+
 ### 方式一：直接启动桌面应用 / Option 1: Start The Desktop App Directly
 
 在仓库根目录双击：
@@ -139,10 +156,14 @@ python -m venv .venv
 
 English:
 
-- Windows-first development environment
-- Python 3.10+
+- Windows-first development environment for source checkout
+- Python 3.10+ for source checkout
 - An OpenAI API key
 - A usable Node.js runtime for the legacy engine, or the portable Node binaries under `desktop_app/runtime/tools/`
+
+从 GitHub Release 下载的 Windows 发布包不要求本地单独安装 Python。
+
+The Windows release package downloaded from GitHub Releases does not require a separate local Python installation.
 
 可用环境变量 / Supported environment variables:
 

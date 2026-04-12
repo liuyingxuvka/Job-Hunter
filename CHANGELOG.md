@@ -10,6 +10,18 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-12
+
+### Added
+
+- Added a Windows release packaging workflow that builds a downloadable `Job-Hunter-<version>-win64.zip` archive plus `.sha256` checksum for GitHub Releases.
+- Added release-package privacy auditing so packaged assets exclude local databases, exports, logs, backups, and search outputs while still shipping demo/default content.
+
+### Changed
+
+- Made the desktop app bundle-aware so the packaged executable can resolve runtime directories, assets, schema files, and the legacy engine layout after extraction.
+- Updated repository and desktop-app documentation to distinguish source-checkout startup from the packaged Windows release workflow.
+
 ## [0.2.0] - 2026-04-12
 
 ### Added
@@ -23,11 +35,13 @@ This project currently follows a lightweight semantic versioning approach:
 - Changed the search workflow to start from a cleaner candidate company pool instead of pre-baked demo company seeds.
 - Removed `company_seed_list` seeding from demo profiles and profile persistence.
 - Improved Windows startup script Python auto-detection for local venv and common local Python installs.
+
 ## [0.1.3] - 2026-04-12
 
 ### Changed
 
 - Hardened repository privacy boundaries, replaced local working files with safe templates, and added automated privacy checks.
+
 ## [0.1.2] - 2026-04-11
 
 ### Added
@@ -61,6 +75,7 @@ This project currently follows a lightweight semantic versioning approach:
 - Initial desktop application scaffold based on PySide6.
 - Local SQLite data model for candidates, search profiles, settings, jobs, analyses, and review states.
 - Legacy job discovery engine integration through `legacy_jobflow_reference/`.
+
 
 
 

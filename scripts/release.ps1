@@ -67,6 +67,16 @@ function Get-ReleaseDate {
   return (Get-Date).ToString("yyyy-MM-dd")
 }
 
+function Write-Utf8NoBom {
+  param(
+    [string]$Path,
+    [string]$Content
+  )
+
+  $encoding = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($Path, $Content, $encoding)
+}
+
 & $privacyAuditPath -Scope repo
 
 $pyprojectContent = Get-Content -LiteralPath $pyprojectPath -Raw
@@ -81,7 +91,7 @@ $updatedPyproject = [regex]::Replace(
   ('version = "{0}"' -f $nextVersion),
   1
 )
-Set-Content -LiteralPath $pyprojectPath -Value $updatedPyproject -Encoding UTF8
+Write-Utf8NoBom -Path $pyprojectPath -Content $updatedPyproject
 
 $packageVersionContent = Get-Content -LiteralPath $packageVersionPath -Raw
 $updatedPackageVersion = [regex]::Replace(
@@ -90,7 +100,7 @@ $updatedPackageVersion = [regex]::Replace(
   ('__version__ = "{0}"' -f $nextVersion),
   1
 )
-Set-Content -LiteralPath $packageVersionPath -Value $updatedPackageVersion -Encoding UTF8
+Write-Utf8NoBom -Path $packageVersionPath -Content $updatedPackageVersion
 
 $changelogContent = Get-Content -LiteralPath $changelogPath -Raw
 $newSection = @"
@@ -108,7 +118,7 @@ $updatedChangelog = [regex]::Replace(
   "## [Unreleased]`r`n`r`n$newSection",
   1
 )
-Set-Content -LiteralPath $changelogPath -Value $updatedChangelog -Encoding UTF8
+Write-Utf8NoBom -Path $changelogPath -Content $updatedChangelog
 
 Write-Output "Updated version: $($currentVersion.Major).$($currentVersion.Minor).$($currentVersion.Patch) -> $nextVersion"
 Write-Output "Updated changelog: $changelogPath"

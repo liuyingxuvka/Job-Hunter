@@ -81,15 +81,17 @@ Better homepage options later may include:
 
 ## Release 建议 / Release Guidance
 
-如果后面开始做可下载版本，推荐：
+如果使用 GitHub Releases 作为公开下载入口，推荐：
 
-- 用 GitHub Releases 发 Windows 包
+- 用 GitHub Releases 发 `Job-Hunter-<version>-win64.zip`
+- 同时附带 `.sha256` 校验文件
 - 在 Release Notes 里区分“本次已完成”和“仍在规划中”
 - 把启动方式、依赖和已知限制写清楚
 
-If downloadable builds become part of the workflow, it is recommended to:
+If GitHub Releases is the public download channel, it is recommended to:
 
-- publish Windows packages through GitHub Releases
+- publish `Job-Hunter-<version>-win64.zip` through GitHub Releases
+- attach a `.sha256` checksum file alongside the archive
 - keep release notes explicit about what is shipped now versus what is still planned
 - document startup steps, dependencies, and known limitations clearly
 

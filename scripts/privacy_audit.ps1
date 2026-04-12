@@ -1,6 +1,7 @@
 param(
-  [ValidateSet("repo", "staged")]
-  [string]$Scope = "repo"
+  [ValidateSet("repo", "staged", "package")]
+  [string]$Scope = "repo",
+  [string]$PackageRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -50,7 +51,12 @@ $blockedPathPatterns = @(
   "desktop_app/runtime/legacy_runs/*"
 )
 
+$packageBlockedPathPatterns = @(
+  "desktop_app/runtime/data/*"
+)
+
 $allowedPathPatterns = @(
+  "desktop_app/runtime/data/demo_candidate_resume.md",
   "desktop_app/runtime/backups/.gitignore",
   "desktop_app/runtime/exports/.gitkeep",
   "desktop_app/runtime/logs/.gitkeep",
@@ -59,6 +65,11 @@ $allowedPathPatterns = @(
 
 $contentScanExcludePaths = @(
   "scripts/privacy_audit.ps1"
+)
+
+$contentScanExcludePrefixes = @(
+  "_internal/",
+  "legacy_jobflow_reference/node_modules/"
 )
 
 $contentRules = @(
@@ -111,6 +122,40 @@ function Get-GitPaths {
   return @($output | Where-Object { $_ } | ForEach-Object { $_.Trim() -replace "\\", "/" })
 }
 
+function Get-PackagePaths {
+  param([string]$TargetRoot)
+
+  if (-not $TargetRoot) {
+    throw "PackageRoot is required when Scope is 'package'."
+  }
+
+  if (-not (Test-Path -LiteralPath $TargetRoot -PathType Container)) {
+    throw "Package root not found at $TargetRoot"
+  }
+
+  $resolvedRoot = (Resolve-Path -LiteralPath $TargetRoot).Path
+  $items = Get-ChildItem -LiteralPath $resolvedRoot -Recurse -File
+  if (-not $items) {
+    return @()
+  }
+
+  return @($items | ForEach-Object {
+      $_.FullName.Substring($resolvedRoot.Length).TrimStart('\', '/') -replace "\\", "/"
+    } | Where-Object { $_ })
+}
+
+function Get-TargetPaths {
+  param(
+    [string]$TargetScope,
+    [string]$TargetRoot
+  )
+
+  switch ($TargetScope) {
+    "package" { return Get-PackagePaths -TargetRoot $TargetRoot }
+    default { return Get-GitPaths -TargetScope $TargetScope }
+  }
+}
+
 function Test-AllowedPath {
   param([string]$Path)
 
@@ -123,13 +168,21 @@ function Test-AllowedPath {
 }
 
 function Test-BlockedPath {
-  param([string]$Path)
+  param(
+    [string]$Path,
+    [string]$TargetScope
+  )
 
   if (Test-AllowedPath -Path $Path) {
     return $false
   }
 
-  foreach ($pattern in $blockedPathPatterns) {
+  $patterns = @($blockedPathPatterns)
+  if ($TargetScope -eq "package") {
+    $patterns += $packageBlockedPathPatterns
+  }
+
+  foreach ($pattern in $patterns) {
     if ($Path -like $pattern) {
       return $true
     }
@@ -151,11 +204,29 @@ function Test-TextFilePath {
 function Test-ContentScanExcludedPath {
   param([string]$Path)
 
-  return $contentScanExcludePaths -contains $Path
+  if ($contentScanExcludePaths -contains $Path) {
+    return $true
+  }
+
+  foreach ($prefix in $contentScanExcludePrefixes) {
+    if ($Path.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+      return $true
+    }
+  }
+
+  return $false
 }
 
-$paths = Get-GitPaths -TargetScope $Scope
-$pathViolations = @($paths | Where-Object { Test-BlockedPath -Path $_ })
+$scanRoot = $repoRoot
+if ($Scope -eq "package") {
+  if (-not $PackageRoot) {
+    throw "PackageRoot is required when Scope is 'package'."
+  }
+  $scanRoot = (Resolve-Path -LiteralPath $PackageRoot).Path
+}
+
+$paths = Get-TargetPaths -TargetScope $Scope -TargetRoot $PackageRoot
+$pathViolations = @($paths | Where-Object { Test-BlockedPath -Path $_ -TargetScope $Scope })
 
 $contentViolations = @()
 foreach ($path in $paths) {
@@ -167,11 +238,10 @@ foreach ($path in $paths) {
     continue
   }
 
-  $absolutePath = $repoRoot
+  $absolutePath = $scanRoot
   foreach ($segment in ($path -split "/")) {
     $absolutePath = Join-Path -Path $absolutePath -ChildPath $segment
   }
-
   if (-not (Test-Path -LiteralPath $absolutePath -PathType Leaf)) {
     continue
   }
@@ -194,14 +264,14 @@ foreach ($path in $paths) {
 }
 
 if ($pathViolations.Count -gt 0) {
-  Write-Output "Blocked paths detected in git scope '$Scope':"
+  Write-Output "Blocked paths detected in scope '$Scope':"
   foreach ($path in $pathViolations) {
     Write-Output "  - $path"
   }
 }
 
 if ($contentViolations.Count -gt 0) {
-  Write-Output "Suspicious tracked content detected in git scope '$Scope':"
+  Write-Output "Suspicious tracked content detected in scope '$Scope':"
   foreach ($violation in $contentViolations) {
     Write-Output ("  - {0}:{1} [{2}] {3}" -f $violation.Path, $violation.Line, $violation.Rule, $violation.Snippet)
   }

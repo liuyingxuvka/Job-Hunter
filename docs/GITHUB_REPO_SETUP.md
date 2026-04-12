@@ -37,6 +37,9 @@ You can choose around 6 to 10 of the following:
 - `job-search`
 - `career-tools`
 - `desktop-app`
+- `ai-agents`
+- `automation`
+- `mcp`
 - `pyside6`
 - `sqlite`
 - `openai`

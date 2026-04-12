@@ -160,7 +160,21 @@ class MainWindow(QMainWindow):
             self._start_ai_health_check()
 
     def _open_workspace(self) -> None:
-        self.workspace_page.set_candidate(self.current_candidate_id)
+        candidate_id = self.current_candidate_id
+        if candidate_id is None:
+            candidate_id = self.candidate_directory_page.current_candidate_id
+        if candidate_id is None:
+            current_item = self.candidate_directory_page.candidate_list.currentItem()
+            if current_item is not None:
+                raw_candidate_id = current_item.data(Qt.UserRole)
+                candidate_id = int(raw_candidate_id) if raw_candidate_id is not None else None
+        if candidate_id is None:
+            self.stack.setCurrentWidget(self.candidate_directory_page)
+            return
+        if candidate_id != self.current_candidate_id:
+            self._set_current_candidate(candidate_id)
+        else:
+            self.workspace_page.set_candidate(candidate_id)
         self.stack.setCurrentWidget(self.workspace_page)
         self._start_ai_health_check()
 

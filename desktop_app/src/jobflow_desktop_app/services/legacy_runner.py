@@ -18,7 +18,7 @@ from ..db.repositories.candidates import CandidateRecord
 from ..db.repositories.profiles import SearchProfileRecord
 from ..db.repositories.settings import OpenAISettings
 from .location_structured import candidate_location_preference_text
-from .role_recommendations import description_query_lines, role_name_query_lines
+from .role_recommendations import description_query_lines, load_resume_excerpt_result, role_name_query_lines
 
 
 @dataclass(frozen=True)
@@ -1569,15 +1569,43 @@ class LegacyJobflowRunner:
 
     def _resolve_resume_path(self, candidate: CandidateRecord, run_dir: Path) -> str:
         raw_path = candidate.active_resume_path.strip()
+        resume_import_note = ""
         if raw_path:
             path = Path(raw_path)
             if path.exists() and path.is_file():
-                return str(path.resolve())
+                suffix = path.suffix.lower()
+                if suffix in {".md", ".txt"}:
+                    return str(path.resolve())
+
+                resume_result = load_resume_excerpt_result(str(path), max_chars=None)
+                if resume_result.text:
+                    normalized_resume = run_dir / "resume.source.normalized.md"
+                    normalized_lines = [
+                        f"# Resume Source: {path.name}",
+                        "",
+                        resume_result.text.strip(),
+                        "",
+                    ]
+                    normalized_resume.write_text("\n".join(normalized_lines), encoding="utf-8")
+                    return str(normalized_resume.resolve())
+                if resume_result.error:
+                    resume_import_note = resume_result.error
 
         generated_resume = run_dir / "resume.generated.md"
         lines = [
             f"# Candidate: {candidate.name}",
             "",
+        ]
+        if raw_path:
+            lines.extend(
+                [
+                    f"- Resume Source Path: {raw_path}",
+                    f"- Resume Import Status: {resume_import_note or 'Unavailable or unreadable; using structured candidate summary instead.'}",
+                    "",
+                ]
+            )
+        lines.extend(
+            [
             f"- Base Location: {candidate.base_location or 'N/A'}",
             "- Preferred Locations:",
             candidate.preferred_locations.strip() or "N/A",
@@ -1585,10 +1613,11 @@ class LegacyJobflowRunner:
             "- Target Directions:",
             candidate.target_directions.strip() or "N/A",
             "",
-            "- Notes:",
+            "- Professional Background Summary:",
             candidate.notes.strip() or "N/A",
             "",
-        ]
+            ]
+        )
         generated_resume.write_text("\n".join(lines), encoding="utf-8")
         return str(generated_resume.resolve())
 

@@ -1105,8 +1105,8 @@ class CandidateForm(QWidget):
         self.notes_input.setPlaceholderText(
             _t(
                 self.ui_language,
-                "例如：语言偏好、内部推荐、地区限制、签证说明。",
-                "For example: language preference, referrals, location limits, visa notes.",
+                "例如：过往工作经历、研究方向、行业专长、核心项目、技术强项，以及你希望继续深耕的主题。",
+                "For example: work history, research focus, industry expertise, core projects, technical strengths, and the themes you want to keep pursuing.",
             )
         )
         self.notes_input.setMinimumHeight(110)
@@ -1116,7 +1116,7 @@ class CandidateForm(QWidget):
         form.addRow(_t(self.ui_language, "当前所在地", "Current Location"), base_location_wrapper)
         form.addRow(_t(self.ui_language, "希望找工作的地点", "Preferred Locations"), preferred_wrapper)
         form.addRow(_t(self.ui_language, "简历路径", "Resume Path"), resume_row)
-        form.addRow(_t(self.ui_language, "备注", "Notes"), self.notes_input)
+        form.addRow(_t(self.ui_language, "职业背景 / 专业摘要", "Professional Background / Summary"), self.notes_input)
         layout.addLayout(form)
 
         self.actions_row = QHBoxLayout()
@@ -1588,6 +1588,13 @@ class CandidateDirectoryPage(QWidget):
                 return record
         return None
 
+    def _selected_candidate_id_from_list(self) -> int | None:
+        current = self.candidate_list.currentItem()
+        if current is None:
+            return None
+        candidate_id = current.data(Qt.UserRole)
+        return int(candidate_id) if candidate_id is not None else None
+
     def _on_candidate_selected(self, current: QListWidgetItem | None, _: QListWidgetItem | None) -> None:
         if current is None:
             self.current_candidate_id = None
@@ -1669,13 +1676,20 @@ class CandidateDirectoryPage(QWidget):
             self.on_candidate_selected(None)
 
     def _open_workspace(self) -> None:
-        if self.current_candidate_id is None:
+        candidate_id = self.current_candidate_id
+        if candidate_id is None:
+            candidate_id = self._selected_candidate_id_from_list()
+        if candidate_id is None:
             QMessageBox.information(
                 self,
                 _t(self.ui_language, "进入工作台", "Open Workspace"),
                 _t(self.ui_language, "请先选择一个求职者。", "Please select a candidate first."),
             )
             return
+        self.current_candidate_id = candidate_id
+        self._update_action_state()
+        if self.on_candidate_selected:
+            self.on_candidate_selected(candidate_id)
         if self.on_open_workspace:
             self.on_open_workspace()
 
@@ -1717,8 +1731,8 @@ class CandidateBasicsStep(QWidget):
                 _t(self.ui_language, "第一步：基本信息", "Step 1: Basics"),
                 _t(
                     self.ui_language,
-                    "这里维护这个求职者自己的基础信息，比如当前所在地、希望找工作的地点、简历和补充说明。",
-                    "Maintain this candidate's core profile here, including location, preferred job locations, resume, and extra notes.",
+                    "这里维护这个求职者自己的基础信息，比如当前所在地、希望找工作的地点、简历，以及职业背景和专业摘要。",
+                    "Maintain this candidate's core profile here, including location, preferred job locations, resume, and the professional background summary used by AI.",
                 ),
             )
         )

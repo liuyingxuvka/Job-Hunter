@@ -10,6 +10,20 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-12
+
+### Added
+
+- Added an experimental `jobflow-agent` CLI that exposes JSON-based overview, candidate/profile inspection, and AI role recommendation entry points for headless automation.
+- Added repository-facing agent integration documentation, GitHub issue intake for automation requests, and GitHub Sponsors funding metadata.
+- Added `pypdf` support and package metadata updates so desktop installs can parse text-based PDF resumes more reliably and surface better project metadata.
+
+### Changed
+
+- Improved workspace navigation so opening the desktop workspace reliably follows the selected candidate instead of silently failing when the current candidate state is stale.
+- Reframed the candidate notes field as a professional background summary and used that summary as structured AI context when recommending or refining target roles.
+- Hardened resume handling for both AI prompts and legacy search runs by normalizing readable resumes, surfacing clearer errors for unreadable files, and falling back to structured candidate summaries when needed.
+
 ## [0.2.1] - 2026-04-12
 
 ### Added

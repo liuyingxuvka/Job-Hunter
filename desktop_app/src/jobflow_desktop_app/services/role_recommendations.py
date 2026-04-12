@@ -224,6 +224,13 @@ class RoleRecommendationError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class ResumeReadResult:
+    text: str = ""
+    error: str = ""
+    source_type: str = ""
+
+
 def decode_bilingual_description(raw_text: str) -> tuple[str, str]:
     text = str(raw_text or "").strip()
     if not text:
@@ -427,10 +434,16 @@ def _read_pdf_resume(path: Path) -> str:
         return ""
 
 
-def load_resume_excerpt(resume_path: str, max_chars: int = 6000) -> str:
-    path = Path(resume_path.strip())
-    if not resume_path.strip() or not path.exists() or not path.is_file():
-        return ""
+def load_resume_excerpt_result(resume_path: str, max_chars: int | None = 6000) -> ResumeReadResult:
+    raw_path = str(resume_path or "").strip()
+    path = Path(raw_path)
+    if not raw_path:
+        return ResumeReadResult()
+    if not path.exists() or not path.is_file():
+        return ResumeReadResult(
+            error=f"Resume file could not be found: {raw_path}",
+            source_type=path.suffix.lower(),
+        )
 
     suffix = path.suffix.lower()
     try:
@@ -439,24 +452,85 @@ def load_resume_excerpt(resume_path: str, max_chars: int = 6000) -> str:
         elif suffix == ".docx":
             text = _read_docx_resume(path)
         elif suffix == ".pdf":
+            try:
+                import pypdf  # noqa: F401
+            except ModuleNotFoundError:
+                return ResumeReadResult(
+                    error=(
+                        "Resume PDF parsing is unavailable in this build because the 'pypdf' package is not installed. "
+                        "Install pypdf, or convert the resume to .docx, .md, or .txt first."
+                    ),
+                    source_type=suffix,
+                )
             text = _read_pdf_resume(path)
         else:
             text = _read_text_resume(path)
-    except Exception:
-        return ""
+    except Exception as exc:
+        return ResumeReadResult(
+            error=f"Resume file could not be read: {exc}",
+            source_type=suffix,
+        )
 
     text = re.sub(r"\s+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    if len(text) > max_chars:
-        return text[:max_chars].rstrip() + "\n...[truncated]"
-    return text
+    if not text:
+        if suffix == ".pdf":
+            return ResumeReadResult(
+                error=(
+                    "Resume PDF contains no extractable text. It may be a scanned or image-only PDF. "
+                    "Please OCR it, or convert it to .docx, .md, or .txt before asking for AI role recommendations."
+                ),
+                source_type=suffix,
+            )
+        return ResumeReadResult(
+            error=f"Resume file is empty or unreadable: {raw_path}",
+            source_type=suffix,
+        )
+
+    if max_chars is not None and max_chars > 0 and len(text) > max_chars:
+        text = text[:max_chars].rstrip() + "\n...[truncated]"
+    return ResumeReadResult(text=text, source_type=suffix)
+
+
+def load_resume_excerpt(resume_path: str, max_chars: int | None = 6000) -> str:
+    return load_resume_excerpt_result(resume_path, max_chars=max_chars).text
+
+
+def manual_background_summary(candidate: CandidateRecord) -> str:
+    return candidate.notes.strip()
+
+
+def build_missing_background_error(
+    *,
+    action_name: str,
+    candidate: CandidateRecord,
+    resume_result: ResumeReadResult,
+) -> str:
+    if resume_result.text or manual_background_summary(candidate):
+        return ""
+
+    field_name = "Professional Background / 专业摘要"
+    if candidate.active_resume_path.strip():
+        return (
+            f"{action_name} needs usable candidate background information. "
+            f"The resume could not be read and '{field_name}' is empty. "
+            f"Please upload a readable resume, or fill in '{field_name}' with work history, domain focus, or core strengths first."
+        )
+    return (
+        f"{action_name} needs usable candidate background information. "
+        f"No readable resume was provided and '{field_name}' is empty. "
+        f"Please upload a resume, or fill in '{field_name}' with work history, domain focus, or core strengths first."
+    )
 
 
 def build_role_recommendation_prompt(
     candidate: CandidateRecord,
     existing_roles: list[tuple[str, str]] | None = None,
+    resume_result: ResumeReadResult | None = None,
 ) -> str:
-    resume_excerpt = load_resume_excerpt(candidate.active_resume_path)
+    resolved_resume = resume_result or load_resume_excerpt_result(candidate.active_resume_path)
+    resume_excerpt = resolved_resume.text
+    background_summary = manual_background_summary(candidate)
     normalized_existing: list[tuple[str, str]] = []
     for role in existing_roles or []:
         if not isinstance(role, tuple) or len(role) != 2:
@@ -474,16 +548,24 @@ def build_role_recommendation_prompt(
         candidate.preferred_locations.strip() or "N/A",
         "Current target directions (self-described):",
         candidate.target_directions.strip() or "N/A",
-        "Notes:",
-        candidate.notes.strip() or "N/A",
+        "Professional background summary (manual):",
+        background_summary or "N/A",
     ]
 
-    if candidate.active_resume_path.strip():
+    if candidate.active_resume_path.strip() and resume_excerpt:
         parts.extend(
             [
                 f"Resume path: {candidate.active_resume_path.strip()}",
                 "Resume excerpt:",
-                resume_excerpt or "Resume text could not be read.",
+                resume_excerpt,
+            ]
+        )
+    elif candidate.active_resume_path.strip() and resolved_resume.error:
+        parts.extend(
+            [
+                f"Resume path: {candidate.active_resume_path.strip()}",
+                "Resume read status:",
+                "Resume text is unavailable. Use the manual professional background summary and the other candidate context as the primary source of truth.",
             ]
         )
 
@@ -504,6 +586,9 @@ def build_role_recommendation_prompt(
             "Avoid generic role titles like Engineer/Manager/Specialist without domain qualifiers.",
             "Avoid broad titles like Systems Engineer / Software Engineer / Project Manager unless strongly specialized.",
             "Prefer titles that include concrete domain or method context.",
+            "Prioritize the candidate's demonstrated domain continuity from resume, notes, and self-described directions.",
+            "Do not over-index on isolated software/tool keywords if they are not central to the candidate's main work.",
+            "If the resume context points to hydrogen, electrochemical systems, aging, degradation, durability, reliability, diagnostics, or lifetime topics, keep the recommendations anchored there unless the candidate explicitly says otherwise.",
             "Provide both role.name_en and role.name_zh.",
             "role.description_zh must be Chinese and 2-3 sentences with concrete details.",
             "role.description_en must be English and 2-3 sentences with concrete details.",
@@ -688,6 +773,15 @@ class OpenAIRoleRecommendationService:
         if not settings.api_key.strip():
             raise RoleRecommendationError("OpenAI API Key is required.")
 
+        resume_result = load_resume_excerpt_result(candidate.active_resume_path)
+        background_error = build_missing_background_error(
+            action_name="AI role recommendations",
+            candidate=candidate,
+            resume_result=resume_result,
+        )
+        if background_error:
+            raise RoleRecommendationError(background_error)
+
         existing_names = {
             str(role[0] or "").strip().casefold()
             for role in (existing_roles or [])
@@ -714,6 +808,7 @@ class OpenAIRoleRecommendationService:
                             "text": build_role_recommendation_prompt(
                                 candidate,
                                 existing_roles=existing_roles,
+                                resume_result=resume_result,
                             ),
                         }
                     ],
@@ -771,7 +866,16 @@ class OpenAIRoleRecommendationService:
         if not intent_name:
             raise RoleRecommendationError("Role name is required.")
 
-        resume_excerpt = load_resume_excerpt(candidate.active_resume_path, max_chars=3500)
+        resume_result = load_resume_excerpt_result(candidate.active_resume_path, max_chars=3500)
+        background_error = build_missing_background_error(
+            action_name="AI role refinement",
+            candidate=candidate,
+            resume_result=resume_result,
+        )
+        if background_error:
+            raise RoleRecommendationError(background_error)
+        resume_excerpt = resume_result.text
+        background_summary = manual_background_summary(candidate)
         user_prompt_parts = [
             f"Candidate name: {candidate.name}",
             f"Current location: {candidate.base_location or 'N/A'}",
@@ -779,18 +883,27 @@ class OpenAIRoleRecommendationService:
             candidate.preferred_locations.strip() or "N/A",
             "Current target directions:",
             candidate.target_directions.strip() or "N/A",
-            "Notes:",
-            candidate.notes.strip() or "N/A",
+            "Professional background summary (manual):",
+            background_summary or "N/A",
             "User provided role intent:",
             f"- Role name: {intent_name}",
             f"- Rough description: {str(rough_description or '').strip() or 'N/A'}",
+            "Keep the refined role close to the candidate's demonstrated main domain instead of over-weighting isolated tool keywords.",
         ]
-        if candidate.active_resume_path.strip():
+        if candidate.active_resume_path.strip() and resume_excerpt:
             user_prompt_parts.extend(
                 [
                     f"Resume path: {candidate.active_resume_path.strip()}",
                     "Resume excerpt:",
-                    resume_excerpt or "Resume text could not be read.",
+                    resume_excerpt,
+                ]
+            )
+        elif candidate.active_resume_path.strip() and resume_result.error:
+            user_prompt_parts.extend(
+                [
+                    f"Resume path: {candidate.active_resume_path.strip()}",
+                    "Resume read status:",
+                    "Resume text is unavailable. Use the manual professional background summary and the other candidate context as the primary source of truth.",
                 ]
             )
         user_prompt_parts.append("Return strict JSON only.")

@@ -4,16 +4,39 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jobflow-desktop-app"
-version = "0.2.1"
+version = "0.3.0"
 description = "Local desktop application for job discovery, screening, scoring, and export."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = [
-  "PySide6>=6.7,<7"
+keywords = ["job-search", "career-tools", "desktop-app", "openai", "sqlite", "automation", "ai-agents"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Win32 (MS Windows)",
+  "Intended Audience :: End Users/Desktop",
+  "Intended Audience :: Developers",
+  "License :: Other/Proprietary License",
+  "Operating System :: Microsoft :: Windows",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Office/Business",
+  "Topic :: Software Development :: Libraries :: Application Frameworks",
 ]
+dependencies = [
+  "PySide6>=6.7,<7",
+  "pypdf>=5,<7"
+]
+
+[project.urls]
+Homepage = "https://github.com/liuyingxuvka/Job-Hunter"
+Documentation = "https://github.com/liuyingxuvka/Job-Hunter/blob/main/README.md"
+Repository = "https://github.com/liuyingxuvka/Job-Hunter"
+Issues = "https://github.com/liuyingxuvka/Job-Hunter/issues"
 
 [project.scripts]
 jobflow-desktop = "jobflow_desktop_app.main:main"
+jobflow-agent = "jobflow_desktop_app.agent_cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

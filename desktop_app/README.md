@@ -72,6 +72,7 @@
 
 - Python 3.10+
 - `PySide6`
+- `pypdf`（用于读取 PDF 简历文本）
 - OpenAI 或兼容接口配置
 - Node.js，或 `runtime/tools/` 下的便携版本
 
@@ -88,6 +89,9 @@ python -m venv .venv
 .\.venv\Scripts\python -m pip install -e .
 .\.venv\Scripts\jobflow-desktop
 ```
+
+如果你希望 AI 直接读取 PDF 简历内容，请确保 PDF 本身包含可提取文本。
+如果是扫描版或图片版 PDF，需要先做 OCR，或者先转成 `.docx`、`.md`、`.txt`。
 
 备选方式：直接启动模块
 
@@ -190,6 +194,7 @@ Development dependencies:
 
 - Python 3.10+
 - `PySide6`
+- `pypdf` (used to extract text from PDF resumes)
 - OpenAI or a compatible API endpoint configuration
 - Node.js, or the portable runtime under `runtime/tools/`
 
@@ -206,6 +211,9 @@ python -m venv .venv
 .\.venv\Scripts\python -m pip install -e .
 .\.venv\Scripts\jobflow-desktop
 ```
+
+If you want AI role recommendations to read a PDF resume directly, the PDF must contain extractable text.
+Scanned or image-only PDFs need OCR first, or should be converted to `.docx`, `.md`, or `.txt`.
 
 Fallback path: run the module directly
 

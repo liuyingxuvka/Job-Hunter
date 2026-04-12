@@ -3,6 +3,28 @@
 > 本说明包含完整中文版本和完整英文版本。请先阅读中文部分，英文部分在后面。  
 > This document includes a full Chinese version and a full English version. The Chinese section comes first, followed by the English section.
 
+## Agent-Facing Summary / 面向 Agent 的摘要
+
+Job Hunter is a local-first job discovery workspace for experienced professionals. It is designed to keep personal data on the user's machine, while exposing the underlying candidate, search, and review workflow in a way that is easier for AI agents and developers to understand.
+
+Job Hunter 是一个面向有经验求职者的本地优先岗位发现工作台。它的目标是把个人数据留在用户本地，同时让候选人管理、搜索流程和结果维护这些底层逻辑更容易被 AI agent 和开发者理解。
+
+If you are an AI agent or an automated coding assistant, start here:
+
+- Read `docs/AI_INTEGRATION.md` for capabilities, privacy boundaries, current and planned integration surfaces, safe-data guidance, and example workflows
+- Read `docs/REPOSITORY_BOUNDARY.md` before touching any local runtime data or personal records
+- Treat the repository as source + docs + demo seeds only; do not assume real candidate data belongs in GitHub
+- Prefer machine-readable outputs and headless entry points over UI-only interaction
+- Use the experimental `jobflow-agent` CLI for JSON-based headless access when working from `desktop_app/`
+
+如果你是 AI agent 或自动化编码助手，请先看：
+
+- 阅读 `docs/AI_INTEGRATION.md`，了解能力、隐私边界、当前与规划中的接入面、安全数据指引和示例工作流
+- 在接触任何本地运行数据或个人记录之前，先阅读 `docs/REPOSITORY_BOUNDARY.md`
+- 把这个仓库理解为“源码 + 文档 + demo 种子”，不要默认真实候选人数据应该进入 GitHub
+- 优先使用机器可读输出，而不是只依赖 UI 交互
+- 在 `desktop_app/` 工作时，可优先使用实验性的 `jobflow-agent` CLI 获取 JSON 输出
+
 ## 中文说明
 
 ### 项目定位
@@ -107,6 +129,15 @@ python -m venv .venv
 .\.venv\Scripts\jobflow-desktop
 ```
 
+面向 agent 的无头入口（实验性）：
+
+```powershell
+cd .\desktop_app
+.\.venv\Scripts\jobflow-agent overview
+.\.venv\Scripts\jobflow-agent list-candidates
+.\.venv\Scripts\jobflow-agent get-candidate --candidate-id <candidate-id>
+```
+
 ### 核心流程
 
 1. 创建候选人档案，导入简历，填写当前所在地、目标地区和补充说明。
@@ -146,6 +177,7 @@ python -m venv .venv
 - [更新记录](CHANGELOG.md)
 - [产品定位](docs/PRODUCT_POSITIONING.md)
 - [架构概览](docs/ARCHITECTURE.md)
+- [AI 集成说明](docs/AI_INTEGRATION.md)
 - [路线图](docs/ROADMAP.md)
 - [仓库边界](docs/REPOSITORY_BOUNDARY.md)
 - [GitHub 仓库设置建议](docs/GITHUB_REPO_SETUP.md)
@@ -312,6 +344,7 @@ This boundary is now enforced through `.gitignore`, `legacy_jobflow_reference/.g
 - [Changelog](CHANGELOG.md)
 - [Product Positioning](docs/PRODUCT_POSITIONING.md)
 - [Architecture Overview](docs/ARCHITECTURE.md)
+- [AI Integration Notes](docs/AI_INTEGRATION.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Repository Boundary](docs/REPOSITORY_BOUNDARY.md)
 - [GitHub Repo Setup Suggestions](docs/GITHUB_REPO_SETUP.md)

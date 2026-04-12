@@ -8,16 +8,26 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 function Resolve-GitExecutable {
   $gitCommand = Get-Command git -ErrorAction SilentlyContinue
-  if ($gitCommand -and $gitCommand.Path) {
-    return $gitCommand.Path
+  $gitCandidate = @(
+    $gitCommand.Path,
+    $gitCommand.Source,
+    $gitCommand.Definition
+  ) | Where-Object { $_ } | Select-Object -First 1
+
+  if ($gitCandidate) {
+    return $gitCandidate
   }
 
-  $windowsGitExe = "C:\Program Files\Git\cmd\git.exe"
-  if (Test-Path -LiteralPath $windowsGitExe) {
-    return $windowsGitExe
+  if ($env:OS -eq "Windows_NT") {
+    $windowsGitExe = "C:\Program Files\Git\cmd\git.exe"
+    if (Test-Path -LiteralPath $windowsGitExe) {
+      return $windowsGitExe
+    }
+
+    throw "Git executable not found in PATH or at $windowsGitExe"
   }
 
-  throw "Git executable not found in PATH or at $windowsGitExe"
+  throw "Git executable not found in PATH."
 }
 
 $gitExe = Resolve-GitExecutable

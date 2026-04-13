@@ -105,6 +105,10 @@ node .\jobflow.mjs --discover-companies
 
 Search outputs, Excel files, generated configs, and other runtime artifacts are local execution data. They are ignored by default and should never enter the public repository.
 
+`companyFit` 只用于当前这一轮运行中的公司排序，不会把公司的匹配分永久写成一套固定标签。
+
+`companyFit` is only used to rerank companies inside the current run. It is not meant to become a permanent company score.
+
 如果你准备提交改动，建议先运行仓库根目录的隐私审计：
 
 Before opening a commit or PR, run the repository privacy audit from the repo root:

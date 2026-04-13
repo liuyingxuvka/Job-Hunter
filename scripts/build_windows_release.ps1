@@ -17,6 +17,8 @@ $distRoot = Join-Path $repoRoot "dist\release"
 $pyInstallerWork = Join-Path $buildRoot "pyinstaller-work"
 $pyInstallerDist = Join-Path $buildRoot "pyinstaller-dist"
 $appName = "Jobflow Desktop"
+$productName = "Job-Hunter"
+$exeAuthorName = "Yingxu Liu"
 $iconPath = Join-Path $desktopRoot "assets\app_icon.ico"
 
 function Resolve-PythonExe {
@@ -80,6 +82,16 @@ function Resolve-Version {
   return $match.Groups[1].Value
 }
 
+function Convert-VersionTuple {
+  param([string]$VersionText)
+
+  $parts = @($VersionText.Split(".") | Where-Object { $_ -ne "" })
+  while ($parts.Count -lt 4) {
+    $parts += "0"
+  }
+  return @($parts | Select-Object -First 4 | ForEach-Object { [int]$_ })
+}
+
 function Resolve-NpmExe {
   $npmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
   if ($npmCommand -and $npmCommand.Path) {
@@ -110,10 +122,12 @@ function Copy-DirectoryContents {
 
 $pythonSpec = Resolve-PythonExe -RequestedPath $PythonExe
 $releaseVersion = Resolve-Version -RequestedVersion $Version
+$versionTuple = Convert-VersionTuple -VersionText $releaseVersion
 $packageStem = "Job-Hunter-$releaseVersion-win64"
 $stageRoot = if ($OutputRoot) { Join-Path $OutputRoot $packageStem } else { Join-Path $buildRoot $packageStem }
 $zipPath = Join-Path $distRoot "$packageStem.zip"
 $checksumPath = "$zipPath.sha256"
+$versionInfoPath = Join-Path $buildRoot "windows-version-info.txt"
 
 if (-not (Test-Path -LiteralPath $legacyRoot)) {
   throw "legacy_jobflow_reference not found at $legacyRoot"
@@ -136,9 +150,48 @@ if (Test-Path -LiteralPath $pyInstallerWork) {
 if (Test-Path -LiteralPath $pyInstallerDist) {
   Remove-Item -LiteralPath $pyInstallerDist -Recurse -Force
 }
+if (Test-Path -LiteralPath $versionInfoPath) {
+  Remove-Item -LiteralPath $versionInfoPath -Force
+}
 
 New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $distRoot -Force | Out-Null
+
+$versionInfoContent = @"
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=($($versionTuple[0]), $($versionTuple[1]), $($versionTuple[2]), $($versionTuple[3])),
+    prodvers=($($versionTuple[0]), $($versionTuple[1]), $($versionTuple[2]), $($versionTuple[3])),
+    mask=0x3F,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo(
+      [
+        StringTable(
+          "040904B0",
+          [
+            StringStruct("CompanyName", "$exeAuthorName"),
+            StringStruct("FileDescription", "$appName"),
+            StringStruct("FileVersion", "$releaseVersion"),
+            StringStruct("InternalName", "$appName"),
+            StringStruct("OriginalFilename", "$appName.exe"),
+            StringStruct("ProductName", "$productName"),
+            StringStruct("ProductVersion", "$releaseVersion"),
+            StringStruct("LegalCopyright", "Copyright (c) $(Get-Date -Format yyyy) $exeAuthorName")
+          ]
+        )
+      ]
+    ),
+    VarFileInfo([VarStruct("Translation", [1033, 1200])])
+  ]
+)
+"@
+Set-Content -LiteralPath $versionInfoPath -Value $versionInfoContent -Encoding utf8
 
 $entryScript = Join-Path $desktopRoot "packaging_entry.py"
 Invoke-Python -PythonSpec $pythonSpec -Arguments @(
@@ -151,6 +204,8 @@ Invoke-Python -PythonSpec $pythonSpec -Arguments @(
   $appName,
   "--icon",
   $iconPath,
+  "--version-file",
+  $versionInfoPath,
   "--distpath",
   $pyInstallerDist,
   "--workpath",

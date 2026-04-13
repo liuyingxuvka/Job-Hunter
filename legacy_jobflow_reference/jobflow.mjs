@@ -85,6 +85,190 @@ function companyDomain(website) {
   return domainOf(website || "");
 }
 
+function mergeUniqueStrings(...groups) {
+  const seen = new Set();
+  const merged = [];
+  for (const group of groups) {
+    if (!Array.isArray(group)) continue;
+    for (const item of group) {
+      const text = String(item || "").trim();
+      if (!text) continue;
+      const key = text.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(text);
+    }
+  }
+  return merged;
+}
+
+function mergeSourceEvidence(existing, incoming) {
+  const left =
+    existing && typeof existing === "object" && !Array.isArray(existing) ? existing : {};
+  const right =
+    incoming && typeof incoming === "object" && !Array.isArray(incoming) ? incoming : {};
+  const merged = { ...left };
+  for (const [key, value] of Object.entries(right)) {
+    const current = merged[key];
+    if (
+      current &&
+      typeof current === "object" &&
+      !Array.isArray(current) &&
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+    ) {
+      merged[key] = { ...current, ...value };
+    } else {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+function deriveDiscoveryTagsFromText(text) {
+  const input = String(text || "").toLowerCase();
+  if (!input) return [];
+  const rules = [
+    ["hydrogen", /\bhydrogen\b|\bh2\b|氢/],
+    ["fuel_cell", /fuel cell|fuel-cell|燃料电池/],
+    ["electrolyzer", /electroly[sz]er|electrolysis|电解槽|制氢/],
+    ["battery", /\bbattery\b|\bbms\b|储能|电池/],
+    ["digital_twin", /digital twin|digital-twin|数字孪生/],
+    ["phm", /\bphm\b|prognostics|health management|健康管理/],
+    ["condition_monitoring", /condition monitoring|state monitoring|asset health|状态监测/],
+    ["mbse", /\bmbse\b|sysml|systems engineering|系统工程/],
+    ["systems", /\bsystem\b|\bsystems\b|integration|集成/],
+    ["validation", /\bvalidation\b|\bverification\b|\bv&v\b|验证|确认/],
+    ["reliability", /\breliability\b|durability|aging|可靠性|耐久|老化/],
+    ["industrial_automation", /automation|controls?|plc|scada|工业自动化|控制/],
+    ["automotive", /\bautomotive\b|vehicle|powertrain|drivetrain|ev|汽车|动力总成/],
+    ["industrial_gas", /industrial gas|工业气体/],
+    ["testing", /\btest\b|\btesting\b|diagnostic|诊断|测试/]
+  ];
+  return rules.filter(([, pattern]) => pattern.test(input)).map(([tag]) => tag);
+}
+
+function buildCompanyIdentityKeys(company) {
+  const keys = [];
+  for (const rawUrl of [
+    String(company?.website || "").trim(),
+    String(company?.careersUrl || "").trim()
+  ]) {
+    const domain = companyDomain(rawUrl);
+    if (domain) keys.push(`domain:${domain}`);
+  }
+  const jurisdiction = String(company?.jurisdictionCode || company?.jurisdiction_code || "")
+    .trim()
+    .toLowerCase();
+  const companyNumber = String(company?.companyNumber || company?.company_number || "")
+    .trim()
+    .toLowerCase();
+  if (jurisdiction && companyNumber) keys.push(`registry:${jurisdiction}:${companyNumber}`);
+  const name = normalizeCompanyName(company?.name || "");
+  if (name) keys.push(`name:${name}`);
+  return mergeUniqueStrings(keys);
+}
+
+function normalizeCompanyCandidate(raw) {
+  const item = raw && typeof raw === "object" ? { ...raw } : {};
+  item.name = String(item.name || "").trim();
+  item.website = normalizeUrl(String(item.website || "").trim());
+  item.careersUrl = normalizeUrl(String(item.careersUrl || "").trim());
+  item.tags = mergeUniqueStrings(Array.isArray(item.tags) ? item.tags : []);
+  item.discoverySources = mergeUniqueStrings(
+    Array.isArray(item.discoverySources) ? item.discoverySources : [],
+    item.source ? [item.source] : []
+  );
+  item.sourceEvidence = mergeSourceEvidence(item.sourceEvidence, {});
+  item.jurisdictionCode = String(item.jurisdictionCode || item.jurisdiction_code || "").trim();
+  item.companyNumber = String(item.companyNumber || item.company_number || "").trim();
+  item.companyType = String(item.companyType || item.company_type || "").trim();
+  item.currentStatus = String(item.currentStatus || item.current_status || "").trim();
+  item.registryUrl = normalizeUrl(String(item.registryUrl || item.registry_url || "").trim());
+  item.branchStatus = String(item.branchStatus || item.branch_status || "").trim();
+  if (typeof item.inactive !== "boolean") {
+    item.inactive = item.inactive === true || String(item.inactive || "").toLowerCase() === "true";
+  }
+  const priority = Number(item.priority || 0);
+  if (Number.isFinite(priority)) item.priority = priority;
+  else delete item.priority;
+  const signalCount = Number(item.signalCount || 0);
+  if (Number.isFinite(signalCount) && signalCount > 0) item.signalCount = Math.floor(signalCount);
+  else delete item.signalCount;
+  if (item.discoverySources.includes("web_search")) item.tags = mergeUniqueStrings(item.tags, ["source:web"]);
+  return item;
+}
+
+function mergeCompanyCandidates(existing, incoming) {
+  const left = normalizeCompanyCandidate(existing);
+  const right = normalizeCompanyCandidate(incoming);
+  const out = { ...left };
+
+  const chooseText = (primary, fallback) => {
+    const preferred = String(primary || "").trim();
+    if (preferred) return preferred;
+    return String(fallback || "").trim();
+  };
+
+  const leftPriority = Number(left.priority || 0);
+  const rightPriority = Number(right.priority || 0);
+  out.name = chooseText(left.name, right.name);
+  out.website = chooseText(left.website, right.website);
+  out.careersUrl = chooseText(left.careersUrl, right.careersUrl);
+  out.source = chooseText(left.source, right.source);
+  out.tags = mergeUniqueStrings(left.tags, right.tags);
+  out.discoverySources = mergeUniqueStrings(left.discoverySources, right.discoverySources);
+  out.sourceEvidence = mergeSourceEvidence(left.sourceEvidence, right.sourceEvidence);
+  out.jurisdictionCode = chooseText(left.jurisdictionCode, right.jurisdictionCode);
+  out.companyNumber = chooseText(left.companyNumber, right.companyNumber);
+  out.companyType = chooseText(left.companyType, right.companyType);
+  out.currentStatus = chooseText(left.currentStatus, right.currentStatus);
+  out.registryUrl = chooseText(left.registryUrl, right.registryUrl);
+  out.branchStatus = chooseText(left.branchStatus, right.branchStatus);
+  out.inactive = left.inactive === true || right.inactive === true;
+  out.priority = Math.max(
+    Number.isFinite(leftPriority) ? leftPriority : 0,
+    Number.isFinite(rightPriority) ? rightPriority : 0
+  );
+
+  const leftSignal = Number(left.signalCount || 0);
+  const rightSignal = Number(right.signalCount || 0);
+  if (Number.isFinite(leftSignal) || Number.isFinite(rightSignal)) {
+    out.signalCount = Math.max(0, Math.floor((Number.isFinite(leftSignal) ? leftSignal : 0) + (Number.isFinite(rightSignal) ? rightSignal : 0)));
+  }
+
+  return out;
+}
+
+function addOrMergeCompanyCandidate(companies, keyToIndex, rawCandidate) {
+  const candidate = normalizeCompanyCandidate(rawCandidate);
+  const identityKeys = buildCompanyIdentityKeys(candidate);
+  if (identityKeys.length === 0) return { company: null, changed: false, isNew: false };
+
+  let index = null;
+  for (const key of identityKeys) {
+    if (keyToIndex.has(key)) {
+      index = keyToIndex.get(key);
+      break;
+    }
+  }
+
+  if (index === null || index === undefined) {
+    companies.push(candidate);
+    const newIndex = companies.length - 1;
+    for (const key of identityKeys) keyToIndex.set(key, newIndex);
+    return { company: companies[newIndex], changed: true, isNew: true };
+  }
+
+  const merged = mergeCompanyCandidates(companies[index], candidate);
+  const before = JSON.stringify(companies[index]);
+  const after = JSON.stringify(merged);
+  companies[index] = merged;
+  for (const key of buildCompanyIdentityKeys(merged)) keyToIndex.set(key, index);
+  return { company: companies[index], changed: before !== after, isNew: false };
+}
+
 function toFiniteNumber(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
@@ -215,6 +399,16 @@ function buildJobDedupeKey(job) {
   const canonical = canonicalJobUrl(job);
   if (canonical) return canonical;
   return composite;
+}
+
+function buildFinalOutputDedupeKey(job, config) {
+  const explicitOutputUrl = normalizeJobUrl(job?.outputUrl || "");
+  if (explicitOutputUrl) return explicitOutputUrl;
+  const outputUrl = chooseOutputJobUrl(job, config);
+  if (outputUrl) return outputUrl;
+  const canonical = canonicalJobUrl(job);
+  if (canonical) return canonical;
+  return buildJobDedupeKey(job) || normalizeJobUrl(job?.url || "");
 }
 
 function trackConfigDefaults() {
@@ -614,6 +808,339 @@ function inferRegionTag(job) {
   return "";
 }
 
+const LOCATION_TERM_GROUPS = [
+  { code: "DE", regions: ["EU"], terms: ["germany", "deutschland"] },
+  { code: "ES", regions: ["EU"], terms: ["spain", "espana"] },
+  { code: "NL", regions: ["EU"], terms: ["netherlands", "holland"] },
+  { code: "PT", regions: ["EU"], terms: ["portugal"] },
+  { code: "JP", regions: ["JP"], terms: ["japan"] },
+  { code: "US", regions: ["US"], terms: ["united states", "usa", "us remote", "us-only"] },
+  { code: "GB", regions: ["EU", "UK"], terms: ["united kingdom", "uk", "great britain"] },
+  { code: "FR", regions: ["EU"], terms: ["france"] },
+  { code: "IT", regions: ["EU"], terms: ["italy"] },
+  { code: "CH", regions: ["EU", "CH"], terms: ["switzerland"] },
+  { code: "AT", regions: ["EU"], terms: ["austria"] },
+  { code: "BE", regions: ["EU"], terms: ["belgium"] },
+  { code: "PL", regions: ["EU"], terms: ["poland"] },
+  { code: "SE", regions: ["EU"], terms: ["sweden"] },
+  { code: "NO", regions: ["EU"], terms: ["norway"] },
+  { code: "DK", regions: ["EU"], terms: ["denmark"] },
+  { code: "FI", regions: ["EU"], terms: ["finland"] },
+  { code: "CA", regions: ["CA"], terms: ["canada"] },
+  { code: "AU", regions: ["AU"], terms: ["australia"] },
+  { code: "SG", regions: ["SG"], terms: ["singapore"] },
+  { code: "IN", regions: ["IN"], terms: ["india"] },
+  { code: "CN", regions: ["CN"], terms: ["china"] },
+  { code: "KR", regions: ["KR"], terms: ["south korea", "korea"] },
+  { code: "TW", regions: ["TW"], terms: ["taiwan"] },
+  { code: "AE", regions: ["AE", "ME"], terms: ["united arab emirates", "uae"] },
+  { code: "SA", regions: ["SA", "ME"], terms: ["saudi arabia"] },
+  { code: "QA", regions: ["ME"], terms: ["qatar"] },
+  { code: "IL", regions: ["IL", "ME"], terms: ["israel"] }
+];
+
+const REGION_PREFERENCE_GROUPS = [
+  { tag: "EU", terms: ["europe", "european union", "eu"] },
+  { tag: "US", terms: ["united states", "usa", "us"] },
+  { tag: "CA", terms: ["canada", "north america"] },
+  { tag: "JP", terms: ["japan"] },
+  { tag: "AU", terms: ["australia", "oceania"] },
+  { tag: "CN", terms: ["china"] },
+  { tag: "IN", terms: ["india"] },
+  { tag: "KR", terms: ["south korea", "korea"] },
+  { tag: "SG", terms: ["singapore"] },
+  { tag: "TW", terms: ["taiwan"] },
+  { tag: "UK", terms: ["united kingdom", "uk"] },
+  { tag: "CH", terms: ["switzerland"] },
+  { tag: "ME", terms: ["middle east"] },
+  { tag: "AE", terms: ["united arab emirates", "uae"] },
+  { tag: "SA", terms: ["saudi arabia"] },
+  { tag: "Global", terms: ["global", "worldwide", "international", "anywhere"] }
+];
+
+function escapeRegex(text) {
+  return String(text || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasStandaloneLocationTerm(text, term) {
+  const normalizedText = normalizeLocationForKey(text);
+  const normalizedTerm = normalizeLocationForKey(term);
+  if (!normalizedText || !normalizedTerm) return false;
+  const pattern = new RegExp(
+    `(^|[^\\p{L}\\p{N}])${escapeRegex(normalizedTerm)}($|[^\\p{L}\\p{N}])`,
+    "iu"
+  );
+  return pattern.test(normalizedText);
+}
+
+function extractCountryCodesFromText(text) {
+  const normalized = normalizeLocationForKey(text);
+  const codes = new Set();
+  if (!normalized) return codes;
+  for (const group of LOCATION_TERM_GROUPS) {
+    if (group.terms.some((term) => hasStandaloneLocationTerm(normalized, term))) {
+      codes.add(group.code);
+    }
+  }
+  return codes;
+}
+
+function extractRegionTagsFromText(text) {
+  const normalized = normalizeLocationForKey(text);
+  const tags = new Set();
+  if (!normalized) return tags;
+  for (const group of REGION_PREFERENCE_GROUPS) {
+    if (group.terms.some((term) => hasStandaloneLocationTerm(normalized, term))) {
+      tags.add(group.tag);
+    }
+  }
+  for (const group of LOCATION_TERM_GROUPS) {
+    if (group.terms.some((term) => hasStandaloneLocationTerm(normalized, term))) {
+      for (const tag of group.regions || []) tags.add(tag);
+    }
+  }
+  return tags;
+}
+
+function normalizePreferenceLines(preferenceText) {
+  return String(preferenceText || "")
+    .split(/\r?\n|[;|]/)
+    .map((line) => String(line || "").trim())
+    .filter(Boolean);
+}
+
+function parseCandidateLocationPreference(preferenceText) {
+  const parsed = {
+    hasPreference: false,
+    allowGlobal: false,
+    allowRemote: false,
+    explicitRegions: new Set(),
+    explicitCountries: new Set(),
+    explicitCities: [],
+    hasExplicitAreaPreference: false
+  };
+
+  for (const rawLine of normalizePreferenceLines(preferenceText)) {
+    parsed.hasPreference = true;
+    const line = normalizeLocationForKey(rawLine);
+    if (!line) continue;
+
+    if (/\b(global|worldwide|international|anywhere)\b/.test(line)) {
+      parsed.allowGlobal = true;
+      continue;
+    }
+    if (/\b(remote|hybrid|telecommute|work from home|home office)\b/.test(line)) {
+      parsed.allowRemote = true;
+      continue;
+    }
+
+    const countryCodes = extractCountryCodesFromText(line);
+    const regionTags = extractRegionTagsFromText(line);
+
+    if (line.includes(",")) {
+      const city = normalizeLocationForKey(line.split(",")[0]);
+      if (city) {
+        parsed.explicitCities.push({
+          city,
+          countries: Array.from(countryCodes)
+        });
+      }
+      continue;
+    }
+
+    if (countryCodes.size > 0) {
+      for (const code of countryCodes) parsed.explicitCountries.add(code);
+      continue;
+    }
+
+    if (regionTags.size > 0) {
+      for (const tag of regionTags) {
+        if (tag !== "Global") parsed.explicitRegions.add(tag);
+      }
+      continue;
+    }
+
+    parsed.explicitCities.push({ city: line, countries: [] });
+  }
+
+  parsed.hasExplicitAreaPreference =
+    parsed.explicitCities.length > 0 ||
+    parsed.explicitCountries.size > 0 ||
+    parsed.explicitRegions.size > 0;
+  return parsed;
+}
+
+function buildJobLocationSignals(job, analysis) {
+  const preferredLocation =
+    String(analysis?.postVerify?.location || analysis?.location || job?.location || "").trim();
+  const locationText = normalizeLocationForKey(preferredLocation);
+  const combinedText = normalizeLocationForKey(
+    [
+      preferredLocation,
+      job?.location || "",
+      job?.title || "",
+      job?.summary || "",
+      job?.jd?.rawText || ""
+    ].join(" ")
+  );
+  const probeJob = { ...job, location: preferredLocation || job?.location || "" };
+  const regionTag = inferRegionTag(probeJob) || "";
+  const countryCodes = extractCountryCodesFromText(locationText || combinedText);
+  const regionTags = extractRegionTagsFromText(locationText || combinedText);
+  const remoteLike =
+    /\b(remote|telecommute|work from home|home office|hybrid|global|worldwide|anywhere|multiple(?: locations| countries)?)\b/.test(
+      locationText || combinedText
+    ) || regionTag === "Global";
+  const hasConcreteArea =
+    countryCodes.size > 0 ||
+    Array.from(regionTags).some((tag) => tag && tag !== "Global") ||
+    Boolean(regionTag && regionTag !== "Global");
+  return {
+    locationText,
+    combinedText,
+    regionTag,
+    countryCodes,
+    regionTags,
+    remoteLike,
+    hasConcreteArea
+  };
+}
+
+function matchesExplicitCityPreference(signals, preferences) {
+  const targetText = signals.locationText || signals.combinedText;
+  if (!targetText || preferences.explicitCities.length === 0) return false;
+  return preferences.explicitCities.some((entry) => {
+    if (!hasStandaloneLocationTerm(targetText, entry.city)) return false;
+    if (!Array.isArray(entry.countries) || entry.countries.length === 0) return true;
+    return entry.countries.some((code) => signals.countryCodes.has(code));
+  });
+}
+
+function matchesExplicitCountryPreference(signals, preferences) {
+  if (!(preferences.explicitCountries instanceof Set) || preferences.explicitCountries.size === 0) {
+    return false;
+  }
+  return Array.from(preferences.explicitCountries).some((code) => signals.countryCodes.has(code));
+}
+
+function matchesExplicitRegionPreference(signals, preferences) {
+  if (!(preferences.explicitRegions instanceof Set) || preferences.explicitRegions.size === 0) {
+    return false;
+  }
+  const signalTags = new Set([
+    ...Array.from(signals.regionTags || []),
+    String(signals.regionTag || "").trim()
+  ]);
+  signalTags.delete("");
+  return Array.from(preferences.explicitRegions).some((tag) => signalTags.has(tag));
+}
+
+function evaluateLocationFit({ job, analysis, config }) {
+  const preferenceText = String(config?.candidate?.locationPreference || "").trim();
+  const preferences = parseCandidateLocationPreference(preferenceText);
+  if (!preferences.hasPreference || preferences.allowGlobal) {
+    return {
+      level: preferences.allowGlobal ? "preferred" : "open",
+      scoreDelta: preferences.allowGlobal ? 2 : 0,
+      blockRecommend: false,
+      reasonCn: preferences.allowGlobal
+        ? "候选人的地点偏好为 Global。"
+        : "未设置明确的地点偏好。"
+    };
+  }
+
+  const signals = buildJobLocationSignals(job, analysis);
+  const cityMatch = matchesExplicitCityPreference(signals, preferences);
+  const countryMatch = matchesExplicitCountryPreference(signals, preferences);
+  const regionMatch = matchesExplicitRegionPreference(signals, preferences);
+  const areaMatch = cityMatch || countryMatch || regionMatch;
+
+  if (!signals.locationText && !signals.regionTag && !signals.remoteLike) {
+    return {
+      level: "unknown",
+      scoreDelta: -4,
+      blockRecommend: false,
+      reasonCn: "岗位地点信息不明确。"
+    };
+  }
+
+  if (!signals.hasConcreteArea && !signals.remoteLike && !cityMatch) {
+    return {
+      level: "unknown",
+      scoreDelta: -4,
+      blockRecommend: false,
+      reasonCn: "岗位地点信息不够具体。"
+    };
+  }
+
+  if (signals.remoteLike) {
+    if (preferences.allowRemote) {
+      if (!signals.hasConcreteArea || areaMatch || !preferences.hasExplicitAreaPreference) {
+        return {
+          level: "preferred",
+          scoreDelta: 4,
+          blockRecommend: false,
+          reasonCn: "岗位支持远程或多地，与候选人的地点偏好一致。"
+        };
+      }
+      return {
+        level: "mismatch",
+        scoreDelta: -12,
+        blockRecommend: true,
+        reasonCn: "岗位的远程/多地范围不在候选人的目标地点内。"
+      };
+    }
+
+    if (areaMatch) {
+      return {
+        level: "acceptable",
+        scoreDelta: 1,
+        blockRecommend: false,
+        reasonCn: "岗位地点与候选人的目标区域一致。"
+      };
+    }
+
+    return {
+      level: "acceptable",
+      scoreDelta: 0,
+      blockRecommend: false,
+      reasonCn: "岗位支持远程或多地，地点限制相对较弱。"
+    };
+  }
+
+  if (cityMatch) {
+    return {
+      level: "preferred",
+      scoreDelta: 5,
+      blockRecommend: false,
+      reasonCn: "岗位地点命中候选人偏好的城市。"
+    };
+  }
+  if (countryMatch) {
+    return {
+      level: "preferred",
+      scoreDelta: 4,
+      blockRecommend: false,
+      reasonCn: "岗位地点命中候选人偏好的国家。"
+    };
+  }
+  if (regionMatch) {
+    return {
+      level: "acceptable",
+      scoreDelta: 1,
+      blockRecommend: false,
+      reasonCn: "岗位地点命中候选人偏好的区域。"
+    };
+  }
+
+  return {
+    level: "mismatch",
+    scoreDelta: -18,
+    blockRecommend: true,
+    reasonCn: "岗位地点不在候选人的目标工作地点范围内。"
+  };
+}
+
 function isPreferredFiveRegion(regionTag) {
   return ["CA", "US", "EU", "JP", "AU", "Global"].includes(String(regionTag || ""));
 }
@@ -950,6 +1477,19 @@ function withDefaults(config) {
       minTransferableScore: config?.analysis?.minTransferableScore ?? 55,
       platformListingRecommendScoreThreshold:
         config?.analysis?.platformListingRecommendScoreThreshold ?? 68
+    },
+    companyFit: {
+      enabled: config?.companyFit?.enabled ?? true,
+      model:
+        config?.companyFit?.model ??
+        config?.companyDiscovery?.model ??
+        config?.search?.model ??
+        "gpt-4o-mini",
+      maxCompaniesToEvaluate: Math.max(
+        0,
+        Math.floor(toFiniteNumber(config?.companyFit?.maxCompaniesToEvaluate, 18))
+      ),
+      batchSize: Math.max(1, Math.floor(toFiniteNumber(config?.companyFit?.batchSize, 6)))
     },
     sources: {
       enableWebSearch: config?.sources?.enableWebSearch ?? true,
@@ -1390,7 +1930,17 @@ Output ONLY JSON matching the schema.`;
       })
   });
   if (!data || !Array.isArray(data.companies)) return [];
-  return data.companies;
+  return data.companies.map((item) => ({
+    ...item,
+    source: "web_search",
+    discoverySources: ["web_search"],
+    sourceEvidence: {
+      webSearch: {
+        query: String(query || "").trim(),
+        discoveredAt: nowIso()
+      }
+    }
+  }));
 }
 
 async function autoDiscoverCompanies({
@@ -1408,11 +1958,17 @@ async function autoDiscoverCompanies({
     return { added: 0, total: 0, nextQueryIndex: queryStartIndex, newCompanies: [] };
   }
   const data = companiesData || (await loadCompanies(companiesPath));
-  const companies = Array.isArray(data.companies) ? data.companies : [];
+  const companies = Array.isArray(data.companies)
+    ? data.companies.map((company) => normalizeCompanyCandidate(company))
+    : [];
+  data.companies = companies;
 
-  const nameSet = new Set(companies.map((c) => normalizeCompanyName(c.name)));
-  const domainSet = new Set(companies.map((c) => companyDomain(c.website)));
+  const keyToIndex = new Map();
+  companies.forEach((company, index) => {
+    for (const key of buildCompanyIdentityKeys(company)) keyToIndex.set(key, index);
+  });
   const newCompanies = [];
+  let changed = false;
   const allQueries =
     Array.isArray(config.companyDiscovery.queries) && config.companyDiscovery.queries.length > 0
       ? config.companyDiscovery.queries
@@ -1455,28 +2011,26 @@ async function autoDiscoverCompanies({
       })
     );
     for (const found of batchResults) {
-      for (const item of found) {
-        const name = String(item.name || "").trim();
-        if (!name) continue;
-        const normName = normalizeCompanyName(name);
-        const website = String(item.website || "").trim();
-        const domain = companyDomain(website);
-        if (nameSet.has(normName)) continue;
-        if (domain && domainSet.has(domain)) continue;
+      for (const rawItem of found) {
+        const item = normalizeCompanyCandidate({
+          ...(rawItem && typeof rawItem === "object" ? rawItem : {}),
+          careersUrl: String(rawItem?.careersUrl || "").trim(),
+          signalCount: Number(rawItem?.signalCount || 1) || 1,
+          lastSeen: nowIso()
+        });
+        if (!item.name) continue;
 
         const tags = Array.isArray(item.tags) ? item.tags.filter(Boolean) : [];
-        const region = String(item.region || "").trim();
+        const region = String(rawItem?.region || "").trim();
         const regionTag = region ? `region:${region.toUpperCase()}` : "";
         if (regionTag && !tags.includes(regionTag)) tags.push(regionTag);
+        item.tags = mergeUniqueStrings(tags);
 
-        newCompanies.push({
-          name,
-          website,
-          careersUrl: "",
-          tags
-        });
-        nameSet.add(normName);
-        if (domain) domainSet.add(domain);
+        const merged = addOrMergeCompanyCandidate(companies, keyToIndex, item);
+        if (merged.changed) changed = true;
+        if (merged.isNew && merged.company) {
+          newCompanies.push(merged.company);
+        }
         if (newCompanies.length >= newCompanyCap) break;
       }
       if (newCompanies.length >= newCompanyCap) break;
@@ -1484,8 +2038,7 @@ async function autoDiscoverCompanies({
     if (newCompanies.length >= newCompanyCap) break;
   }
 
-  if (newCompanies.length > 0) {
-    companies.push(...newCompanies);
+  if (changed) {
     data.companies = companies;
     await writeCompanies(companiesPath, data);
   }
@@ -1771,7 +2324,12 @@ async function collectCompanyJobs({
     Math.floor(toFiniteNumber(adaptiveSearch.deepSearchImmediateProcessBatchSize, 4))
   );
 
-  const prioritizedCompanies = prioritizeCompaniesForRun(companies, config);
+  const companyFitMap = await evaluateCompaniesForCurrentRun({
+    client,
+    config,
+    companies
+  });
+  const prioritizedCompanies = prioritizeCompaniesForRun(companies, config, companyFitMap);
   const initialSelection = buildCompanyRunSelection(prioritizedCompanies, maxCompanies, config);
   let orderedCompanies = initialSelection.companies;
   if (prioritizedCompanies.length && maxCompanies > 0 && config.sources.preferMajorCompanies) {
@@ -1814,7 +2372,7 @@ async function collectCompanyJobs({
   const canStartRound = (budgetMs) => runElapsedMs() < budgetMs;
 
   function refreshOrderedCompanies(preferredKeys = new Set()) {
-    const prioritized = prioritizeCompaniesForRun(companies, config);
+    const prioritized = prioritizeCompaniesForRun(companies, config, companyFitMap);
     const selection = buildCompanyRunSelection(prioritized, maxCompanies, config);
     const base = selection.companies;
     if (!preferredKeys || preferredKeys.size === 0) return base;
@@ -1943,6 +2501,18 @@ async function collectCompanyJobs({
       0,
       Math.floor(toFiniteNumber(discovery.added, 0))
     );
+    if (Array.isArray(discovery.newCompanies) && discovery.newCompanies.length > 0) {
+      const newCompanyFits = await evaluateCompaniesForCurrentRun({
+        client,
+        config,
+        companies: discovery.newCompanies,
+        limit: discovery.newCompanies.length
+      });
+      for (const company of discovery.newCompanies) {
+        const fit = getCompanyFit(newCompanyFits, company);
+        if (fit) rememberCompanyFit(companyFitMap, company, fit);
+      }
+    }
     const preferredKeys = new Set(
       Array.isArray(discovery.newCompanies)
         ? discovery.newCompanies.map((company) => companyRecordKey(company)).filter(Boolean)
@@ -2458,6 +3028,32 @@ function isLikelyLandingPageText(text) {
   );
 }
 
+function shouldSuppressUnanalyzedLandingJob(job) {
+  if (!job || typeof job !== "object") return false;
+  if (hasCompletedAnalysis(job) || isSignalOnlyJob(job)) return false;
+
+  const url = String(job?.url || "");
+  const title = String(job?.title || "").trim();
+  const summary = String(job?.summary || "");
+  const jdText = String(job?.jd?.text || job?.jd?.rawText || "");
+
+  const genericUrl =
+    isGenericCareersUrl(url) ||
+    (!isSpecificJobDetailUrl(url) &&
+      /careers?|jobs?|openings?|vacancies?|graduates?|students?|internships?/i.test(url));
+  const landingTitle =
+    isLikelyNoiseTitle(title) ||
+    /talent community|student|graduate|internship|internships|work experience|early careers|leadership development|programme|programs?/i.test(
+      title
+    );
+  const landingText = isLikelyLandingPageText(summary) || isLikelyLandingPageText(jdText);
+  const unavailable = hasUnavailableSignal(summary) || hasUnavailableSignal(jdText);
+
+  if (unavailable) return true;
+  if (!genericUrl) return false;
+  return landingTitle || landingText || !hasJobSignal({ title, url, summary: summary || jdText });
+}
+
 function hasTitleEvidenceInText(title, text) {
   const cleanTitle = String(title || "").toLowerCase();
   const body = String(text || "").toLowerCase();
@@ -2909,7 +3505,7 @@ function isChinaHydrogenEuropeJob(job, config) {
   return isChinaHydrogenCompanyJob(job, config) && isEuropeRelatedJob(job);
 }
 
-function prioritizeCompaniesForRun(companies, config) {
+function prioritizeCompaniesForRun(companies, config, companyFitMap = null) {
   if (!Array.isArray(companies) || companies.length === 0) return [];
   if (!config?.sources?.preferMajorCompanies) return companies;
   const keywords = Array.isArray(config?.sources?.majorCompanyKeywords)
@@ -2931,6 +3527,11 @@ function prioritizeCompaniesForRun(companies, config) {
     const tags = Array.isArray(company?.tags)
       ? company.tags.map((t) => String(t || "").toLowerCase())
       : [];
+    const discoverySources = Array.isArray(company?.discoverySources)
+      ? company.discoverySources.map((value) => String(value || "").toLowerCase())
+      : [];
+    const fit = getCompanyFit(companyFitMap, company);
+    const fitScore = fit ? clampNumber(toFiniteNumber(fit.fitScore, 0), 0, 100) : -1;
     let score = 0;
     for (const keyword of keywords) {
       if (name.includes(keyword)) score += 100;
@@ -2938,6 +3539,7 @@ function prioritizeCompaniesForRun(companies, config) {
     if (tags.some((t) => /fuel_cell|electrolyzer|hydrogen|stack|system|controls|materials|testing/.test(t)))
       score += 10;
     if (tags.some((t) => /nev_oem|oem|industrial_gas/.test(t))) score += 15;
+    if (discoverySources.includes("web_search")) score += 6;
     if (regionWeights.size > 0) {
       let regionBoost = 0;
       for (const tag of tags) {
@@ -2950,10 +3552,12 @@ function prioritizeCompaniesForRun(companies, config) {
     if (company?.website) score += 2;
     const customPriority = Number(company?.priority || 0);
     if (Number.isFinite(customPriority)) score += customPriority;
-    return { company, index, score };
+    return { company, index, score, fitScore, hasFit: fit !== null };
   });
 
   scored.sort((a, b) => {
+    if (a.hasFit && b.hasFit && b.fitScore !== a.fitScore) return b.fitScore - a.fitScore;
+    if (a.hasFit !== b.hasFit) return a.hasFit ? -1 : 1;
     if (b.score !== a.score) return b.score - a.score;
     return a.index - b.index;
   });
@@ -3047,11 +3651,15 @@ function buildCompanyRunSelection(companies, maxCompanies, config) {
 }
 
 function companyRecordKey(company) {
-  const name = normalizeCompanyName(company?.name || "");
   const website = String(company?.website || "").trim();
   const domain = companyDomain(website);
-  if (name) return name;
-  return domain || String(company?.name || "").trim().toLowerCase();
+  if (domain) return `domain:${domain}`;
+  const jurisdiction = String(company?.jurisdictionCode || "").trim().toLowerCase();
+  const companyNumber = String(company?.companyNumber || "").trim().toLowerCase();
+  if (jurisdiction && companyNumber) return `registry:${jurisdiction}:${companyNumber}`;
+  const name = normalizeCompanyName(company?.name || "");
+  if (name) return `name:${name}`;
+  return "";
 }
 
 function isCompanyInCooldown(company, nowMs = Date.now()) {
@@ -3812,6 +4420,7 @@ function enrichAnalysisDerivedFields({ analysis, job, config }) {
 
 function finalizeAnalysisResult({ analysis, job, config }) {
   const derived = enrichAnalysisDerivedFields({ analysis, job, config });
+  const locationFit = evaluateLocationFit({ job, analysis: derived, config });
   const threshold = clampNumber(
     toFiniteNumber(config?.analysis?.recommendScoreThreshold, 60),
     0,
@@ -3829,7 +4438,11 @@ function finalizeAnalysisResult({ analysis, job, config }) {
   );
   const transferableEnabled = config?.analysis?.transferableFitEnabled !== false;
   const rawScore = toFiniteNumber(derived.matchScore, 0);
-  const score = clampNumber(Math.round(rawScore), 0, 100);
+  const score = clampNumber(
+    Math.round(rawScore + toFiniteNumber(locationFit?.scoreDelta, 0)),
+    0,
+    100
+  );
   const limitedPlatformListing = isLimitedPlatformListingJob(job, config);
   const deterministicJobSignal =
     !isGenericLocationOrCategoryTitle(job?.title || "") &&
@@ -3844,14 +4457,31 @@ function finalizeAnalysisResult({ analysis, job, config }) {
   const strongDomain = derived.domainScore >= 55;
   const strongTransferable = transferableEnabled && derived.transferableScore >= minTransferable;
   const effectiveThreshold = limitedPlatformListing ? Math.max(threshold, platformThreshold) : threshold;
-  const eligible = isJobPosting && score >= effectiveThreshold && (strongDomain || strongTransferable);
+  const eligible =
+    isJobPosting &&
+    score >= effectiveThreshold &&
+    (strongDomain || strongTransferable) &&
+    locationFit.blockRecommend !== true;
   const recommendedByModel = typeof derived.recommend === "boolean" ? derived.recommend : true;
+  const recommend = Boolean(eligible && recommendedByModel);
+  let recommendReasonCn = String(derived.recommendReasonCn || "").trim();
+  if (locationFit.reasonCn) {
+    if (locationFit.blockRecommend) {
+      recommendReasonCn = locationFit.reasonCn;
+    } else if (recommendReasonCn) {
+      recommendReasonCn = `${recommendReasonCn} ${locationFit.reasonCn}`;
+    } else {
+      recommendReasonCn = locationFit.reasonCn;
+    }
+  }
   return {
     ...derived,
     matchScore: score,
-    fitLevelCn: derived.fitLevelCn || toFitLevelCn(score),
+    fitLevelCn: toFitLevelCn(score),
     isJobPosting,
-    recommend: Boolean(eligible && recommendedByModel)
+    recommend,
+    recommendReasonCn,
+    locationFit: String(locationFit.level || "unknown")
   };
 }
 
@@ -3899,6 +4529,23 @@ function dedupeJobsByCanonical(jobs, config) {
     deduped.push(chosen);
   }
   return deduped;
+}
+
+function mergePreferredRecommendedJob(map, key, candidate, config) {
+  if (!key || !candidate) return;
+  const current = map.get(key);
+  if (!current) {
+    map.set(key, candidate);
+    return;
+  }
+  const mergedTags = Array.from(
+    new Set([...(current.listTags || []), ...(candidate.listTags || [])].filter(Boolean))
+  );
+  if (compareJobsByPreference(current, candidate, config) > 0) {
+    map.set(key, { ...candidate, listTags: mergedTags });
+    return;
+  }
+  map.set(key, { ...current, listTags: mergedTags });
 }
 
 function fallbackScoreAdjacentMbse({ job, config }) {
@@ -4391,6 +5038,9 @@ function buildLiteScoringPrompt({ config, job, jdText, jdLimit, dataAvailability
 候选人目标方向：
 ${config.candidate.targetRole}
 
+候选人地点偏好：
+${config.candidate.locationPreference || "未提供"}
+
 ${dataAvailabilityNote}
 
 岗位：
@@ -4407,6 +5057,8 @@ ${chunk(jdText, jdLimit)}
 - 核心看“角色形状”，优先识别 MBSE / Systems Engineering / SysML / Requirements / Traceability / Verification / Validation / Integration / Qualification / Reliability / Durability / Diagnostics / Digital Twin / PHM / Technical Interface / Owner Engineering。
 - 不要求岗位必须属于氢能、电化学或电池行业；这些只算加分项，不是前提。
 - 明显偏销售、BD、HR、采购、PMO、质量体系、纯软件互联网、纯AI算法、纯运维操作员的岗位要降分。
+- 地点权重很重要。若岗位是明确 onsite / 固定办公地，且地点不在候选人偏好范围内，应明显降分，通常不推荐。
+- 若岗位为 Remote / Hybrid / Multiple，需要结合候选人的地点偏好判断是否可接受。
 - matchScore 0-100
 - recommend 仅当岗位与候选人副线方向相关、且是可申请岗位页或明确的职业平台具体职位页时为 true
 - isJobPosting 表示是否是真实岗位JD页面；对于 LinkedIn 这类职业平台职位页，如果明显是具体岗位，也可为 true
@@ -4423,6 +5075,9 @@ ${fitTrackPromptNote(config)}
 候选人目标方向：
 ${config.candidate.targetRole}
 
+候选人地点偏好：
+${config.candidate.locationPreference || "未提供"}
+
 ${dataAvailabilityNote}
 
 岗位：
@@ -4436,6 +5091,8 @@ JD:
 ${chunk(jdText, jdLimit)}
 
 规则：
+- 地点权重很重要。若岗位是明确 onsite / 固定办公地，且地点不在候选人偏好范围内，应明显降分，通常不推荐。
+- 若岗位为 Remote / Hybrid / Multiple，需要结合候选人的地点偏好判断是否可接受。
 - matchScore 0-100
 - recommend 仅当岗位与候选人方向相关、且是可申请岗位页或明确的职业平台具体职位页时为 true
 - isJobPosting 表示是否是真实岗位JD页面；对于 LinkedIn 这类职业平台职位页，如果明显是具体岗位，也可为 true
@@ -4468,6 +5125,9 @@ B) 行业语境加分：汽车与复杂装备、工业设备与自动化、航�
 候选人画像（JSON）：
 ${JSON.stringify(candidateProfile)}
 
+候选人地点偏好：
+${config.candidate.locationPreference || "未提供"}
+
 ${dataAvailabilityNote}
 
 岗位信息：
@@ -4496,6 +5156,8 @@ ${fitTrackPromptNote(config)}
 - gapsCn: 主要差距（中文）
 - questionsCn: 建议对HR/用人经理提问的问题（中文）
 - nextActionCn: 下一步建议（中文）
+- 地点权重很重要。若岗位是明确 onsite / 固定办公地，且地点不在候选人偏好范围内，应明显降分，通常不推荐。
+- 若岗位为 Remote / Hybrid / Multiple，需要结合候选人的地点偏好判断是否可接受。
 推荐规则：只有当 isJobPosting=true 且 fitLevelCn 为“强匹配/匹配/可能匹配”且 matchScore ≥ ${recommendThreshold} 时，才能 recommend=true；否则 recommend=false。
 
 只输出 JSON。`;
@@ -4513,6 +5175,9 @@ B) 可迁移能力匹配（Durability与Degradation/Model-Based Engineering/数�
 候选人画像（JSON）：
 ${JSON.stringify(candidateProfile)}
 
+候选人地点偏好：
+${config.candidate.locationPreference || "未提供"}
+
 ${dataAvailabilityNote}
 
 岗位信息：
@@ -4541,6 +5206,8 @@ ${fitTrackPromptNote(config)}
 - gapsCn: 主要差距（中文）
 - questionsCn: 建议对HR/用人经理提问的问题（中文）
 - nextActionCn: 下一步建议（中文）
+- 地点权重很重要。若岗位是明确 onsite / 固定办公地，且地点不在候选人偏好范围内，应明显降分，通常不推荐。
+- 若岗位为 Remote / Hybrid / Multiple，需要结合候选人的地点偏好判断是否可接受。
 推荐规则：只有当 isJobPosting=true 且 fitLevelCn 为“强匹配/匹配/可能匹配”且 matchScore ≥ ${recommendThreshold} 时，才能 recommend=true；否则 recommend=false。
 
 只输出 JSON。`;
@@ -4753,6 +5420,9 @@ async function postVerifyRecommendedJob({ client, config, job }) {
 候选人目标：
 ${config.candidate.targetRole}
 
+候选人地点偏好：
+${config.candidate.locationPreference || "未提供"}
+
 岗位：
 Title: ${job.title}
 Company: ${job.company}
@@ -4763,7 +5433,7 @@ ${chunk(jdText, jdLimit)}
 
 判定规则：
 1) isValidJobPage=true 仅当该链接是“真实可投递岗位JD页”（不是 careers 首页/职位列表入口/新闻/聚合页/失效页/反爬拦截页）。
-2) recommend=true 仅当 isValidJobPage=true 且岗位与候选人目标方向匹配：${recommendRule}
+2) recommend=true 仅当 isValidJobPage=true、岗位与候选人目标方向匹配，且地点与候选人的地点偏好不明显冲突：${recommendRule}
 3) finalUrl 返回你确认后的最终岗位URL，优先返回 employer/ATS 的具体岗位详情/投递页；不要返回 careers 首页、搜索列表页、地区筛选页或职业聚合页。无法确认就返回原URL。
 4) location 尽量给出岗位地点，未知可空字符串。
 
@@ -5111,6 +5781,7 @@ function rowToJob(row, config) {
     rowScope === SCOPE_PROFILE.ADJACENT_MBSE || isAdjacentScope(config);
   return {
     url: normalizeJobUrl(row.url),
+    outputUrl: normalizeJobUrl(row.url),
     canonicalUrl: normalizeJobUrl(row.canonicalUrl) || normalizeJobUrl(row.url),
     title: row.title || "",
     company: row.company || "",
@@ -5256,6 +5927,218 @@ function normalizeTrackMix(mix) {
   if (total <= 0) return defaults;
   for (const key of TRACK_KEYS) normalized[key] = normalized[key] / total;
   return normalized;
+}
+
+function topTrackMixLabels(mix, limit = 3) {
+  return Object.entries(normalizeTrackMix(mix))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, Math.max(1, limit))
+    .map(([key, value]) => `${TRACK_CN_LABEL[key] || key}:${Math.round(value * 100)}%`);
+}
+
+function companyFitContextForPrompt(config) {
+  const targetRole = String(config?.candidate?.targetRole || "").trim();
+  const locationPreference = String(config?.candidate?.locationPreference || "").trim();
+  const scopeProfile = String(config?.candidate?.scopeProfile || "").trim();
+  const discoveryQueries = Array.isArray(config?.companyDiscovery?.queries)
+    ? config.companyDiscovery.queries.slice(0, 8).map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  const trackSummary = topTrackMixLabels(config?.search?.trackMix || trackConfigDefaults(), 3);
+  return {
+    targetRole,
+    locationPreference,
+    scopeProfile,
+    trackSummary,
+    discoveryQueries
+  };
+}
+
+function companyFitPrompt({ config, companies }) {
+  const context = companyFitContextForPrompt(config);
+  const payload = companies.map((company, index) => ({
+    id: `C${index + 1}`,
+    name: String(company?.name || "").trim(),
+    website: String(company?.website || "").trim(),
+    careersUrl: String(company?.careersUrl || "").trim(),
+    region: String(company?.region || "").trim(),
+    tags: Array.isArray(company?.tags) ? company.tags.slice(0, 12) : [],
+    discoverySources: Array.isArray(company?.discoverySources) ? company.discoverySources : [],
+    companyType: String(company?.companyType || company?.company_type || "").trim(),
+    currentStatus: String(company?.currentStatus || company?.current_status || "").trim(),
+    priority: Number.isFinite(Number(company?.priority)) ? Number(company.priority) : 0,
+    notes: chunk(String(company?.notes || company?.summary || company?.description || "").trim(), 240),
+    discoveryQuery: chunk(
+      String(company?.sourceEvidence?.webSearch?.query || "").trim(),
+      120
+    )
+  }));
+
+  return `你在做“当前这一次求职搜索”的公司匹配排序，不是永久给公司打分。
+
+候选人当前搜索上下文：
+- 目标岗位方向: ${context.targetRole || "未提供"}
+- 地域偏好: ${context.locationPreference || "未提供"}
+- 搜索主线: ${context.scopeProfile || "未提供"}
+- 方向权重: ${context.trackSummary.join(" | ") || "未提供"}
+- 公司发现查询样例: ${context.discoveryQueries.join(" | ") || "未提供"}
+
+请只基于下面提供的公司结构化信息做判断，不要调用 web_search，也不要假设你知道未给出的事实。
+
+评分原则：
+1. 评估“这家公司是否像当前搜索方向下值得优先追踪的公司”。
+2. 优先考虑业务方向、技术环境、公司类型是否贴近当前目标。
+3. 信息不足时必须保守，不要给很高分。
+4. 这不是永久分数，只反映当前这一次搜索方向。
+
+输出要求：
+- fitScore: 0 到 100 的整数
+- fitLevel: high / medium / low
+- reasonCn: 一句简短中文理由
+- confidence: 0 到 1
+
+公司列表(JSON)：
+${JSON.stringify(payload, null, 2)}
+`;
+}
+
+function rememberCompanyFit(companyFitMap, company, fit) {
+  if (!(companyFitMap instanceof Map) || !company || !fit) return;
+  for (const key of buildCompanyIdentityKeys(company)) {
+    companyFitMap.set(key, fit);
+  }
+}
+
+function getCompanyFit(companyFitMap, company) {
+  if (!(companyFitMap instanceof Map) || !company) return null;
+  for (const key of buildCompanyIdentityKeys(company)) {
+    if (companyFitMap.has(key)) return companyFitMap.get(key);
+  }
+  return null;
+}
+
+async function evaluateCompanyFitBatch({ client, config, companies }) {
+  if (!Array.isArray(companies) || companies.length === 0) return [];
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      evaluations: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string" },
+            fitScore: { type: "number" },
+            fitLevel: { type: "string", enum: ["high", "medium", "low"] },
+            reasonCn: { type: "string" },
+            confidence: { type: "number" }
+          },
+          required: ["id", "fitScore", "fitLevel", "reasonCn", "confidence"]
+        }
+      }
+    },
+    required: ["evaluations"]
+  };
+  const input = companyFitPrompt({ config, companies });
+  const data = await callStructuredJsonWithRetry({
+    label: `Company fit evaluation (${companies.length})`,
+    maxAttempts: 2,
+    fn: () =>
+      client.responses.create({
+        model: config?.companyFit?.model || config?.companyDiscovery?.model || "gpt-4o-mini",
+        input,
+        text: {
+          format: {
+            type: "json_schema",
+            name: "company_fit_evaluations",
+            strict: true,
+            schema
+          }
+        }
+      })
+  });
+  const evaluations = Array.isArray(data?.evaluations) ? data.evaluations : [];
+  return companies.map((company, index) => {
+    const id = `C${index + 1}`;
+    const matched = evaluations.find((item) => String(item?.id || "") === id) || {};
+    const fitScore = clampNumber(Math.round(toFiniteNumber(matched?.fitScore, 40)), 0, 100);
+    const fitLevel = ["high", "medium", "low"].includes(String(matched?.fitLevel || ""))
+      ? String(matched.fitLevel)
+      : fitScore >= 75
+        ? "high"
+        : fitScore >= 50
+          ? "medium"
+          : "low";
+    const confidence = clampNumber(toFiniteNumber(matched?.confidence, 0.45), 0, 1);
+    return {
+      company,
+      fitScore,
+      fitLevel,
+      reasonCn: String(matched?.reasonCn || "").trim() || "现有公司信息和当前搜索方向存在一定相关性。",
+      confidence,
+      evaluatedAt: nowIso()
+    };
+  });
+}
+
+async function evaluateCompaniesForCurrentRun({
+  client,
+  config,
+  companies,
+  limit = null
+}) {
+  const enabled = config?.companyFit?.enabled !== false;
+  const configuredLimit = Math.max(
+    0,
+    Math.floor(toFiniteNumber(config?.companyFit?.maxCompaniesToEvaluate, 18))
+  );
+  const maxCompanies =
+    limit === null || limit === undefined
+      ? configuredLimit
+      : Math.max(0, Math.floor(toFiniteNumber(limit, configuredLimit)));
+  if (!enabled || !(client && typeof client.responses?.create === "function")) return new Map();
+  if (!Array.isArray(companies) || companies.length === 0 || maxCompanies <= 0) return new Map();
+
+  const heuristicRanked = prioritizeCompaniesForRun(companies, config, null).slice(0, maxCompanies);
+  const batchSize = Math.max(1, Math.floor(toFiniteNumber(config?.companyFit?.batchSize, 6)));
+  const results = new Map();
+  for (let start = 0; start < heuristicRanked.length; start += batchSize) {
+    const batch = heuristicRanked.slice(start, start + batchSize);
+    try {
+      const evaluated = await evaluateCompanyFitBatch({ client, config, companies: batch });
+      for (const item of evaluated) {
+        rememberCompanyFit(results, item.company, {
+          fitScore: item.fitScore,
+          fitLevel: item.fitLevel,
+          reasonCn: item.reasonCn,
+          confidence: item.confidence,
+          evaluatedAt: item.evaluatedAt
+        });
+      }
+    } catch (err) {
+      console.log(
+        `[${nowIso()}] Company fit batch failed, keeping heuristic order: ${String(err?.message || err)}`
+      );
+    }
+  }
+
+  if (results.size > 0) {
+    const sample = heuristicRanked
+      .slice(0, Math.min(5, heuristicRanked.length))
+      .map((company) => {
+        const fit = getCompanyFit(results, company);
+        if (!fit) return String(company?.name || "").trim();
+        return `${String(company?.name || "").trim()}(${fit.fitScore})`;
+      })
+      .filter(Boolean)
+      .join(" | ");
+    console.log(
+      `[${nowIso()}] Company fit rerank applied to ${heuristicRanked.length} companies. Sample: ${sample}`
+    );
+  }
+
+  return results;
 }
 
 function computeTrackFeedbackMultipliers(existingRecommendedRows) {
@@ -6056,6 +6939,7 @@ async function main() {
   );
 
   let suppressedSignalOnlyCount = 0;
+  let suppressedLandingPageCount = 0;
   if (!args.offline && !args.reanalyze && !args.retranslate) {
     for (const job of processed) {
       if (!isSignalOnlyJob(job)) continue;
@@ -6070,6 +6954,39 @@ async function main() {
       };
       suppressedSignalOnlyCount += 1;
     }
+    for (const job of processed) {
+      if (!shouldSuppressUnanalyzedLandingJob(job)) continue;
+      const fallback = fallbackScoreJobFit({ job, config });
+      job.analysis = enrichAnalysisDerivedFields({
+        analysis: {
+          ...fallback,
+          matchScore: Math.min(20, Math.max(0, Number(fallback?.matchScore || 0) || 0)),
+          fitLevelCn: "不匹配",
+          isJobPosting: false,
+          recommend: false,
+          recommendReasonCn: "",
+          nextActionCn: "",
+          reasonsCn: [],
+          gapsCn: [],
+          questionsCn: [],
+          primaryEvidenceCn:
+            "该页面更像 careers 入口、人才社区、学生/项目介绍或泛化招聘落地页，不是最终可申请的具体职位详情。",
+          jobPostingEvidenceCn:
+            "链接与标题信号更接近招聘入口页或项目介绍页，未形成明确岗位JD证据。"
+        },
+        job,
+        config
+      });
+      job.analysis = {
+        ...(job.analysis || {}),
+        updatedAt: nowIso(),
+        fallback: true,
+        prefilterRejected: true,
+        prefilterScore: 0,
+        landingPageNoise: true
+      };
+      suppressedLandingPageCount += 1;
+    }
   }
 
   const prefilterRejectedCount = processed.filter(
@@ -6083,6 +7000,11 @@ async function main() {
   if (suppressedSignalOnlyCount > 0) {
     console.log(
       `[${nowIso()}] Suppressed ${suppressedSignalOnlyCount} signal-only jobs from resume queue.`
+    );
+  }
+  if (suppressedLandingPageCount > 0) {
+    console.log(
+      `[${nowIso()}] Suppressed ${suppressedLandingPageCount} landing-page jobs from resume queue.`
     );
   }
 
@@ -6258,34 +7180,35 @@ async function main() {
     );
     const combinedMap = new Map();
     for (const job of recommendedOnlyJobs) {
-      const key = buildJobDedupeKey(job) || job.url;
+      const key = buildFinalOutputDedupeKey(job, config) || job.url;
       const tags = ["推荐"];
       const platformTag = platformListingTag(job, config);
       if (platformTag) tags.push(platformTag);
       const withMeta = {
         ...job,
+        outputUrl: chooseOutputJobUrl(job, config) || normalizeJobUrl(job.url),
         canonicalUrl: canonicalJobUrl(job) || normalizeJobUrl(job.url),
         sourceQuality: inferSourceQuality(job, config),
         regionTag: inferRegionTag(job) || job.regionTag || "",
         listTags: tags
       };
-      combinedMap.set(key, withMeta);
+      mergePreferredRecommendedJob(combinedMap, key, withMeta, config);
     }
     for (const job of cnEuropeJobs) {
-      const key = buildJobDedupeKey(job) || job.url;
-      const current = combinedMap.get(key);
-      if (current) {
-        const tags = new Set([...(current.listTags || []), "中资赴欧"]);
-        combinedMap.set(key, { ...current, listTags: Array.from(tags) });
-      } else {
-        combinedMap.set(key, {
+      const key = buildFinalOutputDedupeKey(job, config) || job.url;
+      mergePreferredRecommendedJob(
+        combinedMap,
+        key,
+        {
           ...job,
+          outputUrl: chooseOutputJobUrl(job, config) || normalizeJobUrl(job.url),
           canonicalUrl: canonicalJobUrl(job) || normalizeJobUrl(job.url),
           sourceQuality: inferSourceQuality(job, config),
           regionTag: inferRegionTag(job) || job.regionTag || "",
           listTags: ["中资赴欧"]
-        });
-      }
+        },
+        config
+      );
     }
 
     let unifiedRecommendedJobs = Array.from(combinedMap.values());
@@ -6295,14 +7218,14 @@ async function main() {
       const merged = new Map();
       const allJobsByKey = new Map(
         allJobs
-          .map((job) => [buildJobDedupeKey(job) || normalizeJobUrl(job.url), job])
+          .map((job) => [buildFinalOutputDedupeKey(job, config) || normalizeJobUrl(job.url), job])
           .filter(([key]) => key)
       );
       let prunedRecentInvalidRows = 0;
       for (const row of existingRecommendedRows.values()) {
         const job = rowToJob(row, config);
         if (!job) continue;
-        const key = buildJobDedupeKey(job) || normalizeJobUrl(job.url);
+        const key = buildFinalOutputDedupeKey(job, config) || normalizeJobUrl(job.url);
         if (!key) continue;
         const currentDateFound = String(job.dateFound || row.dateFound || "").trim();
         const richJob = allJobsByKey.get(key) || job;
@@ -6326,7 +7249,7 @@ async function main() {
       const historicalJobs = allJobs.filter((job) => shouldRestoreHistoricalRecommendedJob(job, config));
       historicalJobs.sort((a, b) => String(a.dateFound || "").localeCompare(String(b.dateFound || "")));
       for (const job of historicalJobs) {
-        const key = buildJobDedupeKey(job) || normalizeJobUrl(job.url);
+        const key = buildFinalOutputDedupeKey(job, config) || normalizeJobUrl(job.url);
         if (!key) continue;
         const existingJob = merged.get(key);
         const candidate = {
@@ -6361,7 +7284,7 @@ async function main() {
         return String(b.dateFound || "").localeCompare(String(a.dateFound || ""));
       });
       for (const job of newJobs) {
-        const key = buildJobDedupeKey(job) || normalizeJobUrl(job.url);
+        const key = buildFinalOutputDedupeKey(job, config) || normalizeJobUrl(job.url);
         if (!key) continue;
         const existingJob = merged.get(key);
         if (!existingJob) {

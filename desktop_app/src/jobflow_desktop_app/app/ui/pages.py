@@ -3,7 +3,9 @@
 import json
 import os
 import re
+import sys
 import threading
+import time
 from datetime import datetime
 from html import escape
 from pathlib import Path
@@ -148,6 +150,27 @@ def _background_thread_parent() -> QObject | None:
     return app if isinstance(app, QObject) else None
 
 
+def _report_unhandled_ui_exception(owner: QWidget, title: str, exc: BaseException) -> None:
+    try:
+        sys.excepthook(type(exc), exc, exc.__traceback__)
+    except Exception:
+        pass
+    language = "en" if getattr(owner, "ui_language", "zh") == "en" else "zh"
+    detail = str(exc or "").strip() or exc.__class__.__name__
+    try:
+        QMessageBox.warning(
+            owner,
+            title,
+            _t(
+                language,
+                f"界面处理时发生未处理异常：{detail}\n\n日志已经写入 crash.log，请把这次操作步骤告诉我继续定位。",
+                f"An unhandled UI error occurred: {detail}\n\nThe details were written to crash.log. Please share the exact steps so this can be diagnosed further.",
+            ),
+        )
+    except Exception:
+        pass
+
+
 def run_busy_task(
     owner: QWidget,
     *,
@@ -186,6 +209,16 @@ def run_busy_task(
     completed = False
     timeout_timer: QTimer | None = None
 
+    def _invoke_callback(callback: Callable[..., Any] | None, *args: Any) -> bool:
+        if callback is None:
+            return True
+        try:
+            callback(*args)
+            return True
+        except Exception as exc:
+            _report_unhandled_ui_exception(owner, title, exc)
+            return False
+
     def _finish(result: Any, error: object) -> None:
         nonlocal completed
         if completed:
@@ -200,16 +233,16 @@ def run_busy_task(
         setattr(owner, "_busy_task_worker", None)
         setattr(owner, "_busy_task_dialog", None)
         setattr(owner, "_busy_task_relay", None)
-        if on_finally is not None:
-            on_finally()
+        if not _invoke_callback(on_finally):
+            return
         if error is not None:
             if on_error is not None:
                 if isinstance(error, Exception):
-                    on_error(error)
+                    _invoke_callback(on_error, error)
                 else:
-                    on_error(RuntimeError(str(error)))
+                    _invoke_callback(on_error, RuntimeError(str(error)))
             return
-        on_success(result)
+        _invoke_callback(on_success, result)
 
     if timeout_ms is not None and timeout_ms > 0:
         timeout_timer = QTimer(owner)
@@ -227,10 +260,11 @@ def run_busy_task(
             setattr(owner, "_busy_task_worker", None)
             setattr(owner, "_busy_task_dialog", None)
             setattr(owner, "_busy_task_relay", None)
-            if on_finally is not None:
-                on_finally()
+            if not _invoke_callback(on_finally):
+                return
             if on_error is not None:
-                on_error(
+                _invoke_callback(
+                    on_error,
                     RuntimeError("Operation timed out. Check network or API settings and retry.")
                 )
 
@@ -2159,16 +2193,20 @@ class TargetDirectionStep(QWidget):
         context: AppContext,
         ui_language: str = "zh",
         on_data_changed: Callable[[], None] | None = None,
+        on_busy_state_changed: Callable[[bool, str], None] | None = None,
     ) -> None:
         super().__init__()
         self.context = context
         self.ui_language = "en" if ui_language == "en" else "zh"
         self.on_data_changed = on_data_changed
+        self.on_busy_state_changed = on_busy_state_changed
         self.role_recommender = OpenAIRoleRecommendationService()
         self.current_candidate_id: int | None = None
         self.current_profile_id: int | None = None
         self.profile_records: list[SearchProfileRecord] = []
         self._auto_translated_profile_ids: set[int] = set()
+        self._ai_busy = False
+        self._ai_busy_message = ""
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -2280,6 +2318,22 @@ class TargetDirectionStep(QWidget):
         self.direction_list.itemChanged.connect(self._on_item_checked_changed)
 
         self._set_enabled(False)
+
+    def is_ai_busy(self) -> bool:
+        return self._ai_busy
+
+    def ai_busy_message(self) -> str:
+        return self._ai_busy_message
+
+    def _set_ai_busy_state(self, busy: bool, message: str = "") -> None:
+        normalized_busy = bool(busy)
+        normalized_message = str(message or "").strip() if normalized_busy else ""
+        if self._ai_busy == normalized_busy and self._ai_busy_message == normalized_message:
+            return
+        self._ai_busy = normalized_busy
+        self._ai_busy_message = normalized_message
+        if self.on_busy_state_changed:
+            self.on_busy_state_changed(normalized_busy, normalized_message)
 
     def set_candidate(self, candidate_id: int | None) -> None:
         self.current_candidate_id = candidate_id
@@ -2542,22 +2596,30 @@ class TargetDirectionStep(QWidget):
         ):
             return profile
 
-        updated_profile_id = self.context.profiles.save(
-            SearchProfileRecord(
-                profile_id=profile.profile_id,
-                candidate_id=profile.candidate_id,
-                name=updated_name,
-                scope_profile=profile.scope_profile,
-                target_role=updated_target_role,
-                location_preference=profile.location_preference,
-                company_focus=profile.company_focus,
-                company_keyword_focus=profile.company_keyword_focus,
-                role_name_i18n=updated_role_name_i18n,
-                keyword_focus=updated_keyword_focus,
-                is_active=profile.is_active,
-                queries=profile.queries,
+        try:
+            updated_profile_id = self.context.profiles.save(
+                SearchProfileRecord(
+                    profile_id=profile.profile_id,
+                    candidate_id=profile.candidate_id,
+                    name=updated_name,
+                    scope_profile=profile.scope_profile,
+                    target_role=updated_target_role,
+                    location_preference=profile.location_preference,
+                    company_focus=profile.company_focus,
+                    company_keyword_focus=profile.company_keyword_focus,
+                    role_name_i18n=updated_role_name_i18n,
+                    keyword_focus=updated_keyword_focus,
+                    is_active=profile.is_active,
+                    queries=profile.queries,
+                )
             )
-        )
+        except Exception as exc:
+            _report_unhandled_ui_exception(
+                self,
+                _t(self.ui_language, "目标岗位设立", "Target Roles"),
+                exc,
+            )
+            return profile
         refreshed = self.context.profiles.get(updated_profile_id)
         if refreshed is None:
             refreshed = SearchProfileRecord(
@@ -2582,6 +2644,20 @@ class TargetDirectionStep(QWidget):
                 self.profile_records[index] = refreshed
                 break
         return refreshed
+
+    def shutdown_background_work(self, wait_ms: int = 8000) -> None:
+        dialog = getattr(self, "_busy_task_dialog", None)
+        if isinstance(dialog, QProgressDialog):
+            dialog.close()
+            dialog.deleteLater()
+        running_thread = getattr(self, "_busy_task_thread", None)
+        if isinstance(running_thread, QThread) and running_thread.isRunning():
+            running_thread.wait(max(0, int(wait_ms)))
+        setattr(self, "_busy_task_thread", None)
+        setattr(self, "_busy_task_worker", None)
+        setattr(self, "_busy_task_dialog", None)
+        setattr(self, "_busy_task_relay", None)
+        self._set_ai_busy_state(False)
 
     def _clear_profile_form(self) -> None:
         self.current_profile_id = None
@@ -2684,6 +2760,14 @@ class TargetDirectionStep(QWidget):
             self.ui_language,
             "AI 正在生成岗位推荐，请稍候...",
             "AI is generating role recommendations, please wait...",
+        )
+        self._set_ai_busy_state(
+            True,
+            _t(
+                self.ui_language,
+                "第二步 AI 正在生成岗位方向，完成前不能开始第三步搜索。",
+                "Step 2 AI is generating target roles. Step 3 search is blocked until it finishes.",
+            ),
         )
 
         def _task() -> Any:
@@ -2790,6 +2874,7 @@ class TargetDirectionStep(QWidget):
 
         def _on_finally() -> None:
             self.generate_directions_button.setEnabled(self.current_candidate_id is not None)
+            self._set_ai_busy_state(False)
 
         started = run_busy_task(
             self,
@@ -2802,6 +2887,7 @@ class TargetDirectionStep(QWidget):
         )
         if not started:
             self.generate_directions_button.setEnabled(self.current_candidate_id is not None)
+            self._set_ai_busy_state(False)
 
     def _add_direction(self) -> None:
         if self.current_candidate_id is None:
@@ -2962,6 +3048,14 @@ class TargetDirectionStep(QWidget):
             "AI 正在补全岗位信息，请稍候...",
             "AI is enriching role details, please wait...",
         )
+        self._set_ai_busy_state(
+            True,
+            _t(
+                self.ui_language,
+                "第二步 AI 正在补全岗位信息，完成前不能开始第三步搜索。",
+                "Step 2 AI is enriching role details. Step 3 search is blocked until it finishes.",
+            ),
+        )
 
         def _task() -> Any:
             return _build_payload(True)
@@ -2991,6 +3085,7 @@ class TargetDirectionStep(QWidget):
 
         def _on_finally() -> None:
             self.add_direction_button.setEnabled(self.current_candidate_id is not None)
+            self._set_ai_busy_state(False)
 
         started = run_busy_task(
             self,
@@ -3003,6 +3098,7 @@ class TargetDirectionStep(QWidget):
         )
         if not started:
             self.add_direction_button.setEnabled(self.current_candidate_id is not None)
+            self._set_ai_busy_state(False)
 
     def _save_profile(self) -> None:
         if self.current_candidate_id is None:
@@ -3117,6 +3213,14 @@ class TargetDirectionStep(QWidget):
             "AI 正在补全双语岗位信息，请稍候...",
             "AI is completing bilingual role details, please wait...",
         )
+        self._set_ai_busy_state(
+            True,
+            _t(
+                self.ui_language,
+                "第二步 AI 正在保存并补全岗位信息，完成前不能开始第三步搜索。",
+                "Step 2 AI is saving and completing role details. Step 3 search is blocked until it finishes.",
+            ),
+        )
 
         def _task() -> Any:
             translated_name_zh, translated_name_en = self._complete_role_name_pair(
@@ -3172,6 +3276,7 @@ class TargetDirectionStep(QWidget):
 
         def _on_finally() -> None:
             self.save_direction_button.setEnabled(self.current_candidate_id is not None)
+            self._set_ai_busy_state(False)
 
         started = run_busy_task(
             self,
@@ -3184,6 +3289,7 @@ class TargetDirectionStep(QWidget):
         )
         if not started:
             self.save_direction_button.setEnabled(self.current_candidate_id is not None)
+            self._set_ai_busy_state(False)
 
     def _delete_direction(self) -> None:
         if self.current_profile_id is None:
@@ -3209,6 +3315,7 @@ class TargetDirectionStep(QWidget):
 
 class SearchResultsStep(QWidget):
     STATUS_CODES = ("pending", "focus", "applied", "offered", "rejected", "dropped")
+    BLOCKED_AI_LEVELS = {"missing", "invalid", "model_unverified", "warning", "error"}
 
     def __init__(self, context: AppContext, ui_language: str = "zh") -> None:
         super().__init__()
@@ -3227,6 +3334,19 @@ class SearchResultsStep(QWidget):
         self._live_results_last_count = -1
         self._live_results_signature: tuple[tuple[object, ...], ...] = ()
         self._search_cancel_event: threading.Event | None = None
+        self._ai_validation_level = "idle"
+        self._ai_validation_message = ""
+        self._target_ai_busy = False
+        self._target_ai_busy_message = ""
+        self._search_started_monotonic: float | None = None
+        self._search_duration_seconds = 0
+        self._search_stop_requested = False
+        self._queued_search_restart = False
+        self._queued_search_candidate_id: int | None = None
+        self._queued_search_duration_label = ""
+        self._search_countdown_timer = QTimer(self)
+        self._search_countdown_timer.setInterval(1000)
+        self._search_countdown_timer.timeout.connect(self._refresh_search_countdown)
         self._notification_toast: QFrame | None = None
         self._notification_timer = QTimer(self)
         self._notification_timer.setSingleShot(True)
@@ -3240,8 +3360,8 @@ class SearchResultsStep(QWidget):
                 _t(self.ui_language, "第三步：岗位搜索结果", "Step 3: Search Results"),
                 _t(
                     self.ui_language,
-                    "点击“寻找更多岗位”后，系统会继续抓取并分析岗位结果。表格支持评分查看、状态维护和删除。",
-                    "Click 'Find More Jobs' to continue discovery and analysis. The table supports score review, status updates, and deletion.",
+                    "点击“开始搜索”后，系统会继续抓取并分析岗位结果。表格支持评分查看、状态维护和删除。",
+                    "Click 'Start Search' to continue discovery and analysis. The table supports score review, status updates, and deletion.",
                 ),
             )
         )
@@ -3261,6 +3381,12 @@ class SearchResultsStep(QWidget):
         self.results_meta_label.setWordWrap(True)
         control_layout.addWidget(self.results_meta_label)
 
+        self.results_progress_label = QLabel("")
+        self.results_progress_label.setObjectName("MutedLabel")
+        self.results_progress_label.setWordWrap(True)
+        self.results_progress_label.hide()
+        control_layout.addWidget(self.results_progress_label)
+
         self.results_stats_label = QLabel(
             _t(
                 self.ui_language,
@@ -3272,10 +3398,40 @@ class SearchResultsStep(QWidget):
         self.results_stats_label.setWordWrap(True)
         control_layout.addWidget(self.results_stats_label)
 
+        duration_row = QWidget()
+        duration_row_layout = QHBoxLayout(duration_row)
+        duration_row_layout.setContentsMargins(0, 0, 0, 0)
+        duration_row_layout.setSpacing(10)
+        self.search_duration_label = QLabel(
+            _t(self.ui_language, "搜索时长", "Search Duration")
+        )
+        self.search_duration_combo = QComboBox()
+        self.search_duration_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.search_duration_combo.setMinimumContentsLength(8)
+        self.search_duration_combo.setMinimumWidth(170)
+        self.search_duration_combo.addItem(_t(self.ui_language, "10 分钟", "10 minutes"), 600)
+        self.search_duration_combo.addItem(_t(self.ui_language, "30 分钟", "30 minutes"), 1800)
+        self.search_duration_combo.addItem(_t(self.ui_language, "1 小时", "1 hour"), 3600)
+        self.search_duration_combo.addItem(_t(self.ui_language, "2 小时", "2 hours"), 7200)
+        self.search_duration_combo.addItem(_t(self.ui_language, "4 小时", "4 hours"), 14400)
+        self.search_duration_combo.setCurrentIndex(2)
+        self.search_duration_combo.currentIndexChanged.connect(self._refresh_search_countdown)
+        duration_row_layout.addWidget(self.search_duration_label)
+        duration_row_layout.addWidget(self.search_duration_combo)
+        self.search_countdown_label = QLabel(
+            _t(self.ui_language, "剩余时间", "Remaining Time")
+        )
+        self.search_countdown_value_label = QLabel("00:00:00")
+        self.search_countdown_value_label.setObjectName("MutedLabel")
+        duration_row_layout.addWidget(self.search_countdown_label)
+        duration_row_layout.addWidget(self.search_countdown_value_label)
+        duration_row_layout.addStretch(1)
+        control_layout.addWidget(duration_row)
+
         button_row = QHBoxLayout()
         button_row.setContentsMargins(0, 0, 0, 0)
         button_row.setSpacing(10)
-        self.refresh_button = styled_button(_t(self.ui_language, "寻找更多岗位", "Find More Jobs"), "primary")
+        self.refresh_button = styled_button(_t(self.ui_language, "开始搜索", "Start Search"), "primary")
         self.stop_button = styled_button(_t(self.ui_language, "停止搜索", "Stop Search"), "secondary")
         self.delete_button = styled_button(_t(self.ui_language, "删除所选岗位", "Delete Selected Jobs"), "danger")
         button_row.addWidget(self.refresh_button)
@@ -3321,11 +3477,284 @@ class SearchResultsStep(QWidget):
         table_layout.addWidget(self.table)
         layout.addWidget(table_card, 1)
 
-        self.refresh_button.clicked.connect(self._run_search)
+        self.stop_button.hide()
+        self.refresh_button.clicked.connect(self._toggle_search)
         self.stop_button.clicked.connect(self._stop_search)
         self.delete_button.clicked.connect(self._delete_selected_rows)
+        self._set_search_button_running(False)
+        self._set_search_countdown_seconds(0)
+
+    def _is_search_running(self) -> bool:
+        running_thread = getattr(self, "_busy_task_thread", None)
+        return isinstance(running_thread, QThread) and running_thread.isRunning()
+
+    def _active_profiles(self, candidate_id: int | None = None) -> list[SearchProfileRecord]:
+        target_candidate_id = candidate_id if candidate_id is not None else self.current_candidate_id
+        if target_candidate_id is None:
+            return []
+        return [
+            profile
+            for profile in self.context.profiles.list_for_candidate(int(target_candidate_id))
+            if profile.is_active
+        ]
+
+    def _search_prerequisite_issue(
+        self,
+        candidate_id: int | None = None,
+        profiles: list[SearchProfileRecord] | None = None,
+    ) -> str:
+        target_candidate_id = candidate_id if candidate_id is not None else self.current_candidate_id
+        if target_candidate_id is None:
+            return ""
+        if self._target_ai_busy:
+            return self._target_ai_busy_message or _t(
+                self.ui_language,
+                "第二步 AI 仍在处理岗位方向。请先等待它完成，再开始第三步搜索。",
+                "Step 2 AI is still processing target roles. Wait for it to finish before starting Step 3 search.",
+            )
+        active_profiles = [profile for profile in (profiles or self._active_profiles(target_candidate_id)) if profile.is_active]
+        if active_profiles:
+            return ""
+        return _t(
+            self.ui_language,
+            "当前还没有任何已启用的目标岗位。请先在第二步至少勾选或创建一个岗位，再开始第三步搜索。",
+            "There are no enabled target roles yet. In Step 2, create or check at least one role before starting Step 3 search.",
+        )
+
+    def _apply_search_prerequisite_state(self, profiles: list[SearchProfileRecord] | None = None) -> None:
+        if self._is_search_running() or self._queued_search_restart or self._search_stop_requested:
+            return
+        has_candidate = self.current_candidate_id is not None
+        issue = self._search_prerequisite_issue(profiles=profiles)
+        self._set_search_button_running(False)
+        self.refresh_button.setEnabled(has_candidate and not issue)
+        self.search_duration_combo.setEnabled(has_candidate and not issue)
+        self.refresh_button.setToolTip(issue)
+        self.search_duration_combo.setToolTip(issue)
+        self._set_results_progress_detail_with_level(issue, alert=bool(issue))
+
+    def set_target_ai_busy_state(self, busy: bool, message: str = "") -> None:
+        self._target_ai_busy = bool(busy)
+        self._target_ai_busy_message = str(message or "").strip() if self._target_ai_busy else ""
+        self._apply_search_prerequisite_state()
+
+    def _set_results_main_status(self, text: str) -> None:
+        message = str(text or "").strip()
+        if self.results_meta_label.text() != message:
+            self.results_meta_label.setText(message)
+
+    def _set_results_progress_detail(self, text: str) -> None:
+        self._set_results_progress_detail_with_level(text, alert=False)
+
+    def _set_results_progress_detail_with_level(self, text: str, *, alert: bool) -> None:
+        message = str(text or "").strip()
+        if alert:
+            self.results_progress_label.setStyleSheet("color: #b42318; font-weight: 600;")
+        else:
+            self.results_progress_label.setStyleSheet("")
+        if self.results_progress_label.text() != message:
+            self.results_progress_label.setText(message)
+        self.results_progress_label.setVisible(bool(message))
+
+    def _candidate_status_text(
+        self,
+        zh_message: str,
+        en_message: str,
+        *,
+        candidate_name: str | None = None,
+    ) -> str:
+        name = str(candidate_name if candidate_name is not None else self.current_candidate_name or "").strip()
+        if not name:
+            return _t(self.ui_language, zh_message, en_message)
+        return _t(
+            self.ui_language,
+            f"当前求职者：{name}。{zh_message}",
+            f"Current candidate: {name}. {en_message}",
+        )
+
+    def _set_no_candidate_status(self) -> None:
+        self._set_results_main_status(
+            _t(
+                self.ui_language,
+                "请先返回选择页，选择一个求职者后再开始搜索。",
+                "Go back to candidate selection and choose a candidate first.",
+            )
+        )
+        self._set_results_progress_detail("")
+
+    def _set_ready_status(self, candidate_name: str | None = None) -> None:
+        self._set_results_main_status(
+            self._candidate_status_text(
+                "点击“开始搜索”后，系统会继续抓取，并把新的岗位结果按最新时间加入列表。",
+                "Click 'Start Search' to continue discovery and add new jobs to the list in newest-first order.",
+                candidate_name=candidate_name,
+            )
+        )
+        self._set_results_progress_detail("")
+
+    def _set_loaded_results_status(self, visible_count: int, pending_count: int) -> None:
+        if visible_count > 0 and pending_count > 0:
+            message = self._candidate_status_text(
+                f"已加载最近一次运行结果；另有 {pending_count} 条上次未补完的岗位，下次开始搜索时会优先继续处理。",
+                f"Loaded the latest run results; {pending_count} unfinished job(s) from the last run will be resumed first the next time you start search.",
+            )
+        elif visible_count > 0:
+            message = self._candidate_status_text(
+                "已加载最近一次运行结果。",
+                "Loaded the latest run results.",
+            )
+        elif pending_count > 0:
+            message = self._candidate_status_text(
+                f"当前还没有可展示结果；另有 {pending_count} 条上次未补完的岗位，下次开始搜索时会优先继续处理。",
+                f"There are no displayable results yet; {pending_count} unfinished job(s) from the last run will be resumed first the next time you start search.",
+            )
+        else:
+            self._set_ready_status()
+            return
+        self._set_results_main_status(message)
+        self._set_results_progress_detail("")
+
+    def _set_running_status(
+        self,
+        *,
+        candidate_name: str | None = None,
+        pending_before_run: int | None = None,
+    ) -> None:
+        if pending_before_run and pending_before_run > 0:
+            message = self._candidate_status_text(
+                f"正在后台搜索岗位；会先补完上次未完成的 {pending_before_run} 条岗位，再继续寻找新的岗位。",
+                f"Background job search is running; {pending_before_run} unfinished job(s) from the last run will be completed first, then discovery will continue.",
+                candidate_name=candidate_name,
+            )
+        else:
+            message = self._candidate_status_text(
+                "正在后台搜索岗位；列表只会在出现新增或结果变化时刷新。",
+                "Background job search is running; the list refreshes only when new or changed results appear.",
+                candidate_name=candidate_name,
+            )
+        self._set_results_main_status(message)
+        self._set_results_progress_detail(
+            _t(
+                self.ui_language,
+                "后台进度：正在启动本轮搜索。",
+                "Background progress: starting this search round.",
+            )
+        )
+
+    def _set_stop_requested_status(self) -> None:
+        self._set_results_main_status(
+            self._candidate_status_text(
+                "已请求停止；系统会在当前阶段安全结束后停止。现在可以先调整下一次搜索时长。",
+                "Stop requested. The system will stop after the current stage ends safely. You can already adjust the next search duration.",
+            )
+        )
+        self._set_results_progress_detail(
+            _t(
+                self.ui_language,
+                "后台收尾：正在等待当前阶段安全结束。",
+                "Finishing: waiting for the current stage to end safely.",
+            )
+        )
+
+    def _set_queued_restart_status(self, duration_label: str) -> None:
+        self._set_results_main_status(
+            self._candidate_status_text(
+                f"下一轮搜索已排队；当前收尾完成后会自动开始。计划时长：{duration_label}。",
+                f"The next search round is queued and will start automatically after the current shutdown finishes. Planned duration: {duration_label}.",
+            )
+        )
+        self._set_results_progress_detail(
+            _t(
+                self.ui_language,
+                f"后台收尾：正在等待当前阶段安全结束；下一轮已排队（{duration_label}）。",
+                f"Finishing: waiting for the current stage to end safely; the next round is queued ({duration_label}).",
+            )
+        )
+
+    def _set_stopped_status(self, candidate_name: str | None = None) -> None:
+        self._set_results_main_status(
+            self._candidate_status_text(
+                "后台搜索已停止，当前保留已完成落盘的结果。",
+                "Background search stopped. Any fully persisted results have been kept.",
+                candidate_name=candidate_name,
+            )
+        )
+        self._set_results_progress_detail("")
+
+    def _set_finished_status(self, pending_after_run: int, candidate_name: str | None = None) -> None:
+        if pending_after_run > 0:
+            message = self._candidate_status_text(
+                f"搜索已完成；仍有 {pending_after_run} 条主流程岗位待补完，下次开始搜索时会优先继续处理。",
+                f"Search finished; {pending_after_run} main-stage job(s) are still pending and will resume first the next time you start search.",
+                candidate_name=candidate_name,
+            )
+        else:
+            message = self._candidate_status_text(
+                "搜索已完成。",
+                "Search finished.",
+                candidate_name=candidate_name,
+            )
+        self._set_results_main_status(message)
+        self._set_results_progress_detail("")
+
+    def _set_failed_status(self, reason: str, candidate_name: str | None = None) -> None:
+        detail = str(reason or "").strip()
+        if detail:
+            message = self._candidate_status_text(
+                f"搜索失败：{detail}",
+                f"Search failed: {detail}",
+                candidate_name=candidate_name,
+            )
+        else:
+            message = self._candidate_status_text(
+                "搜索失败，请查看弹窗中的错误日志。",
+                "Search failed. Please check the error log in the dialog.",
+                candidate_name=candidate_name,
+            )
+        self._set_results_main_status(message)
+        self._set_results_progress_detail("")
+
+    def _set_deleted_status(self, deleted_count: int) -> None:
+        self._set_results_main_status(
+            self._candidate_status_text(
+                f"已删除 {deleted_count} 条岗位。",
+                f"Deleted {deleted_count} row(s).",
+            )
+        )
 
     def set_candidate(self, candidate: CandidateRecord | None) -> None:
+        same_candidate_running = (
+            candidate is not None
+            and candidate.candidate_id is not None
+            and candidate.candidate_id == self.current_candidate_id
+            and self._is_search_running()
+        )
+        if same_candidate_running:
+            self.current_candidate_name = candidate.name
+            profiles = self.context.profiles.list_for_candidate(candidate.candidate_id)
+            self.target_role_candidates = self._build_target_role_candidates(profiles)
+            self._load_review_state(candidate.candidate_id)
+            if self._search_stop_requested:
+                if self._queued_search_restart:
+                    self._set_search_button_running(False, queued=True)
+                    self.search_duration_combo.setEnabled(False)
+                    self._set_queued_restart_status(
+                        self._queued_search_duration_label or self._selected_search_duration_label()
+                    )
+                else:
+                    self._set_search_button_running(False)
+                    self.search_duration_combo.setEnabled(True)
+                    self._set_stop_requested_status()
+            else:
+                self._set_search_button_running(True)
+                self.search_duration_combo.setEnabled(False)
+                self._set_running_status(candidate_name=candidate.name)
+            self.delete_button.setEnabled(True)
+            self._refresh_results_stats_label()
+            progress_detail_text, _progress_dialog_text = self._search_progress_text(candidate.candidate_id)
+            self._set_results_progress_detail(progress_detail_text)
+            return
+
         self._stop_live_results_updates()
         self.table.setRowCount(0)
         self._live_results_signature = ()
@@ -3335,16 +3764,19 @@ class SearchResultsStep(QWidget):
             self.target_role_candidates = []
             self.status_by_job_key = {}
             self.hidden_job_keys = set()
-            self.results_meta_label.setText(
-                _t(
-                    self.ui_language,
-                    "请先返回选择页，选择一个求职者后再开始搜索。",
-                    "Go back to candidate selection and choose a candidate first.",
-                )
-            )
+            self._set_no_candidate_status()
+            self._set_search_button_running(False)
             self.refresh_button.setEnabled(False)
-            self.stop_button.setEnabled(False)
             self.delete_button.setEnabled(False)
+            self.search_duration_combo.setEnabled(True)
+            self._search_started_monotonic = None
+            self._search_duration_seconds = 0
+            self._search_stop_requested = False
+            self._queued_search_restart = False
+            self._queued_search_candidate_id = None
+            self._queued_search_duration_label = ""
+            self._search_countdown_timer.stop()
+            self._set_search_countdown_seconds(0)
             self._search_cancel_event = None
             self._refresh_results_stats_label()
             return
@@ -3354,70 +3786,136 @@ class SearchResultsStep(QWidget):
         profiles = self.context.profiles.list_for_candidate(candidate.candidate_id)
         self.target_role_candidates = self._build_target_role_candidates(profiles)
         self._load_review_state(candidate.candidate_id)
-        self.refresh_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
         self.delete_button.setEnabled(True)
-        self.results_meta_label.setText(
-            _t(
-                self.ui_language,
-                f"当前求职者：{candidate.name}。点击“寻找更多岗位”会继续抓取，并按最新时间排序显示。",
-                f"Current candidate: {candidate.name}. Click 'Find More Jobs' to continue discovery, with newest results shown first.",
-            )
-        )
+        if not self._is_search_running():
+            self._set_search_countdown_seconds(0)
+        self._set_ready_status(candidate.name)
         self._refresh_results_stats_label()
         self._reload_existing_results(candidate.candidate_id)
+        self._apply_search_prerequisite_state(profiles=profiles)
 
     def _reload_existing_results(self, candidate_id: int) -> None:
         jobs = self.runner.load_recommended_jobs(candidate_id)
         visible_count = self._render_jobs(jobs)
         pending_count = self._main_pending_analysis_count(candidate_id)
-        if visible_count > 0:
-            self.results_meta_label.setText(
-                _t(
-                    self.ui_language,
-                    (
-                        f"当前求职者：{self.current_candidate_name}。已加载最近一次运行结果；"
-                        f"另有 {pending_count} 条上次未补完，只有再次点击“寻找更多岗位”时才会继续处理。"
-                        if pending_count > 0
-                        else f"当前求职者：{self.current_candidate_name}。已加载最近一次运行结果。"
-                    ),
-                    (
-                        f"Current candidate: {self.current_candidate_name}. Loaded latest run results; "
-                        f"{pending_count} unfinished main-stage job(s) from the last run will resume only after you click 'Find More Jobs' again."
-                        if pending_count > 0
-                        else f"Current candidate: {self.current_candidate_name}. Loaded latest run results."
-                    ),
-                )
-            )
-        elif pending_count > 0:
-            self.results_meta_label.setText(
-                _t(
-                    self.ui_language,
-                    f"当前求职者：{self.current_candidate_name}。当前还没有可展示结果；另有 {pending_count} 条上次未补完，只有再次点击“寻找更多岗位”时才会继续处理。",
-                    f"Current candidate: {self.current_candidate_name}. There are no displayable results yet; {pending_count} unfinished main-stage job(s) from the last run will resume only after you click 'Find More Jobs' again.",
-                )
-            )
+        self._set_loaded_results_status(visible_count, pending_count)
         self._refresh_results_stats_label()
         self._live_results_last_count = visible_count
+
+    def set_ai_validation_state(self, message: str, level: str = "idle") -> None:
+        self._ai_validation_message = str(message or "").strip()
+        self._ai_validation_level = str(level or "idle").strip().lower() or "idle"
+
+    def _effective_search_settings(self) -> OpenAISettings | None:
+        settings = self.context.settings.get_effective_openai_settings()
+        if settings.api_key.strip():
+            if self._ai_validation_level in self.BLOCKED_AI_LEVELS:
+                detail = self._ai_validation_message or _t(
+                    self.ui_language,
+                    "当前 AI 状态未通过验证。",
+                    "The current AI status has not passed validation.",
+                )
+                QMessageBox.warning(
+                    self,
+                    _t(self.ui_language, "岗位搜索结果", "Search Results"),
+                    _t(
+                        self.ui_language,
+                        f"当前 AI 状态是红色，不能开始岗位搜索。请先在右上角“AI 设置”里修复后再试。\n\n当前状态：{detail}",
+                        f"The current AI status is red, so job search cannot start. Please fix it in the top-right AI settings first.\n\nCurrent status: {detail}",
+                    ),
+                )
+                return None
+            return settings
+        QMessageBox.warning(
+            self,
+            _t(self.ui_language, "岗位搜索结果", "Search Results"),
+            _t(
+                self.ui_language,
+                "当前没有可用的 OpenAI API Key，不能开始岗位搜索。请先在右上角“AI 设置”里检查环境变量或填写并保存 Key。",
+                "No usable OpenAI API key is available, so job search cannot start. Please check the environment variable or save a key in the top-right AI settings first.",
+            ),
+        )
+        return None
+
+    def _toggle_search(self) -> None:
+        if self._is_search_running():
+            if self._search_stop_requested:
+                if self._queued_search_restart:
+                    self._cancel_queued_search_restart()
+                else:
+                    self._queue_search_restart()
+                return
+            self._stop_search()
+            return
+        self._run_search()
 
     def _stop_search(self) -> None:
         cancel_event = self._search_cancel_event
         running_thread = getattr(self, "_busy_task_thread", None)
         if cancel_event is None or not isinstance(running_thread, QThread) or not running_thread.isRunning():
-            self.stop_button.setEnabled(False)
+            self._set_search_button_running(False)
+            return
+        if cancel_event.is_set():
+            if self._queued_search_restart:
+                self._set_search_button_running(False, queued=True)
+                self.search_duration_combo.setEnabled(False)
+            else:
+                self._set_search_button_running(False)
+                self.search_duration_combo.setEnabled(True)
             return
         cancel_event.set()
-        self.stop_button.setEnabled(False)
-        self.results_meta_label.setText(
-            _t(
-                self.ui_language,
-                f"当前求职者：{self.current_candidate_name}。已请求停止后台搜索，正在等待当前子阶段安全结束。",
-                f"Current candidate: {self.current_candidate_name}. Stop requested. Waiting for the current background stage to end safely.",
+        self._search_stop_requested = True
+        self._queued_search_restart = False
+        self._queued_search_candidate_id = None
+        self._queued_search_duration_label = ""
+        self._search_countdown_timer.stop()
+        self._set_search_countdown_seconds(0)
+        self._set_search_button_running(False)
+        self.search_duration_combo.setEnabled(True)
+        self._set_stop_requested_status()
+
+    def _queue_search_restart(self) -> None:
+        if self.current_candidate_id is None:
+            return
+        issue = self._search_prerequisite_issue()
+        if issue:
+            QMessageBox.warning(
+                self,
+                _t(self.ui_language, "岗位搜索结果", "Search Results"),
+                issue,
             )
-        )
+            self._apply_search_prerequisite_state()
+            return
+        if self._effective_search_settings() is None:
+            return
+        selected_duration_seconds = self._selected_search_duration_seconds()
+        selected_duration_label = self._selected_search_duration_label()
+        self._queued_search_restart = True
+        self._queued_search_candidate_id = int(self.current_candidate_id)
+        self._queued_search_duration_label = selected_duration_label
+        self._search_duration_seconds = selected_duration_seconds
+        self._search_started_monotonic = time.monotonic()
+        self._set_search_button_running(False, queued=True)
+        self.search_duration_combo.setEnabled(False)
+        self._refresh_search_countdown()
+        self._search_countdown_timer.start()
+        self._set_queued_restart_status(selected_duration_label)
+
+    def _cancel_queued_search_restart(self) -> None:
+        self._queued_search_restart = False
+        self._queued_search_candidate_id = None
+        self._queued_search_duration_label = ""
+        self._search_started_monotonic = None
+        self._search_duration_seconds = 0
+        self._search_countdown_timer.stop()
+        self._set_search_countdown_seconds(0)
+        self._set_search_button_running(False)
+        self.search_duration_combo.setEnabled(True)
+        self._set_stop_requested_status()
 
     def shutdown_background_work(self, wait_ms: int = 8000) -> None:
         self._stop_live_results_updates()
+        self._search_countdown_timer.stop()
         self._notification_timer.stop()
         self._hide_notification_toast()
         cancel_event = self._search_cancel_event
@@ -3427,6 +3925,9 @@ class SearchResultsStep(QWidget):
         if isinstance(running_thread, QThread) and running_thread.isRunning():
             running_thread.wait(max(0, int(wait_ms)))
         self._search_cancel_event = None
+        self._queued_search_restart = False
+        self._queued_search_candidate_id = None
+        self._queued_search_duration_label = ""
 
     def _run_search(self) -> None:
         if self.current_candidate_id is None:
@@ -3446,47 +3947,57 @@ class SearchResultsStep(QWidget):
             return
 
         profiles = self.context.profiles.list_for_candidate(self.current_candidate_id)
-        active_profiles = [profile for profile in profiles if profile.is_active]
-        if not active_profiles:
+        issue = self._search_prerequisite_issue(
+            candidate_id=self.current_candidate_id,
+            profiles=profiles,
+        )
+        if issue:
             QMessageBox.warning(
                 self,
                 _t(self.ui_language, "岗位搜索结果", "Search Results"),
-                _t(
-                    self.ui_language,
-                    "请先在第二步至少勾选一个目标岗位。",
-                    "Please check at least one target role in Step 2 first.",
-                ),
+                issue,
             )
+            self._apply_search_prerequisite_state(profiles=profiles)
             return
+        active_profiles = [profile for profile in profiles if profile.is_active]
 
         candidate_id = int(self.current_candidate_id)
         pending_before_run = self._main_pending_analysis_count(candidate_id)
+        selected_duration_seconds = self._selected_search_duration_seconds()
+        selected_duration_label = self._selected_search_duration_label()
+        effective_settings = self._effective_search_settings()
+        if effective_settings is None:
+            return
+        queued_restart = (
+            self._queued_search_restart
+            and self._queued_search_candidate_id == candidate_id
+        )
         self._search_cancel_event = threading.Event()
-        self.refresh_button.setEnabled(False)
-        self.stop_button.setEnabled(True)
+        self._search_duration_seconds = selected_duration_seconds
+        if not queued_restart or self._search_started_monotonic is None:
+            self._search_started_monotonic = time.monotonic()
+        self._search_stop_requested = False
+        self._queued_search_restart = False
+        self._queued_search_candidate_id = None
+        self._queued_search_duration_label = ""
+        self._set_search_button_running(True)
+        self.refresh_button.setEnabled(True)
+        self.search_duration_combo.setEnabled(False)
         self._live_results_last_count = -1
-        self.results_meta_label.setText(
-            _t(
-                self.ui_language,
-                (
-                    f"当前求职者：{candidate.name}。正在搜索岗位；会先补完上次未完成的 {pending_before_run} 条主流程岗位，再继续寻找新的岗位。"
-                    if pending_before_run > 0
-                    else f"当前求职者：{candidate.name}。正在后台搜索岗位；只有找到新岗位或结果发生变化时才会刷新列表。你可以继续操作，搜索会在后台持续运行。"
-                ),
-                (
-                    f"Current candidate: {candidate.name}. Searching jobs; {pending_before_run} unfinished main-stage job(s) from the last run will be completed first, then discovery continues."
-                    if pending_before_run > 0
-                    else f"Current candidate: {candidate.name}. Searching jobs in the background; the list refreshes only when new jobs or updated results appear. You can keep working while search continues."
-                ),
-            )
+        self._refresh_search_countdown()
+        self._search_countdown_timer.start()
+        self._set_running_status(
+            candidate_name=candidate.name,
+            pending_before_run=pending_before_run,
         )
 
         def _task() -> Any:
             return self.runner.run_search(
                 candidate=candidate,
                 profiles=active_profiles,
-                settings=self.context.settings.get_effective_openai_settings(),
+                settings=effective_settings,
                 api_base_url=self.context.settings.get_openai_base_url(),
+                timeout_seconds=selected_duration_seconds,
                 cancel_event=self._search_cancel_event,
             )
 
@@ -3501,16 +4012,12 @@ class SearchResultsStep(QWidget):
                 )
                 return
             if getattr(result, "cancelled", False):
+                if self._queued_search_restart and self._queued_search_candidate_id == candidate_id:
+                    return
                 jobs = self.runner.load_recommended_jobs(candidate_id)
                 visible_count = self._render_jobs(jobs)
                 self._refresh_results_stats_label()
-                self.results_meta_label.setText(
-                    _t(
-                        self.ui_language,
-                        f"当前求职者：{candidate.name}。后台搜索已停止，当前保留已完成落盘的结果。",
-                        f"Current candidate: {candidate.name}. Background search stopped. Any fully persisted results have been kept.",
-                    )
-                )
+                self._set_stopped_status(candidate.name)
                 self._show_notification_toast(
                     _t(
                         self.ui_language,
@@ -3523,13 +4030,7 @@ class SearchResultsStep(QWidget):
                 return
             if not result.success:
                 details = result.stderr_tail or result.stdout_tail or "No logs."
-                self.results_meta_label.setText(
-                    _t(
-                        self.ui_language,
-                        f"当前求职者：{candidate.name}。运行失败：{result.message}",
-                        f"Current candidate: {candidate.name}. Run failed: {result.message}",
-                    )
-                )
+                self._set_failed_status(str(result.message or "").strip(), candidate.name)
                 QMessageBox.warning(
                     self,
                     _t(self.ui_language, "岗位搜索结果", "Search Results"),
@@ -3541,23 +4042,7 @@ class SearchResultsStep(QWidget):
             visible_count = self._render_jobs(jobs)
             self._refresh_results_stats_label()
             pending_after_run = self._main_pending_analysis_count(candidate_id)
-            self.results_meta_label.setText(
-                _t(
-                    self.ui_language,
-                    (
-                        f"当前求职者：{candidate.name}。搜索已完成；"
-                        f"仍有 {pending_after_run} 条主流程岗位待补完，下次点击“寻找更多岗位”时会优先继续处理。"
-                        if pending_after_run > 0
-                        else f"当前求职者：{candidate.name}。搜索已完成。"
-                    ),
-                    (
-                        f"Current candidate: {candidate.name}. Search finished; "
-                        f"{pending_after_run} main-stage job(s) are still pending and will resume first the next time you click 'Find More Jobs'."
-                        if pending_after_run > 0
-                        else f"Current candidate: {candidate.name}. Search finished."
-                    ),
-                )
-            )
+            self._set_finished_status(pending_after_run, candidate.name)
             self._show_notification_toast(
                 (
                     _t(
@@ -3578,13 +4063,7 @@ class SearchResultsStep(QWidget):
 
         def _on_error(exc: Exception) -> None:
             if self.current_candidate_id == candidate_id:
-                self.results_meta_label.setText(
-                    _t(
-                        self.ui_language,
-                        f"当前求职者：{candidate.name}。运行失败：{exc}",
-                        f"Current candidate: {candidate.name}. Run failed: {exc}",
-                    )
-                )
+                self._set_failed_status(str(exc), candidate.name)
                 self._refresh_results_stats_label()
             QMessageBox.warning(
                 self,
@@ -3594,18 +4073,37 @@ class SearchResultsStep(QWidget):
 
         def _on_finally() -> None:
             self._stop_live_results_updates()
-            self.refresh_button.setEnabled(self.current_candidate_id is not None)
-            self.stop_button.setEnabled(False)
+            queued_restart = (
+                self._queued_search_restart
+                and self._queued_search_candidate_id == candidate_id
+                and self.current_candidate_id == candidate_id
+            )
+            if queued_restart:
+                self._search_stop_requested = False
+                self._search_cancel_event = None
+                self._refresh_results_stats_label()
+                QTimer.singleShot(0, self._run_search)
+                return
+            self._search_countdown_timer.stop()
+            self._search_started_monotonic = None
+            self._search_duration_seconds = 0
+            self._search_stop_requested = False
+            self._queued_search_restart = False
+            self._queued_search_candidate_id = None
+            self._queued_search_duration_label = ""
+            self._set_search_countdown_seconds(0)
             self._search_cancel_event = None
             self._refresh_results_stats_label()
+            self._set_results_progress_detail("")
+            self._apply_search_prerequisite_state()
 
         started = run_busy_task(
             self,
             title=_t(self.ui_language, "岗位搜索结果", "Search Results"),
             message=_t(
                 self.ui_language,
-                "系统正在后台搜索岗位；只有发现新岗位或结果变化时才会刷新列表。你可以继续操作，搜索会在后台持续运行。",
-                "Searching jobs in the background; the list refreshes only when new jobs or updated results appear. You can keep working while search continues.",
+                f"系统正在后台搜索岗位（本次连续搜索时长：{selected_duration_label}）；只有发现新岗位或结果变化时才会刷新列表。你可以继续操作，搜索会在后台持续运行。",
+                f"Searching jobs in the background for {selected_duration_label}; the list refreshes only when new jobs or updated results appear. You can keep working while search continues.",
             ),
             task=_task,
             on_success=_on_success,
@@ -3614,12 +4112,60 @@ class SearchResultsStep(QWidget):
             show_dialog=False,
         )
         if not started:
-            self.refresh_button.setEnabled(self.current_candidate_id is not None)
-            self.stop_button.setEnabled(False)
+            self._search_countdown_timer.stop()
+            self._search_started_monotonic = None
+            self._search_duration_seconds = 0
+            self._search_stop_requested = False
+            self._queued_search_restart = False
+            self._queued_search_candidate_id = None
+            self._queued_search_duration_label = ""
+            self._set_search_countdown_seconds(0)
             self._search_cancel_event = None
             self._stop_live_results_updates()
+            self._set_results_progress_detail("")
+            self._apply_search_prerequisite_state()
             return
         self._start_live_results_updates(candidate_id)
+
+    def _selected_search_duration_seconds(self) -> int:
+        value = self.search_duration_combo.currentData()
+        try:
+            return max(300, int(value))
+        except (TypeError, ValueError):
+            return 3600
+
+    def _selected_search_duration_label(self) -> str:
+        return str(self.search_duration_combo.currentText() or "").strip() or _t(
+            self.ui_language,
+            "1 小时",
+            "1 hour",
+        )
+
+    @staticmethod
+    def _format_countdown_text(seconds: int) -> str:
+        total = max(0, int(seconds or 0))
+        hours, remainder = divmod(total, 3600)
+        minutes, remaining_seconds = divmod(remainder, 60)
+        return f"{hours:02d}:{minutes:02d}:{remaining_seconds:02d}"
+
+    def _set_search_countdown_seconds(self, seconds: int) -> None:
+        self.search_countdown_value_label.setText(self._format_countdown_text(seconds))
+
+    def _refresh_search_countdown(self) -> None:
+        if (self._is_search_running() or self._queued_search_restart) and self._search_started_monotonic is not None:
+            elapsed = max(0, int(time.monotonic() - self._search_started_monotonic))
+            remaining = max(0, int(self._search_duration_seconds) - elapsed)
+            self._set_search_countdown_seconds(remaining)
+            return
+        self._set_search_countdown_seconds(0)
+
+    def _set_search_button_running(self, running: bool, *, queued: bool = False) -> None:
+        if running or queued:
+            self.refresh_button.setText(_t(self.ui_language, "停止搜索", "Stop Search"))
+            self.refresh_button.setEnabled(True)
+            return
+        self.refresh_button.setText(_t(self.ui_language, "开始搜索", "Start Search"))
+        self.refresh_button.setEnabled(True)
 
     def _visible_jobs(self, jobs: list[LegacyJobResult]) -> list[LegacyJobResult]:
         sorted_jobs = sorted(
@@ -3669,11 +4215,16 @@ class SearchResultsStep(QWidget):
             return 0
         return max(0, int(getattr(stats, "main_pending_analysis_count", 0) or 0))
 
-    @staticmethod
-    def _format_elapsed_text(seconds: int) -> str:
+    def _format_elapsed_text(self, seconds: int) -> str:
         total = max(0, int(seconds or 0))
         minutes, remaining_seconds = divmod(total, 60)
         hours, remaining_minutes = divmod(minutes, 60)
+        if self.ui_language != "en":
+            if hours > 0:
+                return f"{hours} 小时 {remaining_minutes} 分 {remaining_seconds} 秒"
+            if minutes > 0:
+                return f"{minutes} 分 {remaining_seconds} 秒"
+            return f"{remaining_seconds} 秒"
         if hours > 0:
             return f"{hours}h {remaining_minutes}m {remaining_seconds}s"
         if minutes > 0:
@@ -3694,30 +4245,42 @@ class SearchResultsStep(QWidget):
         stage_label = {
             "preparing": _t(self.ui_language, "准备环境", "Preparing"),
             "resume_pending": _t(self.ui_language, "补完待处理岗位", "Resuming pending jobs"),
-            "web_signal": _t(self.ui_language, "初始信号搜索", "Web signal"),
-            "main": _t(self.ui_language, "主流程分析", "Main stage"),
+            "main": _t(self.ui_language, "公司池主流程", "Company-first stage"),
             "completed": _t(self.ui_language, "已完成", "Completed"),
         }.get(stage, _t(self.ui_language, "后台处理中", "Background work"))
         elapsed_text = self._format_elapsed_text(int(getattr(progress, "elapsed_seconds", 0) or 0))
-        detail = str(getattr(progress, "last_event", "") or getattr(progress, "message", "") or "").strip()
+        if self._search_stop_requested:
+            if self._queued_search_restart:
+                dialog_text = _t(
+                    self.ui_language,
+                    f"系统正在等待当前阶段安全结束，当前阶段：{stage_label}，已运行 {elapsed_text}。下一轮搜索已经排队，时长为 {self._queued_search_duration_label or self._selected_search_duration_label()}。",
+                    f"Waiting for the current stage to end safely. Current stage: {stage_label}, elapsed {elapsed_text}. The next search round is already queued for {self._queued_search_duration_label or self._selected_search_duration_label()}.",
+                )
+                if self.ui_language == "en":
+                    detail_text = f"Finishing: {stage_label} | elapsed {elapsed_text} | next round queued: {self._queued_search_duration_label or self._selected_search_duration_label()}"
+                else:
+                    detail_text = f"后台收尾：{stage_label} · 已运行 {elapsed_text} · 下一轮已排队：{self._queued_search_duration_label or self._selected_search_duration_label()}"
+                return detail_text, dialog_text
+            dialog_text = _t(
+                self.ui_language,
+                f"系统正在等待当前阶段安全结束，当前阶段：{stage_label}，已运行 {elapsed_text}。下一次搜索时长现在可以先行调整。",
+                f"Waiting for the current stage to end safely. Current stage: {stage_label}, elapsed {elapsed_text}. The next search duration can already be adjusted.",
+            )
+            if self.ui_language == "en":
+                detail_text = f"Finishing: {stage_label} | elapsed {elapsed_text}"
+            else:
+                detail_text = f"后台收尾：{stage_label} · 已运行 {elapsed_text}"
+            return detail_text, dialog_text
         dialog_text = _t(
             self.ui_language,
             f"系统正在后台搜索岗位，当前阶段：{stage_label}，已运行 {elapsed_text}。你可以继续操作，搜索会在后台持续运行。",
             f"Searching jobs in the background. Current stage: {stage_label}, elapsed {elapsed_text}. You can keep working while search continues.",
         )
-        if detail:
-            page_text = _t(
-                self.ui_language,
-                f"当前求职者：{self.current_candidate_name}。后台正在{stage_label}，已运行 {elapsed_text}。最新进度：{detail}",
-                f"Current candidate: {self.current_candidate_name}. Background work is in {stage_label}, elapsed {elapsed_text}. Latest progress: {detail}",
-            )
+        if self.ui_language == "en":
+            detail_text = f"Background progress: {stage_label} | elapsed {elapsed_text}"
         else:
-            page_text = _t(
-                self.ui_language,
-                f"当前求职者：{self.current_candidate_name}。后台正在{stage_label}，已运行 {elapsed_text}。",
-                f"Current candidate: {self.current_candidate_name}. Background work is in {stage_label}, elapsed {elapsed_text}.",
-            )
-        return page_text, dialog_text
+            detail_text = f"后台进度：{stage_label} · 已运行 {elapsed_text}"
+        return detail_text, dialog_text
 
     def _set_busy_task_message(self, text: str) -> None:
         dialog = getattr(self, "_busy_task_dialog", None)
@@ -3925,7 +4488,7 @@ class SearchResultsStep(QWidget):
         if candidate_id is None or self.current_candidate_id != candidate_id:
             return
         self._refresh_results_stats_label()
-        progress_page_text, progress_dialog_text = self._search_progress_text(candidate_id)
+        progress_detail_text, progress_dialog_text = self._search_progress_text(candidate_id)
         if progress_dialog_text:
             self._set_busy_task_message(progress_dialog_text)
         jobs = self.runner.load_live_jobs(candidate_id)
@@ -3936,23 +4499,29 @@ class SearchResultsStep(QWidget):
             if signature != self._live_results_signature:
                 visible_count = self._render_visible_jobs(visible_jobs)
                 self._live_results_last_count = visible_count
-            message = progress_page_text or _t(
-                self.ui_language,
-                f"当前求职者：{self.current_candidate_name}。后台正在搜索与分析，已发现 {visible_count} 条临时结果；只有出现新增或内容变化时才会刷新列表。",
-                f"Current candidate: {self.current_candidate_name}. Search and analysis are still running in the background; {visible_count} interim result(s) found so far, and the list will refresh only when something changes.",
-            )
-            if self.results_meta_label.text() != message:
-                self.results_meta_label.setText(message)
+            if progress_detail_text:
+                progress_detail_text = _t(
+                    self.ui_language,
+                    f"{progress_detail_text} · 当前临时结果 {visible_count} 条",
+                    f"{progress_detail_text} | {visible_count} interim result(s)",
+                )
+            else:
+                progress_detail_text = _t(
+                    self.ui_language,
+                    f"后台进度：当前临时结果 {visible_count} 条。",
+                    f"Background progress: {visible_count} interim result(s).",
+                )
+            self._set_results_progress_detail(progress_detail_text)
             return
         if self._live_results_last_count > 0:
+            self._set_results_progress_detail(progress_detail_text)
             return
-        message = progress_page_text or _t(
+        message = progress_detail_text or _t(
             self.ui_language,
-            f"当前求职者：{self.current_candidate_name}。后台正在搜索；若暂时没有新增岗位，通常表示系统仍在抓取、分析或收尾。只要搜索提示框还在，后台任务就仍在运行。",
-            f"Current candidate: {self.current_candidate_name}. Search is still running in the background; if no new jobs appear yet, the system is usually still collecting, analyzing, or finishing. As long as the search dialog remains open, the background task is still running.",
+            "后台进度：暂时还没有新增岗位，系统通常仍在抓取、分析或收尾。",
+            "Background progress: no new jobs yet; the system is usually still collecting, analyzing, or finishing.",
         )
-        if self.results_meta_label.text() != message:
-            self.results_meta_label.setText(message)
+        self._set_results_progress_detail(message)
 
     def _refresh_results_stats_label(self) -> None:
         candidate_id = self.current_candidate_id
@@ -3976,22 +4545,19 @@ class SearchResultsStep(QWidget):
                     self.ui_language,
                     (
                         f"内部统计：当前候选公司池 {stats.candidate_company_pool_count} 家。\n"
-                        f"Signal 命中 {stats.signal_hit_job_count} 条；"
                         f"主流程已发现 {stats.main_discovered_job_count} 条，"
                         f"已评分 {stats.main_scored_job_count} 条，"
                         f"待补完 {stats.main_pending_analysis_count} 条。"
                     ),
                     (
                         f"Internal stats: current candidate pool {stats.candidate_company_pool_count}.\n"
-                        f"Signal hits {stats.signal_hit_job_count}; "
-                        f"main-stage discovered {stats.main_discovered_job_count}, "
+                        f"company-first discovered {stats.main_discovered_job_count}, "
                         f"scored {stats.main_scored_job_count}, "
                         f"pending completion {stats.main_pending_analysis_count}."
                     ),
                 )
                 if (
-                    stats.signal_hit_job_count == 0
-                    and stats.main_discovered_job_count == 0
+                    stats.main_discovered_job_count == 0
                     and stats.main_pending_analysis_count == 0
                 ):
                     summary = summary + _t(
@@ -4066,9 +4632,10 @@ class SearchResultsStep(QWidget):
             level = _t(self.ui_language, "中推荐", "Medium")
         else:
             level = _t(self.ui_language, "低推荐", "Low")
+        score_text = f"{score} / 100"
         if self.ui_language == "en":
-            return f"{score} ({level})"
-        return f"{score}（{level}）"
+            return f"{score_text} ({level})"
+        return f"{score_text}（{level}）"
 
     @staticmethod
     def _parse_date_found(value: str) -> float:
@@ -4168,13 +4735,18 @@ class SearchResultsStep(QWidget):
         self._save_review_state()
         self._live_results_last_count = self.table.rowCount()
         self._sync_live_results_signature()
-        self.results_meta_label.setText(
-            _t(
-                self.ui_language,
-                f"当前求职者：{self.current_candidate_name}。已删除 {len(selected_rows)} 条岗位。",
-                f"Current candidate: {self.current_candidate_name}. Deleted {len(selected_rows)} row(s).",
+        if self._is_search_running():
+            self._show_notification_toast(
+                _t(
+                    self.ui_language,
+                    f"已删除 {len(selected_rows)} 条岗位。",
+                    f"Deleted {len(selected_rows)} row(s).",
+                ),
+                level="info",
+                duration_ms=3000,
             )
-        )
+        else:
+            self._set_deleted_status(len(selected_rows))
 
     def _status_display(self, status_code: str) -> str:
         labels = {
@@ -4405,6 +4977,7 @@ class CandidateWorkspacePage(QWidget):
             context,
             ui_language=self.ui_language,
             on_data_changed=on_data_changed,
+            on_busy_state_changed=self._on_target_ai_busy_state_changed,
         )
         self.results_step = SearchResultsStep(context, ui_language=self.ui_language)
         self.step_stack.addWidget(make_scroll_area(self.basics_step))
@@ -4427,6 +5000,8 @@ class CandidateWorkspacePage(QWidget):
         self.set_candidate(None)
 
     def shutdown_background_work(self, wait_ms: int = 8000) -> None:
+        if hasattr(self, "strategy_step") and isinstance(self.strategy_step, TargetDirectionStep):
+            self.strategy_step.shutdown_background_work(wait_ms=wait_ms)
         if hasattr(self, "results_step") and isinstance(self.results_step, SearchResultsStep):
             self.results_step.shutdown_background_work(wait_ms=wait_ms)
 
@@ -4450,6 +5025,8 @@ class CandidateWorkspacePage(QWidget):
             f'<span style="color: #ffffff;">{safe_message}</span>'
         )
         self.ai_validation_status_label.setStyleSheet("color: #ffffff;")
+        if hasattr(self, "results_step") and isinstance(self.results_step, SearchResultsStep):
+            self.results_step.set_ai_validation_state(str(message or ""), level)
 
     def set_candidate(self, candidate_id: int | None) -> None:
         self.current_candidate_id = candidate_id
@@ -4458,6 +5035,10 @@ class CandidateWorkspacePage(QWidget):
             self.basics_step.set_candidate(None)
             self.strategy_step.set_candidate(None)
             self.results_step.set_candidate(None)
+            self.results_step.set_target_ai_busy_state(
+                self.strategy_step.is_ai_busy(),
+                self.strategy_step.ai_busy_message(),
+            )
             return
 
         candidate = self.context.candidates.get(candidate_id)
@@ -4467,6 +5048,10 @@ class CandidateWorkspacePage(QWidget):
             self.basics_step.set_candidate(None)
             self.strategy_step.set_candidate(None)
             self.results_step.set_candidate(None)
+            self.results_step.set_target_ai_busy_state(
+                self.strategy_step.is_ai_busy(),
+                self.strategy_step.ai_busy_message(),
+            )
             return
 
         profile_count = len(self.context.profiles.list_for_candidate(candidate_id))
@@ -4493,6 +5078,10 @@ class CandidateWorkspacePage(QWidget):
         self.basics_step.set_candidate(candidate_id)
         self.strategy_step.set_candidate(candidate_id)
         self.results_step.set_candidate(candidate)
+        self.results_step.set_target_ai_busy_state(
+            self.strategy_step.is_ai_busy(),
+            self.strategy_step.ai_busy_message(),
+        )
         self.body_stack.setCurrentWidget(self.content_page)
 
     def _set_step(self, index: int) -> None:
@@ -4505,6 +5094,10 @@ class CandidateWorkspacePage(QWidget):
 
     def _on_candidate_saved(self, candidate_id: int) -> None:
         self.set_candidate(candidate_id)
+
+    def _on_target_ai_busy_state_changed(self, busy: bool, message: str) -> None:
+        if hasattr(self, "results_step") and isinstance(self.results_step, SearchResultsStep):
+            self.results_step.set_target_ai_busy_state(busy, message)
 
     def _go_back_to_candidates(self) -> None:
         if self.on_back_to_candidates:

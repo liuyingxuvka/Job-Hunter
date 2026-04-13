@@ -27,6 +27,10 @@ class SearchProfileRepository:
     def __init__(self, database: Database) -> None:
         self.database = database
 
+    @staticmethod
+    def _safe_text(value: object) -> str:
+        return str(value or "").strip()
+
     def list_for_candidate(self, candidate_id: int) -> list[SearchProfileRecord]:
         query = """
         SELECT
@@ -136,13 +140,27 @@ class SearchProfileRepository:
         )
 
     def save(self, record: SearchProfileRecord) -> int:
-        name = record.name.strip()
-        if record.candidate_id <= 0:
+        candidate_id = int(getattr(record, "candidate_id", 0) or 0)
+        name = self._safe_text(getattr(record, "name", ""))
+        if candidate_id <= 0:
             raise ValueError("Candidate must be selected before saving a profile.")
         if not name:
             raise ValueError("Profile name is required.")
-        scope_profile = record.scope_profile.strip() or "hydrogen_mainline"
-        queries = [item.strip() for item in record.queries if item.strip()]
+        scope_profile = self._safe_text(getattr(record, "scope_profile", "")) or "hydrogen_mainline"
+        target_role = self._safe_text(getattr(record, "target_role", ""))
+        location_preference = self._safe_text(getattr(record, "location_preference", ""))
+        company_focus = self._safe_text(getattr(record, "company_focus", ""))
+        company_keyword_focus = self._safe_text(getattr(record, "company_keyword_focus", ""))
+        role_name_i18n = self._safe_text(getattr(record, "role_name_i18n", ""))
+        keyword_focus = self._safe_text(getattr(record, "keyword_focus", ""))
+        raw_queries = getattr(record, "queries", [])
+        if not isinstance(raw_queries, (list, tuple)):
+            raw_queries = []
+        queries = [
+            self._safe_text(item)
+            for item in raw_queries
+            if self._safe_text(item)
+        ]
         with self.database.session() as connection:
             if record.profile_id is None:
                 cursor = connection.execute(
@@ -155,15 +173,15 @@ class SearchProfileRepository:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """,
                     (
-                        record.candidate_id,
+                        candidate_id,
                         name,
                         scope_profile,
-                        record.target_role.strip(),
-                        record.location_preference.strip(),
-                        record.company_focus.strip(),
-                        record.company_keyword_focus.strip(),
-                        record.role_name_i18n.strip(),
-                        record.keyword_focus.strip(),
+                        target_role,
+                        location_preference,
+                        company_focus,
+                        company_keyword_focus,
+                        role_name_i18n,
+                        keyword_focus,
                         1 if record.is_active else 0,
                     ),
                 )
@@ -179,15 +197,15 @@ class SearchProfileRepository:
                     WHERE id = ?
                     """,
                     (
-                        record.candidate_id,
+                        candidate_id,
                         name,
                         scope_profile,
-                        record.target_role.strip(),
-                        record.location_preference.strip(),
-                        record.company_focus.strip(),
-                        record.company_keyword_focus.strip(),
-                        record.role_name_i18n.strip(),
-                        record.keyword_focus.strip(),
+                        target_role,
+                        location_preference,
+                        company_focus,
+                        company_keyword_focus,
+                        role_name_i18n,
+                        keyword_focus,
                         1 if record.is_active else 0,
                         profile_id,
                     ),

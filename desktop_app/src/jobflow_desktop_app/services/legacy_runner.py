@@ -195,21 +195,6 @@ DEFAULT_BUSINESS_ANCHORS = {
     },
 }
 
-BUSINESS_JOB_QUERY_TEMPLATES = {
-    "core": [
-        "{anchor} job",
-        "{anchor} careers",
-    ],
-    "adjacent": [
-        "{anchor} job",
-        "{anchor} careers",
-    ],
-    "explore": [
-        "{anchor} job",
-        "{anchor} careers",
-    ],
-}
-
 BUSINESS_COMPANY_QUERY_TEMPLATES = {
     "core": [
         "{anchor} companies",
@@ -300,9 +285,6 @@ class DiscoveryAnchorPlan:
 
 
 class LegacyJobflowRunner:
-    PIPELINE_MODE_COMPANY_ONLY = "company_only"
-    PIPELINE_MODE_COMPANY_PLUS_WEB_SIGNAL = "company_plus_web_signal"
-
     def __init__(self, project_root: Path) -> None:
         self.project_root = Path(project_root)
         self.legacy_root = self.project_root.parent / "legacy_jobflow_reference"
@@ -315,7 +297,7 @@ class LegacyJobflowRunner:
         settings: OpenAISettings | None = None,
         api_base_url: str = "",
         max_queries: int = 6,
-        max_companies: int = 16,
+        max_companies: int = 20,
         timeout_seconds: int = 900,
         cancel_event: threading.Event | None = None,
     ) -> LegacyRunResult:
@@ -324,13 +306,14 @@ class LegacyJobflowRunner:
         run_dir = self._candidate_run_dir(candidate.candidate_id)
         run_dir.mkdir(parents=True, exist_ok=True)
         config_path = run_dir / "config.generated.json"
-        web_signal_config_path = run_dir / "config.generated.web_signal.json"
         resume_config_path = run_dir / "config.generated.resume.json"
         recommended_json_path = run_dir / "jobs_recommended.json"
         progress_started_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         query_rotation_seed = time.time_ns()
         current_stage = "preparing"
         progress_lock = threading.Lock()
+        resume_pending_count = 0
+        previous_run_requires_resume = self._previous_run_requires_resume(run_dir)
 
         def write_progress(
             *,
@@ -351,6 +334,7 @@ class LegacyJobflowRunner:
 
         def error_result(message: str, stdout_tail: str = "", stderr_tail: str = "") -> LegacyRunResult:
             detail = self._tail(stderr_tail or stdout_tail or message, max_lines=8, max_chars=1200)
+            self._refresh_resume_pending_jobs(run_dir)
             write_progress(status="error", message=message, last_event=detail)
             return self._error_result(
                 candidate.candidate_id,
@@ -361,6 +345,7 @@ class LegacyJobflowRunner:
 
         def cancelled_result(message: str, stdout_tail: str = "", stderr_tail: str = "") -> LegacyRunResult:
             detail = self._tail(stderr_tail or stdout_tail or message, max_lines=8, max_chars=1200)
+            self._refresh_resume_pending_jobs(run_dir)
             write_progress(status="cancelled", stage="completed", message=message, last_event=detail)
             return LegacyRunResult(
                 success=False,
@@ -390,10 +375,10 @@ class LegacyJobflowRunner:
             return error_result(
                 "Node.js is not available. Set JOBFLOW_NODE_PATH or place node.exe under runtime/tools/node/",
             )
-        pipeline_mode = self._resolve_pipeline_mode()
         source_companies_path: Path | None = None
         semantic_profile: CandidateSemanticProfile | None = None
-        analysis_budget = 0
+        effective_max_companies = max(1, int(max_companies))
+        model_override = self._resolve_model_override(settings)
         stage_stdout: list[tuple[str, str]] = []
         stage_stderr: list[tuple[str, str]] = []
 
@@ -424,7 +409,7 @@ class LegacyJobflowRunner:
                 run_dir=run_dir,
                 query_rotation_seed=query_rotation_seed,
                 semantic_profile=semantic_profile,
-                model_override=self._resolve_model_override(settings),
+                model_override=model_override,
                 source_companies_path=source_companies_path,
                 pipeline_stage="main",
             )
@@ -432,12 +417,38 @@ class LegacyJobflowRunner:
                 json.dumps(runtime_config, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-            analysis_budget = max(
+            effective_max_companies = max(
+                1,
+                min(
+                    effective_max_companies,
+                    int(
+                        self._ensure_dict(runtime_config, "sources").get(
+                            "maxCompaniesPerRun",
+                            effective_max_companies,
+                        )
+                    ),
+                ),
+            )
+            adaptive_runtime_config = self._ensure_dict(runtime_config, "adaptiveSearch")
+            session_empty_rounds_before_pause = max(
                 1,
                 int(
-                    self._ensure_dict(runtime_config, "analysis").get(
-                        "maxJobsToAnalyzePerRun",
-                        4,
+                    adaptive_runtime_config.get(
+                        "sessionEmptyRoundsBeforePause",
+                        3,
+                    )
+                ),
+            )
+            session_idle_pause_seconds = max(
+                30,
+                int(adaptive_runtime_config.get("sessionIdlePauseSeconds", 300)),
+            )
+            session_pass_timeout_seconds = max(
+                240,
+                int(
+                    adaptive_runtime_config.get(
+                        "sessionPassTimeoutSeconds",
+                        600,
                     )
                 ),
             )
@@ -449,7 +460,7 @@ class LegacyJobflowRunner:
                 run_dir=run_dir,
                 query_rotation_seed=query_rotation_seed,
                 semantic_profile=semantic_profile,
-                model_override=self._resolve_model_override(settings),
+                model_override=model_override,
                 source_companies_path=source_companies_path,
                 pipeline_stage="resume_pending",
             )
@@ -457,23 +468,6 @@ class LegacyJobflowRunner:
                 json.dumps(resume_config, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-
-            if pipeline_mode == self.PIPELINE_MODE_COMPANY_PLUS_WEB_SIGNAL:
-                web_signal_config = self._build_runtime_config(
-                    base_config=base_config,
-                    candidate=candidate,
-                    profiles=profiles,
-                    run_dir=run_dir,
-                    query_rotation_seed=query_rotation_seed,
-                    semantic_profile=semantic_profile,
-                    model_override=self._resolve_model_override(settings),
-                    source_companies_path=source_companies_path,
-                    pipeline_stage="web_signal",
-                )
-                web_signal_config_path.write_text(
-                    json.dumps(web_signal_config, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
         except Exception as exc:
             return error_result(f"Failed to generate runtime config: {exc}")
 
@@ -493,15 +487,83 @@ class LegacyJobflowRunner:
             return cancelled_result("Search cancelled before execution.")
 
         stage_notes: list[str] = []
-        try:
-            resume_pending_count = self._write_resume_pending_jobs(run_dir)
-        except Exception as exc:
-                stage_notes.append(f"Resume queue refresh skipped: {exc}")
-        else:
-            if resume_pending_count > 0:
-                stage_notes.append(
-                    f"Resume queue: {resume_pending_count} unfinished jobs will be processed before discovery continues."
+        search_session_deadline = time.monotonic() + max(60, int(timeout_seconds))
+
+        def write_main_runtime_config(rotation_seed: int) -> dict:
+            nonlocal effective_max_companies
+            runtime_config = self._build_runtime_config(
+                base_config=base_config,
+                candidate=candidate,
+                profiles=profiles,
+                run_dir=run_dir,
+                query_rotation_seed=rotation_seed,
+                semantic_profile=semantic_profile,
+                model_override=model_override,
+                source_companies_path=source_companies_path,
+                pipeline_stage="main",
+            )
+            config_path.write_text(
+                json.dumps(runtime_config, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            effective_max_companies = max(
+                1,
+                min(
+                    max(1, int(max_companies)),
+                    int(
+                        self._ensure_dict(runtime_config, "sources").get(
+                            "maxCompaniesPerRun",
+                            max(1, int(max_companies)),
+                        )
+                    ),
+                ),
+            )
+            return runtime_config
+
+        def remaining_search_session_seconds() -> int:
+            return max(0, int(search_session_deadline - time.monotonic()))
+
+        def wait_for_idle_retry(wait_seconds: int) -> None:
+            nonlocal current_stage
+            current_stage = "idle_wait"
+            write_progress(
+                status="running",
+                message=(
+                    "No new companies were discovered for consecutive rounds. "
+                    "Pausing briefly before the next discovery attempt."
+                ),
+                last_event=(
+                    f"Waiting {wait_seconds} second(s) before the next timed search round."
+                ),
+            )
+            wait_deadline = time.monotonic() + max(1, int(wait_seconds))
+            while time.monotonic() < wait_deadline:
+                if cancel_event is not None and cancel_event.is_set():
+                    break
+                if time.monotonic() >= search_session_deadline:
+                    break
+                sleep_seconds = min(
+                    1.0,
+                    wait_deadline - time.monotonic(),
+                    max(0.1, search_session_deadline - time.monotonic()),
                 )
+                time.sleep(max(0.1, sleep_seconds))
+
+        if previous_run_requires_resume:
+            try:
+                resume_pending_count = self._write_resume_pending_jobs(
+                    run_dir,
+                    include_found_fallback=True,
+                )
+            except Exception as exc:
+                stage_notes.append(f"Resume queue refresh skipped: {exc}")
+            else:
+                if resume_pending_count > 0:
+                    stage_notes.append(
+                        f"Resume queue: {resume_pending_count} unfinished jobs will be processed before discovery continues."
+                    )
+        else:
+            self._clear_resume_pending_jobs(run_dir)
 
         def run_resume_stage(message: str, start_event: str) -> LegacyStageRunResult | None:
             nonlocal current_stage
@@ -513,6 +575,7 @@ class LegacyJobflowRunner:
                 message=message,
                 last_event=start_event,
             )
+            resume_timeout_seconds = max(240, min(session_pass_timeout_seconds, 900))
             return self._run_legacy_stage(
                 command=[
                     node_bin,
@@ -522,11 +585,10 @@ class LegacyJobflowRunner:
                     "--max-queries",
                     str(max(1, int(max_queries))),
                     "--max-companies",
-                    str(max(1, int(max_companies))),
+                    str(effective_max_companies),
                 ],
                 env=env,
-                timeout_seconds=max(240, min(timeout_seconds, 900)),
-                cancel_event=cancel_event,
+                timeout_seconds=resume_timeout_seconds,
                 progress_callback=lambda line: write_progress(
                     status="running",
                     message=message,
@@ -534,7 +596,35 @@ class LegacyJobflowRunner:
                 ),
             )
 
-        auto_resume_threshold = max(1, min(4, analysis_budget))
+        def run_main_stage(message: str, start_event: str, timeout_override_seconds: int) -> LegacyStageRunResult:
+            nonlocal current_stage
+            current_stage = "main"
+            write_progress(
+                status="running",
+                message=message,
+                last_event=start_event,
+            )
+            main_command = [
+                node_bin,
+                "jobflow.mjs",
+                "--config",
+                str(config_path),
+                "--max-queries",
+                str(max(1, int(max_queries))),
+                "--max-companies",
+                str(effective_max_companies),
+            ]
+            return self._run_legacy_stage(
+                command=main_command,
+                env=env,
+                timeout_seconds=timeout_override_seconds,
+                progress_callback=lambda line: write_progress(
+                    status="running",
+                    message=message,
+                    last_event=line,
+                ),
+            )
+
         if resume_pending_count > 0:
             resume_result = run_resume_stage(
                 "Completing unfinished main-stage jobs from the last run before new discovery.",
@@ -568,169 +658,158 @@ class LegacyJobflowRunner:
                         f"Resume-only stage failed (exit {resume_result.exit_code}); continue with discovery pipeline."
                     )
 
-        signal_stdout = ""
-        signal_stderr = ""
-        if (
-            pipeline_mode == self.PIPELINE_MODE_COMPANY_PLUS_WEB_SIGNAL
-            and source_companies_path is not None
-            and web_signal_config_path.exists()
-        ):
-            current_stage = "web_signal"
-            write_progress(
-                status="running",
-                message="Running web signal discovery before main-stage job analysis.",
-                last_event="Starting web signal queries.",
-            )
-            signal_command = [
-                node_bin,
-                "jobflow.mjs",
-                "--config",
-                str(web_signal_config_path),
-                "--max-queries",
-                str(self._signal_max_queries(max_queries)),
-                "--max-companies",
-                str(max(1, min(int(max_companies), 120))),
-                "--dry-run",
-            ]
-            signal_result = self._run_legacy_stage(
-                command=signal_command,
-                env=env,
-                timeout_seconds=max(300, min(timeout_seconds, 900)),
-                cancel_event=cancel_event,
-                progress_callback=lambda line: write_progress(
-                    status="running",
-                    message="Running web signal discovery before main-stage job analysis.",
-                    last_event=line,
-                ),
-            )
-            if signal_result.cancelled:
-                return cancelled_result(
-                    "Search cancelled during web signal stage.",
-                    stdout_tail=signal_result.stdout_tail,
-                    stderr_tail=signal_result.stderr_tail,
-                )
-            signal_stdout = signal_result.stdout_tail
-            signal_stderr = signal_result.stderr_tail
-            if signal_stdout:
-                stage_stdout.append(("web_signal", signal_stdout))
-            if signal_stderr:
-                stage_stderr.append(("web_signal", signal_stderr))
-            if signal_result.success:
-                try:
-                    added = self._ingest_web_signal_companies(
-                        run_dir=run_dir,
-                        companies_path=source_companies_path,
-                    )
-                    if added > 0:
-                        stage_notes.append(f"Web signal intake: +{added} companies.")
-                    write_progress(
-                        status="running",
-                        message="Web signal discovery finished; candidate company pool updated.",
-                        last_event=f"Web signal intake completed with {added} added companies.",
-                    )
-                except Exception as exc:
-                    stage_notes.append(f"Web signal intake skipped: {exc}")
-                    write_progress(
-                        status="running",
-                        message="Web signal discovery finished; candidate company pool update skipped.",
-                        last_event=f"Web signal intake skipped: {exc}",
-                    )
-            else:
-                stage_notes.append(
-                    f"Web signal stage failed (exit {signal_result.exit_code}); continue with company-first stage."
-                )
-                write_progress(
-                    status="running",
-                    message="Web signal stage failed; falling back to main-stage company processing.",
-                    last_event=signal_result.stderr_tail or signal_result.stdout_tail or signal_result.message,
-                )
         if cancel_event is not None and cancel_event.is_set():
-            return cancelled_result("Search cancelled before main-stage analysis.")
+            return cancelled_result("Search cancelled after the pending-job round completed.")
 
-        current_stage = "main"
-        write_progress(
-            status="running",
-            message="Running main-stage company search, scoring, and post-verification.",
-            last_event="Starting main-stage job collection.",
-        )
-        main_command = [
-            node_bin,
-            "jobflow.mjs",
-            "--config",
-            str(config_path),
-            "--max-queries",
-            str(max(1, int(max_queries))),
-            "--max-companies",
-            str(max(1, int(max_companies))),
-        ]
-        main_result = self._run_legacy_stage(
-            command=main_command,
-            env=env,
-            timeout_seconds=timeout_seconds,
-            cancel_event=cancel_event,
-            progress_callback=lambda line: write_progress(
-                status="running",
-                message="Running main-stage company search, scoring, and post-verification.",
-                last_event=line,
-            ),
-        )
-        if main_result.cancelled:
-            return cancelled_result(
-                "Search cancelled during main-stage analysis.",
-                stdout_tail=main_result.stdout_tail,
-                stderr_tail=main_result.stderr_tail,
-            )
-        if main_result.stdout_tail:
-            stage_stdout.append(("main", main_result.stdout_tail))
-        if main_result.stderr_tail:
-            stage_stderr.append(("main", main_result.stderr_tail))
+        main_pass_index = 0
+        idle_pause_count = 0
+        consecutive_no_new_company_rounds = 0
+        completed_pending_finalize_count = 0
+        incomplete_pending_finalize_count = 0
         pending_after_main = 0
-        try:
-            pending_after_main = self._write_resume_pending_jobs(run_dir)
-        except Exception as exc:
-            stage_notes.append(f"Resume queue finalize skipped: {exc}")
-        else:
-            if (
-                main_result.success
-                and pending_after_main > 0
-                and pending_after_main <= auto_resume_threshold
-            ):
-                resume_result = run_resume_stage(
-                    "Finishing the last few unfinished main-stage jobs before wrapping up.",
-                    "Starting final pending-job pass.",
-                )
-                if resume_result is not None:
-                    if resume_result.stdout_tail:
-                        stage_stdout.append(("resume_finalize", resume_result.stdout_tail))
-                    if resume_result.stderr_tail:
-                        stage_stderr.append(("resume_finalize", resume_result.stderr_tail))
-                    if resume_result.cancelled:
-                        return cancelled_result(
-                            "Search cancelled while finalizing unfinished jobs.",
-                            stdout_tail=resume_result.stdout_tail,
-                            stderr_tail=resume_result.stderr_tail,
+        main_result: LegacyStageRunResult | None = None
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                return cancelled_result("Search cancelled before starting the next search round.")
+            remaining_budget_seconds = remaining_search_session_seconds()
+            if remaining_budget_seconds <= 0:
+                stage_notes.append("Timed search session reached its configured duration.")
+                break
+            if main_pass_index > 0 and consecutive_no_new_company_rounds >= session_empty_rounds_before_pause:
+                idle_pause_count += 1
+                wait_for_idle_retry(session_idle_pause_seconds)
+                consecutive_no_new_company_rounds = 0
+                if cancel_event is not None and cancel_event.is_set():
+                    return cancelled_result("Search cancelled during the idle wait.")
+                if remaining_search_session_seconds() <= 0:
+                    stage_notes.append("Timed search session ended during the idle wait.")
+                    break
+
+            pass_query_rotation_seed = query_rotation_seed + (main_pass_index * 104729)
+            if main_pass_index > 0:
+                try:
+                    write_main_runtime_config(pass_query_rotation_seed)
+                except Exception as exc:
+                    stage_notes.append(
+                        f"Timed search session stopped because refreshed company discovery queries could not be prepared: {exc}"
+                    )
+                    break
+
+            search_stats_before_round = self.load_search_stats(candidate.candidate_id)
+            company_pool_count_before_round = search_stats_before_round.candidate_company_pool_count
+            current_round_number = main_pass_index + 1
+            main_result = run_main_stage(
+                (
+                    f"Running timed search round {current_round_number}; this round will finish cleanly before the next stop check."
+                    if current_round_number > 1
+                    else "Running the first timed search round."
+                ),
+                (
+                    f"Starting timed search round {current_round_number} with refreshed company discovery queries."
+                    if current_round_number > 1
+                    else "Starting timed search round 1."
+                ),
+                session_pass_timeout_seconds,
+            )
+            stage_label = "main" if main_pass_index <= 0 else f"main_round_{current_round_number}"
+
+            if main_result.stdout_tail:
+                stage_stdout.append((stage_label, main_result.stdout_tail))
+            if main_result.stderr_tail:
+                stage_stderr.append((stage_label, main_result.stderr_tail))
+
+            pending_after_main = 0
+            try:
+                pending_after_main = self._write_resume_pending_jobs(run_dir)
+            except Exception as exc:
+                stage_notes.append(f"Resume queue finalize skipped: {exc}")
+            else:
+                if main_result.success and pending_after_main > 0:
+                    last_pending_before_pass: int | None = None
+
+                    while pending_after_main > 0:
+                        if (
+                            last_pending_before_pass is not None
+                            and pending_after_main >= last_pending_before_pass
+                        ):
+                            stage_notes.append(
+                                "Auto-resume stopped because the pending queue did not shrink further."
+                            )
+                            break
+
+                        last_pending_before_pass = pending_after_main
+                        resume_result = run_resume_stage(
+                            "Finishing remaining discovered jobs before wrapping up.",
+                            "Starting final pending-job pass.",
                         )
-                    if resume_result.success:
+                        if resume_result is None:
+                            break
+                        if resume_result.stdout_tail:
+                            stage_stdout.append(("resume_finalize", resume_result.stdout_tail))
+                        if resume_result.stderr_tail:
+                            stage_stderr.append(("resume_finalize", resume_result.stderr_tail))
+                        if resume_result.cancelled:
+                            return cancelled_result(
+                                "Search cancelled while finalizing unfinished jobs.",
+                                stdout_tail=resume_result.stdout_tail,
+                                stderr_tail=resume_result.stderr_tail,
+                            )
+                        if not resume_result.success:
+                            stage_notes.append(
+                                f"Final pending pass failed (exit {resume_result.exit_code}); remaining unfinished jobs stay queued."
+                            )
+                            break
                         try:
                             pending_after_main = self._write_resume_pending_jobs(run_dir)
                         except Exception as exc:
                             stage_notes.append(f"Resume queue final check skipped: {exc}")
-                        else:
-                            if pending_after_main > 0:
-                                stage_notes.append(
-                                    f"Final pending pass still left {pending_after_main} unfinished job(s)."
-                                )
-                            else:
-                                stage_notes.append("Final pending pass cleared the remaining unfinished jobs.")
+                            break
+
+                    if pending_after_main > 0:
+                        incomplete_pending_finalize_count += 1
                     else:
-                        stage_notes.append(
-                            f"Final pending pass failed (exit {resume_result.exit_code}); remaining unfinished jobs stay queued."
-                        )
-        success = main_result.success
+                        completed_pending_finalize_count += 1
+            search_stats_after_round = self.load_search_stats(candidate.candidate_id)
+            company_pool_growth = max(
+                0,
+                search_stats_after_round.candidate_company_pool_count - company_pool_count_before_round,
+            )
+            if company_pool_growth > 0:
+                consecutive_no_new_company_rounds = 0
+            else:
+                consecutive_no_new_company_rounds += 1
+
+            main_pass_index += 1
+            if not main_result.success or pending_after_main > 0:
+                break
+
+            if cancel_event is not None and cancel_event.is_set():
+                return cancelled_result(
+                    "Search stopped after the current round completed.",
+                    stdout_tail=main_result.stdout_tail,
+                    stderr_tail=main_result.stderr_tail,
+                )
+
+        success = (main_result is None or main_result.success) and pending_after_main <= 0
         if success:
-            message = "Legacy engine completed."
+            message = "Timed search session completed."
+            self._clear_resume_pending_jobs(run_dir)
+        elif main_result is not None and main_result.success and pending_after_main > 0:
+            message = "Timed search session stopped before finishing all discovered jobs."
         else:
-            message = main_result.message or "Legacy engine failed."
+            message = (main_result.message if main_result is not None else "") or "Timed search session failed."
+        if completed_pending_finalize_count > 0:
+            stage_notes.append(
+                f"Pending jobs were finalized successfully in {completed_pending_finalize_count} round(s)."
+            )
+        if incomplete_pending_finalize_count > 0:
+            stage_notes.append(
+                f"Pending jobs still remained after finalization in {incomplete_pending_finalize_count} round(s)."
+            )
+        if idle_pause_count > 0:
+            stage_notes.append(
+                f"The session paused {idle_pause_count} time(s) after {session_empty_rounds_before_pause} consecutive rounds without new companies."
+            )
         if stage_notes:
             message = f"{message} {' '.join(stage_notes)}"
 
@@ -740,11 +819,15 @@ class LegacyJobflowRunner:
             status="success" if success else "error",
             stage="completed" if success else "main",
             message=message,
-            last_event=main_result.stderr_tail or main_result.stdout_tail or message,
+            last_event=(
+                (main_result.stderr_tail if main_result is not None else "")
+                or (main_result.stdout_tail if main_result is not None else "")
+                or message
+            ),
         )
         return LegacyRunResult(
             success=success,
-            exit_code=main_result.exit_code,
+            exit_code=main_result.exit_code if main_result is not None else 0,
             message=message,
             stdout_tail=self._tail("\n\n".join(combined_stdout)),
             stderr_tail=self._tail("\n\n".join(combined_stderr)),
@@ -761,7 +844,6 @@ class LegacyJobflowRunner:
         if not jobs:
             all_jobs = self._load_jobs_from_file(run_dir / "jobs.json")
             if all_jobs:
-                ready_all_jobs = self._filter_review_ready_jobs(all_jobs)
                 recommended_in_all = [
                     item
                     for item in all_jobs
@@ -770,12 +852,6 @@ class LegacyJobflowRunner:
                 recommended_ready = self._filter_review_ready_jobs(recommended_in_all)
                 if recommended_ready:
                     jobs = recommended_ready
-                else:
-                    ready_all_jobs.sort(
-                        key=lambda item: int(self._extract_match_score(item.get("analysis")) or 0),
-                        reverse=True,
-                    )
-                    jobs = ready_all_jobs[:20]
 
         return self._build_job_records(jobs)
 
@@ -783,8 +859,6 @@ class LegacyJobflowRunner:
         run_dir = self._candidate_run_dir(candidate_id)
         jobs = self._merge_job_items_from_paths(
             [
-                run_dir / "jobs_found.signal.json",
-                run_dir / "jobs.signal.json",
                 run_dir / "jobs_found.json",
                 run_dir / "jobs.json",
                 run_dir / "jobs_recommended.json",
@@ -795,34 +869,26 @@ class LegacyJobflowRunner:
     def load_search_stats(self, candidate_id: int) -> LegacySearchStats:
         run_dir = self._candidate_run_dir(candidate_id)
         candidate_companies_payload = self._load_companies_payload(run_dir / "companies.candidate.json")
-        # Keep signal-stage hits and main-stage jobs separate so the UI can
-        # show what was only discovered by web signal versus what reached the
-        # company-first analysis pipeline.
-        signal_paths = [
-            run_dir / "jobs_found.signal.json",
-            run_dir / "jobs.signal.json",
-        ]
         main_paths = [
             run_dir / "jobs_found.json",
             run_dir / "jobs.json",
             run_dir / "jobs_recommended.json",
         ]
-        signal_jobs = self._merge_job_items_from_paths(signal_paths)
         main_jobs = self._merge_job_items_from_paths(main_paths)
-        merged_jobs = self._merge_job_items_from_paths(signal_paths + main_paths)
+        merged_jobs = list(main_jobs)
         discovered_companies: set[str] = set()
         for item in merged_jobs:
             company = self._clean_company_name(item.get("company"))
             if company:
                 discovered_companies.add(company.casefold())
 
-        pending_jobs = self._load_resume_pending_jobs(run_dir)
+        pending_jobs = self._load_resume_pending_jobs(run_dir, include_fallback=False)
         recommended_jobs = self.load_recommended_jobs(candidate_id)
         scored_jobs = self._filter_review_ready_jobs(merged_jobs)
         main_scored_jobs = self._filter_review_ready_jobs(main_jobs)
 
         candidate_company_pool_count = self._count_unique_companies_in_payload(candidate_companies_payload)
-        signal_hit_job_count = len(signal_jobs)
+        signal_hit_job_count = 0
         main_discovered_job_count = len(main_jobs)
         main_scored_job_count = len(main_scored_jobs)
         displayable_result_count = len(recommended_jobs)
@@ -968,14 +1034,19 @@ class LegacyJobflowRunner:
         return bool(analysis.get("prefilterRejected"))
 
     @classmethod
-    def _collect_resume_pending_jobs(cls, run_dir: Path) -> list[dict]:
-        merged_jobs: dict[str, dict] = {}
+    def _resume_pending_detail_paths(cls, run_dir: Path, include_found: bool = False) -> list[Path]:
         paths = [
-            run_dir / "jobs_found.json",
             run_dir / "jobs.json",
             run_dir / "jobs_recommended.json",
         ]
-        for path in paths:
+        if include_found:
+            paths.insert(0, run_dir / "jobs_found.json")
+        return paths
+
+    @classmethod
+    def _collect_resume_pending_jobs(cls, run_dir: Path, include_found: bool = False) -> list[dict]:
+        merged_jobs: dict[str, dict] = {}
+        for path in cls._resume_pending_detail_paths(run_dir, include_found=include_found):
             for item in cls._load_jobs_from_file(path):
                 key = cls._job_item_key(item)
                 if not key:
@@ -1010,12 +1081,18 @@ class LegacyJobflowRunner:
         return pending_jobs
 
     @classmethod
-    def _merge_resume_pending_job_lists(cls, run_dir: Path, *job_lists: list[dict]) -> list[dict]:
+    def _merge_resume_pending_job_lists(
+        cls,
+        run_dir: Path,
+        *job_lists: list[dict],
+        include_found_details: bool = False,
+    ) -> list[dict]:
         merged_jobs: dict[str, dict] = {}
         for jobs in job_lists:
             normalized_jobs = cls._normalize_resume_pending_jobs(
                 jobs if isinstance(jobs, list) else [],
                 run_dir,
+                include_found_details=include_found_details,
             )
             for item in normalized_jobs:
                 key = cls._job_item_key(item)
@@ -1029,6 +1106,18 @@ class LegacyJobflowRunner:
         return cls._normalize_resume_pending_jobs(list(merged_jobs.values()), run_dir)
 
     @classmethod
+    def _previous_run_requires_resume(cls, run_dir: Path) -> bool:
+        progress = cls._load_search_progress_from_run_dir(run_dir)
+        status = str(progress.status or "").strip().lower()
+        if status in {"running", "cancelled", "error"}:
+            return True
+        if status in {"success", "idle"}:
+            return False
+        payload = cls._load_resume_pending_payload(run_dir)
+        payload_jobs = payload.get("jobs", [])
+        return isinstance(payload_jobs, list) and len(payload_jobs) > 0
+
+    @classmethod
     def _load_resume_pending_payload(cls, run_dir: Path) -> dict:
         payload_path = run_dir / "jobs_resume_pending.json"
         if not payload_path.exists():
@@ -1040,13 +1129,14 @@ class LegacyJobflowRunner:
         return payload if isinstance(payload, dict) else {}
 
     @classmethod
-    def _normalize_resume_pending_jobs(cls, jobs: list[dict], run_dir: Path) -> list[dict]:
+    def _normalize_resume_pending_jobs(
+        cls,
+        jobs: list[dict],
+        run_dir: Path,
+        include_found_details: bool = False,
+    ) -> list[dict]:
         merged_detail_items = cls._merge_job_items_from_paths(
-            [
-                run_dir / "jobs_found.json",
-                run_dir / "jobs.json",
-                run_dir / "jobs_recommended.json",
-            ]
+            cls._resume_pending_detail_paths(run_dir, include_found=include_found_details)
         )
         merged_details = {
             cls._job_item_key(item): item
@@ -1093,19 +1183,27 @@ class LegacyJobflowRunner:
     def _load_resume_pending_jobs(cls, run_dir: Path, include_fallback: bool = True) -> list[dict]:
         payload = cls._load_resume_pending_payload(run_dir)
         payload_jobs = payload.get("jobs", [])
-        if isinstance(payload_jobs, list) and not include_fallback:
+        if isinstance(payload_jobs, list):
             return cls._normalize_resume_pending_jobs(payload_jobs, run_dir)
         if not include_fallback:
             return []
         current_jobs = cls._collect_resume_pending_jobs(run_dir)
+        if current_jobs:
+            return cls._merge_resume_pending_job_lists(
+                run_dir,
+                current_jobs,
+                payload_jobs if isinstance(payload_jobs, list) else [],
+            )
+        current_jobs = cls._collect_resume_pending_jobs(run_dir, include_found=True)
         return cls._merge_resume_pending_job_lists(
             run_dir,
             current_jobs,
             payload_jobs if isinstance(payload_jobs, list) else [],
+            include_found_details=True,
         )
 
     @classmethod
-    def _build_resume_pending_payload(cls, run_dir: Path) -> dict:
+    def _build_resume_pending_payload(cls, run_dir: Path, include_found_fallback: bool = False) -> dict:
         existing_payload = cls._load_resume_pending_payload(run_dir)
         payload_jobs = existing_payload.get("jobs", [])
         pending_jobs = cls._merge_resume_pending_job_lists(
@@ -1113,6 +1211,13 @@ class LegacyJobflowRunner:
             cls._collect_resume_pending_jobs(run_dir),
             payload_jobs if isinstance(payload_jobs, list) else [],
         )
+        if include_found_fallback and not pending_jobs:
+            pending_jobs = cls._merge_resume_pending_job_lists(
+                run_dir,
+                cls._collect_resume_pending_jobs(run_dir, include_found=True),
+                payload_jobs if isinstance(payload_jobs, list) else [],
+                include_found_details=True,
+            )
         existing_version = existing_payload.get("version")
         try:
             version = max(2, int(existing_version))
@@ -1138,14 +1243,54 @@ class LegacyJobflowRunner:
         return payload
 
     @classmethod
-    def _write_resume_pending_jobs(cls, run_dir: Path) -> int:
-        payload = cls._build_resume_pending_payload(run_dir)
+    def _write_resume_pending_jobs(cls, run_dir: Path, include_found_fallback: bool = False) -> int:
+        payload = cls._build_resume_pending_payload(
+            run_dir,
+            include_found_fallback=include_found_fallback,
+        )
         output_path = run_dir / "jobs_resume_pending.json"
         output_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         return len(payload["jobs"])
+
+    @classmethod
+    def _clear_resume_pending_jobs(cls, run_dir: Path) -> None:
+        output_path = run_dir / "jobs_resume_pending.json"
+        existing_payload = cls._load_resume_pending_payload(run_dir)
+        existing_version = existing_payload.get("version")
+        try:
+            version = max(2, int(existing_version))
+        except (TypeError, ValueError):
+            version = 2
+        preserved_meta = {
+            key: value
+            for key, value in existing_payload.items()
+            if key not in {"version", "generatedAt", "jobs", "summary"}
+        }
+        summary = existing_payload.get("summary")
+        if not isinstance(summary, dict):
+            summary = {}
+        summary["mainStagePendingCount"] = 0
+        payload = {
+            **preserved_meta,
+            "version": version,
+            "generatedAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "jobs": [],
+            "summary": summary,
+        }
+        output_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    @classmethod
+    def _refresh_resume_pending_jobs(cls, run_dir: Path) -> int:
+        try:
+            return cls._write_resume_pending_jobs(run_dir, include_found_fallback=True)
+        except Exception:
+            return 0
 
     @staticmethod
     def _build_job_records(jobs: list[dict]) -> list[LegacyJobResult]:
@@ -1235,13 +1380,17 @@ class LegacyJobflowRunner:
 
     def _build_runtime_env(self, settings: OpenAISettings | None, api_base_url: str) -> dict[str, str]:
         env = os.environ.copy()
-        use_env_only = (
-            settings is not None and str(settings.api_key_source or "").strip().lower() == "env"
-        )
+        source = str(settings.api_key_source or "").strip().lower() if settings is not None else ""
+        use_env_only = source == "env"
         settings_key = settings.api_key.strip() if settings is not None else ""
-        if settings_key:
-            env["OPENAI_API_KEY"] = settings_key
-        elif not use_env_only and not env.get("OPENAI_API_KEY", "").strip():
+        if settings is not None:
+            if settings_key:
+                env["OPENAI_API_KEY"] = settings_key
+            elif use_env_only:
+                env.pop("OPENAI_API_KEY", None)
+            else:
+                env.pop("OPENAI_API_KEY", None)
+        elif not env.get("OPENAI_API_KEY", "").strip():
             azure_key = env.get("AZURE_OPENAI_API_KEY", "").strip()
             if azure_key:
                 env["OPENAI_API_KEY"] = azure_key
@@ -1496,31 +1645,17 @@ class LegacyJobflowRunner:
                 self._candidate_semantic_profile_path(run_dir).resolve()
             )
 
-        queries = self._build_queries(
-            candidate,
-            profiles,
-            run_dir=run_dir,
-            anchor_plan=anchor_plan,
-            semantic_profile=semantic_profile,
-            rotation_seed=query_rotation_seed,
-        )
-        search_config["queries"] = queries
+        search_config["queries"] = []
         search_config["trackMix"] = self._build_search_track_mix(
             scope_profile=scope_profile,
             candidate=candidate,
             profiles=profiles,
             semantic_profile=semantic_profile,
         )
-        if pipeline_stage == "web_signal":
-            search_config["maxJobsPerQuery"] = min(
-                35,
-                max(10, int(search_config.get("maxJobsPerQuery", 20))),
-            )
-        else:
-            search_config["maxJobsPerQuery"] = min(
-                50,
-                max(10, int(search_config.get("maxJobsPerQuery", 30))),
-            )
+        search_config["maxJobsPerQuery"] = min(
+            50,
+            max(10, int(search_config.get("maxJobsPerQuery", 30))),
+        )
         if model_override:
             search_config["model"] = model_override
 
@@ -1533,7 +1668,6 @@ class LegacyJobflowRunner:
         company_discovery_queries = self._build_company_discovery_queries(
             candidate=candidate,
             profiles=profiles,
-            search_queries=queries,
             anchor_plan=anchor_plan,
             semantic_profile=semantic_profile,
             run_dir=run_dir,
@@ -1579,33 +1713,6 @@ class LegacyJobflowRunner:
             output_config["foundJsonPath"] = "./jobs_found.resume_pending.json"
             return config
 
-        if pipeline_stage == "web_signal":
-            # Web signal stage only collects potential hiring company hints from web job hits.
-            sources_config["enableWebSearch"] = True
-            sources_config["enableCompanySources"] = False
-            sources_config["requireCompanyDiscovery"] = False
-            sources_config["enableCompanySearchFallback"] = False
-            company_discovery_config["enableAutoDiscovery"] = False
-            company_discovery_config["queries"] = []
-            # This stage is always executed with '--dry-run'. strictScoring must be disabled,
-            # otherwise legacy jobflow throws and aborts before signal ingestion.
-            analysis_config["strictScoring"] = False
-            analysis_config["scoringUseWebSearch"] = False
-            analysis_config["postVerifyEnabled"] = False
-            analysis_config["postVerifyUseWebSearch"] = False
-            analysis_config["postVerifyRequireChecked"] = False
-            translation_config["enable"] = False
-
-            output_config["trackerXlsxPath"] = "./jobs_recommended.signal.xlsx"
-            output_config["xlsxPath"] = "./jobs.signal.xlsx"
-            output_config["jsonPath"] = "./jobs.signal.json"
-            output_config["foundJsonPath"] = "./jobs_found.signal.json"
-            output_config["recommendedXlsxPath"] = "./jobs_recommended.signal.xlsx"
-            output_config["recommendedJsonPath"] = "./jobs_recommended.signal.json"
-            output_config["cnEuropeJsonPath"] = "./jobs_cn_europe.signal.json"
-            output_config["resumePendingPath"] = "./jobs_resume_pending.json"
-            return config
-
         # Main stage: company pool first, company sources as final job channel.
         adaptive_search_config = self._ensure_dict(config, "adaptiveSearch")
         fetch_config = self._ensure_dict(config, "fetch")
@@ -1613,7 +1720,7 @@ class LegacyJobflowRunner:
         sources_config["enableWebSearch"] = False
         sources_config["enableCompanySources"] = True
         sources_config["requireCompanyDiscovery"] = True
-        sources_config["maxCompaniesPerRun"] = 16
+        sources_config["maxCompaniesPerRun"] = 4
         sources_config["maxJobsPerCompany"] = 5
         sources_config["maxJobLinksPerCompany"] = 12
         sources_config["enableCompanySearchFallback"] = True
@@ -1621,46 +1728,49 @@ class LegacyJobflowRunner:
 
         company_discovery_config["enableAutoDiscovery"] = True
         company_discovery_config["queries"] = company_discovery_queries
-        company_discovery_config["maxNewCompaniesPerRun"] = 6
+        company_discovery_config["maxNewCompaniesPerRun"] = 3
         analysis_config["scoringUseWebSearch"] = False
         # Ask AI to post-verify link validity/expiry signals before final recommendation.
         analysis_config["postVerifyEnabled"] = True
         analysis_config["postVerifyUseWebSearch"] = True
         analysis_config["postVerifyRequireChecked"] = True
-        analysis_config["maxJobsToAnalyzePerRun"] = 8
-        analysis_config["jdFetchMaxJobsPerRun"] = 10
-        analysis_config["postVerifyMaxJobsPerRun"] = 5
+        analysis_config["maxJobsToAnalyzePerRun"] = 12
+        analysis_config["jdFetchMaxJobsPerRun"] = 12
+        analysis_config["postVerifyMaxJobsPerRun"] = 8
         fetch_config["timeoutMs"] = 12000
         adaptive_search_config.update(
             {
                 "enabled": True,
-                "targetNewJobs": 3,
-                "minNewJobsToContinue": 3,
-                "baseBudgetSeconds": 300,
-                "baseRoundSeconds": 300,
-                "extendBudgetSeconds": 480,
-                "extendRoundSeconds": 480,
-                "deepBudgetSeconds": 720,
-                "deepRoundSeconds": 720,
-                "baseExistingCompanies": 8,
-                "baseExistingCompanyBatchSize": 8,
-                "extendCompanyBatchSize": 4,
-                "extendExistingCompanyBatchSize": 4,
-                "maxExistingCompaniesPerRun": 12,
-                "coldDiscoveryQueryBudget": 6,
-                "coldStartQueryBudget": 6,
-                "warmDiscoveryQueryBudget": 4,
-                "deepSearchQueryBudget": 4,
-                "coldDiscoveryCompanyBudget": 6,
-                "coldStartMaxNewCompanies": 6,
-                "warmDiscoveryCompanyBudget": 4,
-                "deepSearchMaxNewCompanies": 4,
-                "processDiscoveredCompaniesPerRound": 4,
-                "coldStartImmediateProcessBatchSize": 4,
-                "deepSearchImmediateProcessBatchSize": 4,
+                "targetNewJobs": 999999,
+                "minNewJobsToContinue": 999999,
+                "baseBudgetSeconds": 120,
+                "baseRoundSeconds": 120,
+                "extendBudgetSeconds": 120,
+                "extendRoundSeconds": 120,
+                "deepBudgetSeconds": 180,
+                "deepRoundSeconds": 180,
+                "baseExistingCompanies": 2,
+                "baseExistingCompanyBatchSize": 2,
+                "extendCompanyBatchSize": 1,
+                "extendExistingCompanyBatchSize": 1,
+                "maxExistingCompaniesPerRun": 4,
+                "coldDiscoveryQueryBudget": 4,
+                "coldStartQueryBudget": 4,
+                "warmDiscoveryQueryBudget": 2,
+                "deepSearchQueryBudget": 2,
+                "coldDiscoveryCompanyBudget": 3,
+                "coldStartMaxNewCompanies": 3,
+                "warmDiscoveryCompanyBudget": 2,
+                "deepSearchMaxNewCompanies": 2,
+                "processDiscoveredCompaniesPerRound": 3,
+                "coldStartImmediateProcessBatchSize": 2,
+                "deepSearchImmediateProcessBatchSize": 2,
+                "sessionEmptyRoundsBeforePause": 3,
+                "sessionIdlePauseSeconds": 300,
+                "sessionPassTimeoutSeconds": 600,
                 "companyCooldownDaysNoJobs": 7,
-                "companyCooldownDaysNoNewJobs": 3,
-                "companyCooldownDaysSomeJobsNoNew": 3,
+                "companyCooldownDaysNoNewJobs": 7,
+                "companyCooldownDaysSomeJobsNoNew": 7,
                 "companyCooldownDaysWithNewJobs": 2,
                 "companyCooldownDaysWithNew": 2,
             }
@@ -2518,62 +2628,10 @@ class LegacyJobflowRunner:
         }
         return self._normalize_search_track_mix(blended)
 
-    def _build_queries(
-        self,
-        candidate: CandidateRecord,
-        profiles: list[SearchProfileRecord],
-        run_dir: Path | None = None,
-        anchor_plan: DiscoveryAnchorPlan | None = None,
-        semantic_profile: CandidateSemanticProfile | None = None,
-        rotation_seed: int = 0,
-    ) -> list[str]:
-        scope_profile = self._resolve_scope_profile(profiles)
-        resolved_anchor_plan = anchor_plan or self._build_discovery_anchor_plan(
-            candidate=candidate,
-            profiles=profiles,
-            scope_profile=scope_profile,
-            semantic_profile=semantic_profile,
-            run_dir=run_dir,
-        )
-        round_phrase_plan = self._select_round_phrase_plan(
-            anchor_plan=resolved_anchor_plan,
-            seed=rotation_seed,
-        )
-        raw_queries = self._generate_weighted_query_plan(
-            anchor_plan=round_phrase_plan,
-            templates=BUSINESS_JOB_QUERY_TEMPLATES,
-            limit=12,
-            seed=rotation_seed,
-            normalize=self._normalize_query,
-        )
-
-        if not raw_queries and semantic_profile is not None and semantic_profile.is_usable():
-            raw_queries.extend(list(semantic_profile.job_search_phrase_library_en())[:8])
-
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for query in raw_queries:
-            text = self._normalize_query(query)
-            if not text:
-                continue
-            key = text.casefold()
-            if key in seen:
-                continue
-            seen.add(key)
-            normalized.append(text)
-
-        if not normalized:
-            normalized = [
-                "hydrogen systems job",
-                "systems engineering job",
-            ]
-        return normalized[:12]
-
     def _build_company_discovery_queries(
         self,
         candidate: CandidateRecord,
         profiles: list[SearchProfileRecord],
-        search_queries: list[str],
         anchor_plan: DiscoveryAnchorPlan | None = None,
         semantic_profile: CandidateSemanticProfile | None = None,
         run_dir: Path | None = None,
@@ -2629,26 +2687,6 @@ class LegacyJobflowRunner:
                 "industrial technology companies",
             ]
         return dedup[:16]
-
-    def _resolve_pipeline_mode(self) -> str:
-        raw = str(os.getenv("JOBFLOW_PIPELINE_MODE", "") or "").strip().lower()
-        key = raw.replace("-", "_").replace(" ", "_")
-        if key in {
-            "",
-            "default",
-            "company_plus_web_signal",
-            "company_plus_signal",
-            "company_and_web_signal",
-            "hybrid",
-        }:
-            return self.PIPELINE_MODE_COMPANY_PLUS_WEB_SIGNAL
-        if key in {"company_only", "company_first"}:
-            return self.PIPELINE_MODE_COMPANY_ONLY
-        return self.PIPELINE_MODE_COMPANY_PLUS_WEB_SIGNAL
-
-    @staticmethod
-    def _signal_max_queries(max_queries: int) -> int:
-        return max(4, min(24, int(max_queries)))
 
     def _run_legacy_stage(
         self,
@@ -2812,61 +2850,6 @@ class LegacyJobflowRunner:
         except Exception:
             pass
 
-    def _ingest_web_signal_companies(self, run_dir: Path, companies_path: Path) -> int:
-        signal_jobs = self._load_jobs_from_file(run_dir / "jobs_found.signal.json")
-        if not signal_jobs:
-            signal_jobs = self._load_jobs_from_file(run_dir / "jobs.signal.json")
-        if not signal_jobs:
-            return 0
-
-        now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-        candidates: list[dict] = []
-        for job in signal_jobs:
-            source = str(job.get("source") or "").strip().casefold()
-            if not source.startswith("web_search"):
-                continue
-            company_name = self._clean_company_name(job.get("company"))
-            if not company_name:
-                continue
-
-            job_url = str(job.get("canonicalUrl") or job.get("url") or "").strip()
-            domain = self._domain_from_url(job_url)
-            website = ""
-            careers_url = ""
-            if domain and not self._is_aggregator_domain(domain):
-                website = f"https://{domain}"
-                careers_url = job_url
-
-            tags = ["pool:signal", "stage:signal", "signal:web_search"]
-            region_tag = str(job.get("regionTag") or "").strip().upper()
-            if region_tag:
-                tags.append(f"region:{region_tag}")
-
-            candidates.append(
-                {
-                    "name": company_name,
-                    "website": website,
-                    "careersUrl": careers_url,
-                    "tags": tags,
-                    "source": "web_signal",
-                    "signalCount": 1,
-                    "lastSeen": now_iso,
-                }
-            )
-
-        if not candidates:
-            return 0
-
-        existing_payload = self._load_companies_payload(companies_path)
-        before = self._company_identity_keys(existing_payload)
-        merged_payload = self._merge_companies_payloads({"companies": candidates}, existing_payload)
-        after = self._company_identity_keys(merged_payload)
-        companies_path.write_text(
-            json.dumps(merged_payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        return max(0, len(after) - len(before))
-
     @staticmethod
     def _company_identity_keys(payload: dict) -> set[str]:
         keys: set[str] = set()
@@ -2913,7 +2896,6 @@ class LegacyJobflowRunner:
         paths = [
             run_dir / "jobs_recommended.json",
             run_dir / "jobs.json",
-            run_dir / "jobs_found.signal.json",
         ]
         company_candidates: list[str] = []
         keyword_candidates: list[str] = []
@@ -2925,7 +2907,7 @@ class LegacyJobflowRunner:
                     analysis = {}
                 score = analysis.get("matchScore")
                 recommend = bool(analysis.get("recommend"))
-                accepted = path.name in {"jobs_recommended.json", "jobs_found.signal.json"} or recommend or (
+                accepted = path.name == "jobs_recommended.json" or recommend or (
                     isinstance(score, int) and score >= 70
                 )
                 if not accepted:

@@ -171,6 +171,12 @@ QPushButton:hover {
   background: #f3f7fb;
 }
 
+QPushButton:disabled {
+  background: #d9e2ec;
+  color: #7b8794;
+  border: 1px solid #c5d0db;
+}
+
 QPushButton[variant="primary"] {
   background: #0f7b6c;
   color: #ffffff;
@@ -181,6 +187,12 @@ QPushButton[variant="primary"]:hover {
   background: #0d6c5f;
 }
 
+QPushButton[variant="primary"]:disabled {
+  background: #d9e2ec;
+  color: #7b8794;
+  border: 1px solid #c5d0db;
+}
+
 QPushButton[variant="danger"] {
   background: #ffffff;
   color: #b42318;
@@ -189,6 +201,12 @@ QPushButton[variant="danger"] {
 
 QPushButton[variant="danger"]:hover {
   background: #fff3f1;
+}
+
+QPushButton[variant="danger"]:disabled {
+  background: #f3f4f6;
+  color: #9aa5b1;
+  border: 1px solid #d9e2ec;
 }
 
 QPushButton[variant="step"] {

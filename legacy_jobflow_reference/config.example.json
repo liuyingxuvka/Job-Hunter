@@ -117,6 +117,12 @@
     "minTransferableScore": 55,
     "platformListingRecommendScoreThreshold": 68
   },
+  "companyFit": {
+    "enabled": true,
+    "model": "gpt-4o-mini",
+    "maxCompaniesToEvaluate": 18,
+    "batchSize": 6
+  },
   "translation": {
     "enable": false,
     "model": "gpt-4o-mini",

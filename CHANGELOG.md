@@ -10,6 +10,22 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-13
+
+### Added
+
+- Added company-fit reranking and richer company-discovery metadata in the legacy engine, including company identity merging, source evidence retention, registry-aware keys, and signal-count accumulation across discovered companies.
+- Added region and location-preference parsing in the legacy engine so company prioritization and downstream discovery can react more directly to target geography.
+
+### Changed
+
+- Reworked the adaptive legacy search loop to resume unfinished jobs first, refresh resume-pending payloads more safely, and continue timed search rounds with cleaner idle backoff when discovery temporarily stalls.
+- Improved the desktop workflow coordination between Step 2 target-role AI work and Step 3 search execution so searches stay blocked while AI enrichment is still running, with clearer busy-state messages and safer background-work shutdown.
+- Hardened search-profile persistence to sanitize incomplete text values and malformed query payloads before saving instead of crashing on partial UI state.
+- Added public `companyFit` defaults to the legacy example configs and clarified in the legacy README that company-fit scores are run-local reranking signals, not permanent stored labels.
+- Refined desktop button disabled-state styling and routed unhandled UI callback failures into `crash.log` with user-facing diagnostics instead of failing silently.
+- Updated the Windows packaging metadata so the packaged `.exe` carries `Yingxu Liu` in its embedded author/publisher-style version information.
+
 ## [0.4.0] - 2026-04-12
 
 ### Added

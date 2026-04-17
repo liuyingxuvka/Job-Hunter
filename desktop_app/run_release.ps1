@@ -58,40 +58,6 @@ function Resolve-PythonCommand {
   throw "Python executable not found. Set JOBFLOW_PYTHON_PATH or install Python 3.10+."
 }
 
-function Resolve-NodeExe {
-  if ($env:JOBFLOW_NODE_PATH -and (Test-Path -LiteralPath $env:JOBFLOW_NODE_PATH)) {
-    return $env:JOBFLOW_NODE_PATH
-  }
-
-  $candidatePaths = @(
-    (Join-Path $projectRoot "runtime\tools\node\node.exe"),
-    (Join-Path $projectRoot "runtime\tools\nodejs\node.exe"),
-    (Join-Path $projectRoot "runtime\tools\node-v24-win-x64\node.exe"),
-    (Join-Path $projectRoot "runtime\tools\node-v22-win-x64\node.exe"),
-    (Join-Path $projectRoot "runtime\tools\node-v20-win-x64\node.exe")
-  )
-  foreach ($candidate in $candidatePaths) {
-    if (Test-Path -LiteralPath $candidate) {
-      return $candidate
-    }
-  }
-
-  $toolsDir = Join-Path $projectRoot "runtime\tools"
-  if (Test-Path -LiteralPath $toolsDir) {
-    $latest = Get-ChildItem -Path $toolsDir -Directory -Filter "node-v*-win-x64" -ErrorAction SilentlyContinue |
-      Sort-Object Name -Descending |
-      Select-Object -First 1
-    if ($latest) {
-      $nodeExe = Join-Path $latest.FullName "node.exe"
-      if (Test-Path -LiteralPath $nodeExe) {
-        return $nodeExe
-      }
-    }
-  }
-
-  return ""
-}
-
 if (-not $env:OPENAI_API_KEY -and $env:AZURE_OPENAI_API_KEY) {
   $env:OPENAI_API_KEY = $env:AZURE_OPENAI_API_KEY
 }
@@ -101,11 +67,6 @@ if (-not $env:JOBFLOW_OPENAI_MODEL) {
   } elseif ($env:AZURE_OPENAI_DEPLOYMENT) {
     $env:JOBFLOW_OPENAI_MODEL = $env:AZURE_OPENAI_DEPLOYMENT
   }
-}
-
-$resolvedNode = Resolve-NodeExe
-if ($resolvedNode) {
-  $env:JOBFLOW_NODE_PATH = $resolvedNode
 }
 
 $src = Join-Path $projectRoot "src"

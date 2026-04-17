@@ -35,7 +35,7 @@ Current capability signals:
 - local candidate profile management
 - bilingual target-role setup and refinement
 - AI-assisted role recommendation flows
-- company-first search workflow through a legacy discovery engine
+- company-first search workflow through the current Python-native discovery engine
 - local result review and state tracking
 - Windows desktop distribution for non-developer users
 - experimental JSON-oriented CLI for headless automation

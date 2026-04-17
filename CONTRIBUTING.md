@@ -142,9 +142,9 @@ python -m venv .venv
 .\.venv\Scripts\jobflow-desktop
 ```
 
-如果需要调用旧版岗位发现引擎，还需要可用的 Node.js，或者使用 `desktop_app/runtime/tools/` 下的便携 Node。
+当前源码主线已经是 Python 原生桌面工作台与搜索执行链路，不再需要额外的 Node.js 运行时。
 
-If you need to run the legacy discovery engine, you will also need a usable Node.js runtime, or the portable Node binaries under `desktop_app/runtime/tools/`.
+The current source path is now Python-native for both the desktop workspace and search execution, so no extra Node.js runtime is required.
 
 ## 数据边界 / Repository Data Boundary
 
@@ -156,19 +156,17 @@ Treat the public repository as product code plus public documentation, not as an
 
 The following must remain local:
 
-- `legacy_jobflow_reference/config.json`、`config.adjacent.json`
-- `legacy_jobflow_reference/companies.json`、`companies_adjacent.json`
-- `legacy_jobflow_reference/resume.md`
-- `legacy_jobflow_reference/jobs*.json`、`jobs*.xlsx`
 - `desktop_app/runtime/data/jobflow_desktop.db*`
 - `desktop_app/runtime/backups/**`
+- `desktop_app/runtime/exports/**`
+- `desktop_app/runtime/logs/**`
+- `desktop_app/runtime/search_runs/**`
 
-- `legacy_jobflow_reference/config.json` and `config.adjacent.json`
-- `legacy_jobflow_reference/companies.json` and `companies_adjacent.json`
-- `legacy_jobflow_reference/resume.md`
-- `legacy_jobflow_reference/jobs*.json` and `jobs*.xlsx`
 - `desktop_app/runtime/data/jobflow_desktop.db*`
 - `desktop_app/runtime/backups/**`
+- `desktop_app/runtime/exports/**`
+- `desktop_app/runtime/logs/**`
+- `desktop_app/runtime/search_runs/**`
 
 如果你需要从模板开始，请复制 `*.example.*` 文件到本地工作副本，不要把个人资料写回模板。
 
@@ -229,13 +227,13 @@ Recommended conventions:
 请在贡献时注意：
 
 - 项目还在演进中，不要把尚未稳定的规划写成已完成能力
-- 旧版引擎仍在承担部分关键能力，不要忽略这层依赖
+- Python 搜索主线已经落地，当前仓库不再为旧本地运行数据保留兼容分支
 - 自动化测试目前并不完整，必要时请补充手工验证说明
 
 Please keep these constraints in mind:
 
 - the project is still evolving, so avoid presenting planned work as completed capability
-- the legacy engine still carries part of the functional load
+- the current repository no longer keeps compatibility branches for prior local runtime data
 - automated test coverage is still incomplete, so manual verification notes are often necessary
 
 ## 版本与更新记录 / Versioning And Changelog

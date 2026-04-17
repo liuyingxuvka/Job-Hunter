@@ -2,15 +2,13 @@ param(
   [string]$PythonExe = "",
   [string]$Version = "",
   [string]$OutputRoot = "",
-  [switch]$SkipZip,
-  [switch]$SkipNodeModulesInstall
+  [switch]$SkipZip
 )
 
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $desktopRoot = Join-Path $repoRoot "desktop_app"
-$legacyRoot = Join-Path $repoRoot "legacy_jobflow_reference"
 $privacyAuditPath = Join-Path $repoRoot "scripts\privacy_audit.ps1"
 $buildRoot = Join-Path $repoRoot "build\release"
 $distRoot = Join-Path $repoRoot "dist\release"
@@ -92,20 +90,6 @@ function Convert-VersionTuple {
   return @($parts | Select-Object -First 4 | ForEach-Object { [int]$_ })
 }
 
-function Resolve-NpmExe {
-  $npmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
-  if ($npmCommand -and $npmCommand.Path) {
-    return $npmCommand.Path
-  }
-
-  $npmFallback = Get-Command npm -ErrorAction SilentlyContinue
-  if ($npmFallback -and $npmFallback.Path) {
-    return $npmFallback.Path
-  }
-
-  throw "npm was not found. Install Node.js/npm or run with -SkipNodeModulesInstall only if node_modules is already vendored."
-}
-
 function Copy-DirectoryContents {
   param(
     [string]$Source,
@@ -129,9 +113,6 @@ $zipPath = Join-Path $distRoot "$packageStem.zip"
 $checksumPath = "$zipPath.sha256"
 $versionInfoPath = Join-Path $buildRoot "windows-version-info.txt"
 
-if (-not (Test-Path -LiteralPath $legacyRoot)) {
-  throw "legacy_jobflow_reference not found at $legacyRoot"
-}
 if (-not (Test-Path -LiteralPath $privacyAuditPath)) {
   throw "privacy_audit.ps1 not found at $privacyAuditPath"
 }
@@ -232,12 +213,10 @@ $packagedDesktopRoot = Join-Path $stageRoot "desktop_app"
 $packagedAssetsRoot = Join-Path $packagedDesktopRoot "assets"
 $packagedRuntimeRoot = Join-Path $packagedDesktopRoot "runtime"
 $packagedSchemaRoot = Join-Path $packagedDesktopRoot "src\jobflow_desktop_app\db"
-$packagedLegacyRoot = Join-Path $stageRoot "legacy_jobflow_reference"
 
 Copy-DirectoryContents -Source (Join-Path $desktopRoot "assets") -Destination $packagedAssetsRoot
-Copy-DirectoryContents -Source (Join-Path $desktopRoot "runtime\tools") -Destination (Join-Path $packagedRuntimeRoot "tools")
 
-foreach ($relativeDir in @("backups", "data", "exports", "legacy_runs", "logs")) {
+foreach ($relativeDir in @("backups", "data", "exports", "search_runs", "logs")) {
   New-Item -ItemType Directory -Path (Join-Path $packagedRuntimeRoot $relativeDir) -Force | Out-Null
 }
 
@@ -249,46 +228,9 @@ if (Test-Path -LiteralPath $demoResumePath -PathType Leaf) {
 New-Item -ItemType Directory -Path $packagedSchemaRoot -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $desktopRoot "src\jobflow_desktop_app\db\schema.sql") -Destination (Join-Path $packagedSchemaRoot "schema.sql") -Force
 
-New-Item -ItemType Directory -Path $packagedLegacyRoot -Force | Out-Null
-foreach ($legacyFile in @(
-  "README.md",
-  "jobflow.mjs",
-  "package.json",
-  "package-lock.json",
-  "config.example.json",
-  "config.adjacent.example.json",
-  "companies.example.json",
-  "companies_adjacent.example.json",
-  "resume.example.md"
-)) {
-  Copy-Item -LiteralPath (Join-Path $legacyRoot $legacyFile) -Destination (Join-Path $packagedLegacyRoot $legacyFile) -Force
-}
-
-if (-not $SkipNodeModulesInstall) {
-  $npmExe = Resolve-NpmExe
-  Push-Location $packagedLegacyRoot
-  try {
-    & $npmExe "ci" "--omit=dev" "--no-audit" "--no-fund"
-    if ($LASTEXITCODE -ne 0) {
-      throw "npm ci failed with exit code $LASTEXITCODE"
-    }
-  } finally {
-    Pop-Location
-  }
-}
-
 $packagedExe = Join-Path $stageRoot "$appName.exe"
 if (-not (Test-Path -LiteralPath $packagedExe)) {
   throw "Packaged executable not found at $packagedExe"
-}
-
-$packagedNodeExe = Get-ChildItem -Path (Join-Path $packagedRuntimeRoot "tools") -Recurse -Filter "node.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $packagedNodeExe) {
-  throw "Portable node.exe was not bundled into the release package."
-}
-
-if (-not (Test-Path -LiteralPath (Join-Path $packagedLegacyRoot "node_modules"))) {
-  throw "legacy_jobflow_reference/node_modules was not created in the release package."
 }
 
 & $privacyAuditPath -Scope package -PackageRoot $stageRoot

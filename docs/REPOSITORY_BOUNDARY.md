@@ -30,31 +30,17 @@ The goal is straightforward:
 
 ## 必须留在本地的内容 / What Must Stay Local
 
-- `legacy_jobflow_reference/config.json`
-- `legacy_jobflow_reference/config.adjacent.json`
-- `legacy_jobflow_reference/companies.json`
-- `legacy_jobflow_reference/companies_adjacent.json`
-- `legacy_jobflow_reference/resume.md`
-- `legacy_jobflow_reference/jobs*.json`
-- `legacy_jobflow_reference/jobs*.xlsx`
 - `desktop_app/runtime/data/jobflow_desktop.db*`
 - `desktop_app/runtime/backups/**`
 - `desktop_app/runtime/exports/**`（保留 `.gitkeep`）
 - `desktop_app/runtime/logs/**`（保留 `.gitkeep`）
-- `desktop_app/runtime/legacy_runs/**`（保留 `.gitkeep`）
+- `desktop_app/runtime/search_runs/**`（保留 `.gitkeep`）
 
-- `legacy_jobflow_reference/config.json`
-- `legacy_jobflow_reference/config.adjacent.json`
-- `legacy_jobflow_reference/companies.json`
-- `legacy_jobflow_reference/companies_adjacent.json`
-- `legacy_jobflow_reference/resume.md`
-- `legacy_jobflow_reference/jobs*.json`
-- `legacy_jobflow_reference/jobs*.xlsx`
 - `desktop_app/runtime/data/jobflow_desktop.db*`
 - `desktop_app/runtime/backups/**`
 - `desktop_app/runtime/exports/**` (except `.gitkeep`)
 - `desktop_app/runtime/logs/**` (except `.gitkeep`)
-- `desktop_app/runtime/legacy_runs/**` (except `.gitkeep`)
+- `desktop_app/runtime/search_runs/**` (except `.gitkeep`)
 
 ## 发布包边界 / Release Package Boundary
 
@@ -66,17 +52,15 @@ The Windows release package may contain only distributable runtime essentials, n
 
 - `Jobflow Desktop.exe` 和对应运行时目录
 - `desktop_app/assets/`
-- `desktop_app/runtime/tools/` 下的便携 Node
 - `desktop_app/runtime/data/demo_candidate_resume.md`
-- `legacy_jobflow_reference/` 下的安全模板、公开脚本和预装依赖
+- `README_RELEASE.txt` 等发布包内说明文件
 
 Allowed in the release package:
 
 - `Jobflow Desktop.exe` and its bundled runtime directory
 - `desktop_app/assets/`
-- the portable Node runtime under `desktop_app/runtime/tools/`
 - `desktop_app/runtime/data/demo_candidate_resume.md`
-- safe templates, public scripts, and preinstalled dependencies under `legacy_jobflow_reference/`
+- release notes files such as `README_RELEASE.txt`
 
 不得进入发布包的内容：
 
@@ -84,11 +68,7 @@ Allowed in the release package:
 - `desktop_app/runtime/backups/**`
 - `desktop_app/runtime/exports/**`
 - `desktop_app/runtime/logs/**`
-- `desktop_app/runtime/legacy_runs/**`
-- `legacy_jobflow_reference/config.json`
-- `legacy_jobflow_reference/companies.json`
-- `legacy_jobflow_reference/jobs*.json`
-- `legacy_jobflow_reference/jobs*.xlsx`
+- `desktop_app/runtime/search_runs/**`
 
 Must never enter the release package:
 
@@ -96,11 +76,7 @@ Must never enter the release package:
 - `desktop_app/runtime/backups/**`
 - `desktop_app/runtime/exports/**`
 - `desktop_app/runtime/logs/**`
-- `desktop_app/runtime/legacy_runs/**`
-- `legacy_jobflow_reference/config.json`
-- `legacy_jobflow_reference/companies.json`
-- `legacy_jobflow_reference/jobs*.json`
-- `legacy_jobflow_reference/jobs*.xlsx`
+- `desktop_app/runtime/search_runs/**`
 
 ## 执行规则 / Operational Rules
 
@@ -118,12 +94,12 @@ Must never enter the release package:
 
 This boundary is enforced in four layers:
 
-1. `.gitignore` 和 `legacy_jobflow_reference/.gitignore` 默认忽略本地工作副本与运行输出。
+1. `.gitignore` 默认忽略本地工作副本与运行输出。
 2. `scripts/privacy_audit.ps1` 会检查是否有禁止上传的路径或明显泄露迹象。
 3. `.github/workflows/privacy-check.yml` 会在 push 和 pull request 时自动执行审计。
 4. `scripts/build_windows_release.ps1` 只从白名单内容组装发布包，并在压缩前再次执行发布包隐私审计。
 
-1. `.gitignore` and `legacy_jobflow_reference/.gitignore` ignore local working copies and runtime outputs by default.
+1. `.gitignore` ignores local working copies and runtime outputs by default.
 2. `scripts/privacy_audit.ps1` checks for blocked upload paths and obvious leak patterns.
 3. `.github/workflows/privacy-check.yml` runs the audit automatically on pushes and pull requests.
 4. `scripts/build_windows_release.ps1` assembles release assets from a safe allowlist and reruns a package privacy audit before zipping.

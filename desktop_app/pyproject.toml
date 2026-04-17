@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jobflow-desktop-app"
-version = "0.5.0"
+version = "0.6.0"
 description = "Local desktop application for job discovery, screening, scoring, and export."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,7 +25,8 @@ classifiers = [
 ]
 dependencies = [
   "PySide6>=6.7,<7",
-  "pypdf>=5,<7"
+  "pypdf>=5,<7",
+  "openpyxl>=3.1,<4"
 ]
 
 [project.urls]
@@ -36,10 +37,16 @@ Issues = "https://github.com/liuyingxuvka/Job-Hunter/issues"
 
 [project.scripts]
 jobflow-desktop = "jobflow_desktop_app.main:main"
-jobflow-agent = "jobflow_desktop_app.agent_cli:main"
+jobflow-agent = "jobflow_desktop_app.cli.agent:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+jobflow_desktop_app = [
+  "resources/prompts/ai/*.txt",
+  "resources/prompts/search_analysis/*.txt",
+]

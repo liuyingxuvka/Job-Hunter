@@ -34,21 +34,12 @@ function Resolve-GitExecutable {
 $gitExe = Resolve-GitExecutable
 
 $blockedPathPatterns = @(
-  "legacy_jobflow_reference/config.json",
-  "legacy_jobflow_reference/config.adjacent.json",
-  "legacy_jobflow_reference/companies.json",
-  "legacy_jobflow_reference/companies_adjacent.json",
-  "legacy_jobflow_reference/resume.md",
-  "legacy_jobflow_reference/jobs*.json",
-  "legacy_jobflow_reference/jobs*.xlsx",
-  "legacy_jobflow_reference/config.generated*.json",
-  "legacy_jobflow_reference/resume.generated.md",
-  "legacy_jobflow_reference/companies.candidate.json",
   "desktop_app/runtime/data/jobflow_desktop.db*",
   "desktop_app/runtime/backups/*",
   "desktop_app/runtime/exports/*",
   "desktop_app/runtime/logs/*",
-  "desktop_app/runtime/legacy_runs/*"
+  "desktop_app/runtime/search_runs/*",
+  "desktop_app/runtime/tools/*"
 )
 
 $packageBlockedPathPatterns = @(
@@ -60,7 +51,7 @@ $allowedPathPatterns = @(
   "desktop_app/runtime/backups/.gitignore",
   "desktop_app/runtime/exports/.gitkeep",
   "desktop_app/runtime/logs/.gitkeep",
-  "desktop_app/runtime/legacy_runs/.gitkeep"
+  "desktop_app/runtime/search_runs/.gitkeep"
 )
 
 $contentScanExcludePaths = @(
@@ -68,8 +59,7 @@ $contentScanExcludePaths = @(
 )
 
 $contentScanExcludePrefixes = @(
-  "_internal/",
-  "legacy_jobflow_reference/node_modules/"
+  "_internal/"
 )
 
 $contentRules = @(
@@ -119,7 +109,17 @@ function Get-GitPaths {
     return @()
   }
 
-  return @($output | Where-Object { $_ } | ForEach-Object { $_.Trim() -replace "\\", "/" })
+  $paths = @($output | Where-Object { $_ } | ForEach-Object { $_.Trim() -replace "\\", "/" })
+  if ($TargetScope -eq "repo") {
+    $paths = @(
+      $paths | Where-Object {
+        $absolutePath = Join-Path -Path $repoRoot -ChildPath ($_ -replace "/", "\")
+        Test-Path -LiteralPath $absolutePath
+      }
+    )
+  }
+
+  return $paths
 }
 
 function Get-PackagePaths {

@@ -146,7 +146,7 @@ class SearchProfileRepository:
             raise ValueError("Candidate must be selected before saving a profile.")
         if not name:
             raise ValueError("Profile name is required.")
-        scope_profile = self._safe_text(getattr(record, "scope_profile", "")) or "hydrogen_mainline"
+        scope_profile = self._safe_text(getattr(record, "scope_profile", ""))
         target_role = self._safe_text(getattr(record, "target_role", ""))
         location_preference = self._safe_text(getattr(record, "location_preference", ""))
         company_focus = self._safe_text(getattr(record, "company_focus", ""))

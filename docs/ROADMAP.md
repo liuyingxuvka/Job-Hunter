@@ -10,13 +10,13 @@ The repository has moved from a script-oriented reference implementation to an e
 
 - 桌面应用会成为主入口
 - 本地数据库会成为状态和结果的中心
-- 旧版搜索引擎会在一段时间内继续作为执行层存在
+- Python 原生搜索主线会继续收紧和简化
 
 The direction is already fairly clear:
 
 - the desktop app becomes the main entry point
 - the local database becomes the center of state and result management
-- the legacy engine remains the execution layer for a while
+- the Python-native search path keeps getting simpler and more self-contained
 
 ## 阶段一：把桌面工作台做扎实 / Stage 1: Make The Desktop Workspace Solid
 
@@ -62,29 +62,29 @@ Important directions include:
 - more practical export handling such as unified Excel and JSON management
 - stronger deduplication, hide-state handling, sync, and manual review support
 
-## 阶段三：逐步减少对旧版引擎的依赖 / Stage 3: Reduce Dependence On The Legacy Engine
+## 阶段三：继续压缩运行时噪音并收紧模块边界 / Stage 3: Reduce Runtime Sprawl And Tighten Module Boundaries
 
-当前项目最现实的演进方式，不是一次性重写，而是渐进替换。
+当前项目更现实的演进方式，不是继续叠加补丁，而是继续把重复状态、过多中间产物和历史迁移噪音收敛掉。
 
-The most realistic evolution path is not a full rewrite. It is gradual replacement.
+The more realistic path now is not to keep stacking patches. It is to keep shrinking duplicate state, excess intermediate runtime artifacts, and leftover migration noise.
 
-后续可以逐步迁移的模块包括：
+后续可以继续压缩和整理的模块包括：
 
-- 配置生成逻辑
-- 公司发现逻辑
-- 岗位抓取与标准化逻辑
-- 匹配分析与结果落库逻辑
+- 运行时目录与中间状态文件
+- 搜索编排门面与底层模块之间的边界
+- 结果持久化与导出职责划分
+- 剩余迁移辅助点与当前模块路径之间的关系
 
-Modules that can be migrated gradually include:
+Areas that can be simplified further include:
 
-- config generation
-- company discovery
-- job retrieval and normalization
-- match analysis and result persistence
+- runtime directories and intermediate state files
+- the boundary between orchestration facades and lower-level search modules
+- persistence versus export responsibilities
+- remaining migration-sensitive helpers versus direct module paths
 
-目标是让桌面端不只是“启动器”，而是真正拥有自己的应用层和运行编排能力。
+目标是让桌面端不只是“启动器”，而是在清晰目录边界下拥有稳定、易理解的 Python 原生应用层和运行编排能力。
 
-The goal is to make the desktop app more than a launcher by giving it its own application logic and orchestration capability.
+The goal is to make the desktop app more than a launcher by keeping a stable, understandable Python-native application layer and orchestration boundary.
 
 ## 暂不优先的方向 / Lower-Priority Directions For Now
 

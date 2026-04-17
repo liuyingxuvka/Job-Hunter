@@ -9,15 +9,9 @@ desktop_app/**/__pycache__/
 desktop_app/runtime/data/jobflow_desktop.db*
 desktop_app/runtime/backups/**
 !desktop_app/runtime/backups/.gitignore
-desktop_app/runtime/tools/node-v*-win-x64/*
-!desktop_app/runtime/tools/node-v*-win-x64/CHANGELOG.md
-!desktop_app/runtime/tools/node-v*-win-x64/LICENSE
-!desktop_app/runtime/tools/node-v*-win-x64/README.md
-!desktop_app/runtime/tools/node-v*-win-x64/node.exe
 desktop_app/runtime/exports/**
 !desktop_app/runtime/exports/.gitkeep
 desktop_app/runtime/logs/**
 !desktop_app/runtime/logs/.gitkeep
-desktop_app/runtime/legacy_runs/**
-!desktop_app/runtime/legacy_runs/.gitkeep
-legacy_jobflow_reference/node_modules/
+desktop_app/runtime/search_runs/**
+!desktop_app/runtime/search_runs/.gitkeep

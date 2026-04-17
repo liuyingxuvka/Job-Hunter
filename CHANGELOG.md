@@ -10,6 +10,22 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-18
+
+### Added
+
+- Added a Python-native search module tree under `jobflow_desktop_app/search/` with focused orchestration, company sourcing, runtime-state, output, and stage-execution modules instead of keeping the search path behind the old monolithic legacy engine files.
+- Added a dedicated `jobflow_desktop_app/ai/` package, packaged prompt assets, repository-specific `AGENTS.md` guidance, and a broad regression suite under `desktop_app/tests/` that now covers search orchestration, runtime persistence, UI control flow, and AI prompt parsing behavior.
+- Added new runtime persistence seams for search runs, candidate company pools, per-run job buckets, semantic profiles, and richer review-state keys in SQLite.
+
+### Changed
+
+- Reorganized the desktop UI into direct page, dialog, widget, and context modules so the main window now imports real page implementations instead of a single forwarding `pages.py` mega-file.
+- Removed the old `legacy_jobflow_reference/` execution path and portable Node runtime from the active repository and Windows package flow; the desktop app and release process now assume a Python-native search pipeline end to end.
+- Renamed the candidate-scoped runtime workspace from `runtime/legacy_runs/` to `runtime/search_runs/` and tightened repository boundary docs, `.gitignore`, and privacy auditing around the new runtime layout.
+- Hardened database bootstrap and schema migrations for older local databases by backfilling newer runtime/review columns and migrating candidate company storage away from the old pool-name shape.
+- Updated the GitHub release workflow to validate that the pushed tag version matches `desktop_app/pyproject.toml`, and fixed the privacy audit so deleting blocked runtime artifacts no longer fails the release gate.
+
 ## [0.5.0] - 2026-04-13
 
 ### Added

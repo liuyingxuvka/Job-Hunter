@@ -42,6 +42,13 @@ class AppSettingsRepository:
                 (key, value),
             )
 
+    def delete_value(self, key: str) -> None:
+        with self.database.session() as connection:
+            connection.execute(
+                "DELETE FROM app_settings WHERE key = ?",
+                (key,),
+            )
+
     def get_openai_settings(self) -> OpenAISettings:
         source = self._normalize_api_key_source(
             self.get_value("openai_api_key_source", "direct")
@@ -119,17 +126,17 @@ class AppSettingsRepository:
         seen: set[str] = set()
         process_env_by_upper = {name.upper(): name for name in os.environ.keys()}
         persisted_names = self._list_persisted_environment_variable_names()
-        persisted_upper = {str(name).upper() for name in persisted_names}
         if os.name == "nt":
-            source_names = sorted(persisted_names, key=lambda value: str(value).casefold())
+            source_names = sorted(
+                {*(str(name) for name in persisted_names), *process_env_by_upper.values()},
+                key=lambda value: str(value).casefold(),
+            )
         else:
             source_names = sorted(process_env_by_upper.values(), key=lambda value: str(value).casefold())
 
         def push(raw: str) -> None:
             name = self._normalize_api_key_env_var(raw)
             if not name:
-                return
-            if os.name == "nt" and name.upper() not in persisted_upper:
                 return
             canonical = process_env_by_upper.get(name.upper(), name)
             if not self._read_environment_variable(canonical):
@@ -149,12 +156,9 @@ class AppSettingsRepository:
             ):
                 continue
             push(name)
-        if stored.api_key_env_var and (
-            os.name != "nt" or stored.api_key_env_var.upper() in persisted_upper
-        ):
-            canonical = process_env_by_upper.get(stored.api_key_env_var.upper())
-            if canonical:
-                push(canonical)
+        if stored.api_key_env_var:
+            canonical = process_env_by_upper.get(stored.api_key_env_var.upper(), stored.api_key_env_var)
+            push(canonical)
         return candidates
 
     def get_openai_model_catalog(self) -> list[str]:

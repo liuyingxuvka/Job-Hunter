@@ -87,14 +87,35 @@ CREATE TABLE IF NOT EXISTS search_runs (
   search_profile_id INTEGER,
   run_type TEXT NOT NULL DEFAULT 'full',
   status TEXT NOT NULL DEFAULT 'queued',
+  run_dir TEXT NOT NULL DEFAULT '',
+  current_stage TEXT NOT NULL DEFAULT 'queued',
+  last_message TEXT DEFAULT '',
+  last_event TEXT DEFAULT '',
   started_at TEXT DEFAULT '',
   finished_at TEXT DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  cancelled INTEGER NOT NULL DEFAULT 0,
   jobs_found_count INTEGER NOT NULL DEFAULT 0,
   jobs_scored_count INTEGER NOT NULL DEFAULT 0,
   jobs_recommended_count INTEGER NOT NULL DEFAULT 0,
+  config_json TEXT DEFAULT '',
+  resume_config_json TEXT DEFAULT '',
   error_message TEXT DEFAULT '',
   FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE SET NULL,
   FOREIGN KEY (search_profile_id) REFERENCES search_profiles(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS candidate_companies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  candidate_id INTEGER NOT NULL,
+  company_key TEXT NOT NULL,
+  company_name TEXT NOT NULL DEFAULT '',
+  website TEXT DEFAULT '',
+  careers_url TEXT DEFAULT '',
+  company_json TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
+  UNIQUE (candidate_id, company_key)
 );
 
 CREATE TABLE IF NOT EXISTS job_analyses (
@@ -129,6 +150,9 @@ CREATE TABLE IF NOT EXISTS job_review_states (
   candidate_id INTEGER NOT NULL,
   search_profile_id INTEGER NOT NULL,
   job_id INTEGER NOT NULL,
+  job_key TEXT NOT NULL DEFAULT '',
+  status_code TEXT DEFAULT '',
+  hidden INTEGER NOT NULL DEFAULT 0,
   interest_level TEXT DEFAULT '',
   applied_status TEXT DEFAULT '',
   applied_date TEXT DEFAULT '',
@@ -142,6 +166,40 @@ CREATE TABLE IF NOT EXISTS job_review_states (
   UNIQUE (candidate_id, search_profile_id, job_id)
 );
 
+CREATE TABLE IF NOT EXISTS search_run_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  search_run_id INTEGER NOT NULL,
+  candidate_id INTEGER NOT NULL,
+  job_id INTEGER,
+  job_key TEXT NOT NULL,
+  job_bucket TEXT NOT NULL DEFAULT 'jobs',
+  canonical_url TEXT DEFAULT '',
+  source_url TEXT DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  company_name TEXT NOT NULL DEFAULT '',
+  location_text TEXT DEFAULT '',
+  date_found TEXT DEFAULT '',
+  match_score INTEGER,
+  analysis_completed INTEGER NOT NULL DEFAULT 0,
+  recommended INTEGER NOT NULL DEFAULT 0,
+  pending_resume INTEGER NOT NULL DEFAULT 0,
+  job_json TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (search_run_id) REFERENCES search_runs(id) ON DELETE CASCADE,
+  FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
+  FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL,
+  UNIQUE (search_run_id, job_bucket, job_key)
+);
+
+CREATE TABLE IF NOT EXISTS candidate_semantic_profiles (
+  candidate_id INTEGER PRIMARY KEY,
+  source_signature TEXT DEFAULT '',
+  summary TEXT DEFAULT '',
+  profile_json TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS app_settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL DEFAULT '',
@@ -151,6 +209,11 @@ CREATE TABLE IF NOT EXISTS app_settings (
 CREATE INDEX IF NOT EXISTS idx_search_profiles_candidate_id ON search_profiles(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_profile_queries_profile_id ON search_profile_queries(search_profile_id);
 CREATE INDEX IF NOT EXISTS idx_resumes_candidate_id ON resumes(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_search_runs_candidate_id ON search_runs(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_job_analyses_job_id ON job_analyses(job_id);
 CREATE INDEX IF NOT EXISTS idx_job_analyses_profile_id ON job_analyses(search_profile_id);
 CREATE INDEX IF NOT EXISTS idx_review_states_job_id ON job_review_states(job_id);
+CREATE INDEX IF NOT EXISTS idx_review_states_candidate_job_key ON job_review_states(candidate_id, job_key);
+CREATE INDEX IF NOT EXISTS idx_candidate_companies_candidate_id ON candidate_companies(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_search_run_jobs_run_bucket ON search_run_jobs(search_run_id, job_bucket);
+CREATE INDEX IF NOT EXISTS idx_search_run_jobs_candidate_id ON search_run_jobs(candidate_id);

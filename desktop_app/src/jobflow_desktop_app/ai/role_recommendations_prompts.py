@@ -1,0 +1,222 @@
+from __future__ import annotations
+
+from ..prompt_assets import load_prompt_asset
+from ..db.repositories.candidates import CandidateRecord
+from .role_recommendations_models import CandidateSemanticProfile, ResumeReadResult
+from .role_recommendations_resume import (
+    load_resume_excerpt_result,
+    manual_background_summary,
+)
+
+
+SYSTEM_PROMPT = load_prompt_asset("ai", "system_prompt.txt")
+TRANSLATE_PROMPT = load_prompt_asset("ai", "translate_prompt.txt")
+ROLE_NAME_TRANSLATE_PROMPT = load_prompt_asset("ai", "role_name_translate_prompt.txt")
+MANUAL_ROLE_ENRICH_PROMPT = load_prompt_asset("ai", "manual_role_enrich_prompt.txt")
+CANDIDATE_SEMANTIC_PROFILE_PROMPT = load_prompt_asset("ai", "candidate_semantic_profile_prompt.txt")
+
+
+def build_candidate_semantic_profile_prompt(
+    candidate: CandidateRecord,
+    *,
+    resume_result: ResumeReadResult | None = None,
+) -> str:
+    resolved_resume = resume_result or load_resume_excerpt_result(candidate.active_resume_path, max_chars=12000)
+    background_summary = manual_background_summary(candidate)
+    parts = [
+        f"Candidate name: {candidate.name}",
+        f"Current location: {candidate.base_location or 'N/A'}",
+        "Preferred locations:",
+        candidate.preferred_locations.strip() or "N/A",
+        "Future target directions (self-described):",
+        candidate.target_directions.strip() or "N/A",
+        "Professional background summary (manual):",
+        background_summary or "N/A",
+        "Important extraction intent:",
+        "- Extract demonstrated business/technical experience from the resume and manual summary.",
+        "- Separately extract future-oriented target directions from the self-described target directions field.",
+        "- Keep the phrase library target-direction first, then background, then supporting capabilities, then adjacent exploration.",
+        "- Prefer English business domains, product/platform areas, technical themes, and credible adjacent directions.",
+        "- Do not collapse everything into generic job titles.",
+        "- Build a reusable English phrase library for company discovery and job-search planning.",
+    ]
+    if candidate.active_resume_path.strip() and resolved_resume.text:
+        parts.extend(
+            [
+                f"Resume path: {candidate.active_resume_path.strip()}",
+                "Resume excerpt:",
+                resolved_resume.text,
+            ]
+        )
+    elif candidate.active_resume_path.strip() and resolved_resume.error:
+        parts.extend(
+            [
+                f"Resume path: {candidate.active_resume_path.strip()}",
+                "Resume read status:",
+                resolved_resume.error,
+                "If the resume text is unavailable, rely on the manual professional background summary and target directions.",
+            ]
+        )
+    parts.append("Return strict JSON only.")
+    return "\n".join(parts)
+
+
+def semantic_profile_prompt_lines(profile: CandidateSemanticProfile | None) -> list[str]:
+    if profile is None or not profile.is_usable():
+        return []
+    sections: list[tuple[str, tuple[str, ...] | str, int | None]] = [
+        ("AI semantic summary:", profile.summary, None),
+        ("AI extracted target-direction keywords:", profile.target_direction_keywords, 14),
+        ("AI extracted background keywords:", profile.background_keywords, 14),
+        ("AI extracted core business areas:", profile.core_business_areas, 24),
+        ("AI extracted strong capabilities:", profile.strong_capabilities, 10),
+        ("AI extracted adjacent business areas:", profile.adjacent_business_areas, 16),
+        ("AI extracted exploration business areas:", profile.exploration_business_areas, 8),
+        ("AI extracted seniority signals:", profile.seniority_signals, 8),
+    ]
+    lines: list[str] = []
+    lines.extend(
+        [
+            "AI English business phrase library size:",
+            f"- company-discovery phrases: {len(profile.company_discovery_phrase_library_en())}",
+            f"- job-search phrases: {len(profile.job_search_phrase_library_en())}",
+        ]
+    )
+    for label, value, limit in sections:
+        if isinstance(value, tuple):
+            if not value:
+                continue
+            lines.append(label)
+            shown = value[: limit or len(value)]
+            lines.extend(f"- {item}" for item in shown)
+            if limit is not None and len(value) > limit:
+                lines.append(f"- ... ({len(value) - limit} more)")
+            continue
+        if str(value or "").strip():
+            lines.extend([label, str(value).strip()])
+    if profile.avoid_business_areas:
+        lines.append("AI extracted avoid / misleading directions:")
+        shown_avoid = profile.avoid_business_areas[:8]
+        lines.extend(f"- {item}" for item in shown_avoid)
+        if len(profile.avoid_business_areas) > 8:
+            lines.append(f"- ... ({len(profile.avoid_business_areas) - 8} more)")
+    return lines
+
+
+def compact_role_recommendation_semantic_profile_lines(
+    profile: CandidateSemanticProfile | None,
+) -> list[str]:
+    if profile is None or not profile.is_usable():
+        return []
+    lines: list[str] = []
+    if profile.summary:
+        lines.extend(["AI semantic summary:", profile.summary])
+
+    sections: list[tuple[str, tuple[str, ...], int]] = [
+        ("AI extracted target-direction keywords:", profile.target_direction_keywords, 8),
+        ("AI extracted background keywords:", profile.background_keywords, 8),
+        ("AI extracted core business areas:", profile.core_business_areas, 12),
+        ("AI extracted strong capabilities:", profile.strong_capabilities, 8),
+    ]
+    for label, values, limit in sections:
+        if not values:
+            continue
+        lines.append(label)
+        lines.extend(f"- {item}" for item in values[:limit])
+        if len(values) > limit:
+            lines.append(f"- ... ({len(values) - limit} more)")
+
+    lines.append(
+        "Treat these phrases as soft evidence only. Do not let them override the resume, notes, or explicit target directions."
+    )
+    return lines
+
+
+def build_role_recommendation_prompt(
+    candidate: CandidateRecord,
+    existing_roles: list[tuple[str, str]] | None = None,
+    resume_result: ResumeReadResult | None = None,
+    semantic_profile: CandidateSemanticProfile | None = None,
+) -> str:
+    resolved_resume = resume_result or load_resume_excerpt_result(candidate.active_resume_path)
+    resume_excerpt = resolved_resume.text
+    background_summary = manual_background_summary(candidate)
+    normalized_existing: list[tuple[str, str]] = []
+    for role in existing_roles or []:
+        if not isinstance(role, tuple) or len(role) != 2:
+            continue
+        role_name = str(role[0] or "").strip()
+        role_desc = str(role[1] or "").strip()
+        if not role_name:
+            continue
+        normalized_existing.append((role_name, role_desc))
+
+    parts = [
+        f"Candidate name: {candidate.name}",
+        f"Current location: {candidate.base_location or 'N/A'}",
+        "Preferred locations:",
+        candidate.preferred_locations.strip() or "N/A",
+        "Current target directions (self-described):",
+        candidate.target_directions.strip() or "N/A",
+        "Professional background summary (manual):",
+        background_summary or "N/A",
+    ]
+    parts.extend(compact_role_recommendation_semantic_profile_lines(semantic_profile))
+
+    if candidate.active_resume_path.strip() and resume_excerpt:
+        parts.extend(
+            [
+                f"Resume path: {candidate.active_resume_path.strip()}",
+                "Resume excerpt:",
+                resume_excerpt,
+            ]
+        )
+    elif candidate.active_resume_path.strip() and resolved_resume.error:
+        parts.extend(
+            [
+                f"Resume path: {candidate.active_resume_path.strip()}",
+                "Resume read status:",
+                "Resume text is unavailable. Use the manual professional background summary and the other candidate context as the primary source of truth.",
+            ]
+        )
+
+    if normalized_existing:
+        parts.append("existing roles (must not repeat):")
+        for role_name, role_desc in normalized_existing:
+            if role_desc:
+                parts.append(f"- {role_name}: {role_desc}")
+            else:
+                parts.append(f"- {role_name}")
+        parts.append("Please add only 1-2 NEW role directions beyond existing roles.")
+    else:
+        parts.append("Please return up to 3 role directions.")
+
+    parts.extend(
+        [
+            "role.name_en should be specific, not overly generic.",
+            "Avoid generic role titles like Engineer/Manager/Specialist without domain qualifiers.",
+            "Avoid broad titles like Systems Engineer / Software Engineer / Project Manager unless strongly specialized.",
+            "Prefer titles that include concrete domain or method context.",
+            "Prioritize the candidate's demonstrated domain continuity from resume, notes, and self-described directions.",
+            "Do not over-index on isolated software/tool keywords if they are not central to the candidate's main work.",
+            "Treat any inferred scope label as soft evidence only; do not force a hydrogen or adjacent-MBSE direction unless the resume, notes, and self-described directions clearly support it.",
+            "Provide both role.name_en and role.name_zh.",
+            "role.description_zh must be Chinese and 2-3 sentences with concrete details.",
+            "role.description_en must be English and 2-3 sentences with concrete details.",
+            "Return strict JSON only.",
+        ]
+    )
+    return "\n".join(parts)
+
+
+__all__ = [
+    "CANDIDATE_SEMANTIC_PROFILE_PROMPT",
+    "MANUAL_ROLE_ENRICH_PROMPT",
+    "ROLE_NAME_TRANSLATE_PROMPT",
+    "SYSTEM_PROMPT",
+    "TRANSLATE_PROMPT",
+    "build_candidate_semantic_profile_prompt",
+    "build_role_recommendation_prompt",
+    "compact_role_recommendation_semantic_profile_lines",
+    "semantic_profile_prompt_lines",
+]

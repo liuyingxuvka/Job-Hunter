@@ -49,7 +49,7 @@ Job Hunter 不是一个面向大众求职场景的职位推荐器。它更适合
 5. 如果 Windows 对直接启动 `.exe` 比较严格，再改用 `START_JOBFLOW_DESKTOP.cmd`。
 6. 第一次打开后，在应用里填写 API 设置即可开始使用。
 
-这个发布包已经包含桌面运行时、便携 Node、demo 候选人种子和安全模板。普通用户本地不需要额外安装 Python。
+这个发布包已经包含桌面运行时、demo 候选人种子和安全模板。普通用户本地不需要额外安装 Python。
 
 发布包不会包含真实候选人数据库、客户数据、搜索历史、导出结果或运行备份。
 
@@ -62,7 +62,6 @@ Job Hunter 不是一个面向大众求职场景的职位推荐器。它更适合
 - Windows 开发环境优先
 - Python 3.10+
 - OpenAI API Key
-- 如果要运行旧版搜索引擎，需要可用的 Node.js；也可以使用 `desktop_app/runtime/tools/` 下的便携 Node
 
 从 GitHub Release 下载的 Windows 发布包不要求本地单独安装 Python。
 
@@ -74,7 +73,6 @@ Job Hunter 不是一个面向大众求职场景的职位推荐器。它更适合
 - `AZURE_OPENAI_API_KEY`
 - `AZURE_OPENAI_ENDPOINT`
 - `AZURE_OPENAI_DEPLOYMENT`
-- `JOBFLOW_NODE_PATH`
 - `JOBFLOW_PYTHON_PATH`
 
 源码启动方式 A：从仓库根目录快速启动
@@ -106,16 +104,16 @@ python -m venv .venv
 
 ### 当前仓库能做什么
 
-当前仓库主要包含一个正在持续迭代的本地桌面工作台，以及一套旧版岗位发现引擎参考实现。
+当前仓库主要包含一个正在持续迭代的本地桌面工作台，以及一套 Python 原生的公司优先搜索执行链路。
 
 已落地能力包括：
 
 - 本地候选人管理：维护姓名、邮箱、当前所在地、目标地区、备注和简历路径
 - AI 目标岗位设立：辅助生成更具体的岗位方向，并维护中英文岗位名称和说明
 - 本地 AI 设置：支持直接填写 API Key 或绑定环境变量，并验证模型可用性
-- 公司优先的岗位发现流程：根据候选人的岗位方向和偏好，调用旧版搜索引擎做公司与岗位发现
+- 公司优先的岗位发现流程：根据候选人的岗位方向和偏好，由 Python 搜索主线完成公司发现、公司筛选与岗位抓取
 - 搜索结果工作台：查看匹配结果，并维护关注、投递、Offer、放弃等状态
-- 本地优先数据存储：通过 SQLite 保存候选人、搜索配置、结果状态和运行数据
+- 本地优先数据存储：以 SQLite 作为候选人、搜索配置、结果状态和运行数据的主存储；`desktop_app/runtime/search_runs/` 只保留按候选人划分的临时工作目录
 
 ### 核心流程
 
@@ -129,7 +127,6 @@ python -m venv .venv
 | Path | 说明 |
 | --- | --- |
 | `desktop_app/` | 新版桌面应用，负责候选人工作台、AI 设置、搜索结果查看与后续维护 |
-| `legacy_jobflow_reference/` | 旧版岗位发现参考引擎，当前仍作为搜索执行层被桌面应用调用 |
 | `docs/` | GitHub 说明文档，包括产品定位、架构和路线图 |
 | `README_RELEASE.txt` | 面向打包发布目录的简要启动说明 |
 | `START_JOBFLOW_DESKTOP.cmd` | Windows 下的快速启动入口 |
@@ -143,13 +140,13 @@ python -m venv .venv
 - 不是面向所有求职者的大众化职位推荐产品
 - 不是自动投递系统
 - 不是已经完成商业化打磨的成品桌面软件
-- 不是完全脱离旧版引擎的独立新架构，当前搜索执行仍依赖 `legacy_jobflow_reference/`
+- 不是已经为所有平台和长期维护场景都做完最终工程化定型的产品
 
 ### 公开仓库边界
 
 这个仓库公开部分只保留源码、文档、演示种子和安全示例模板；个人简历、公司池、搜索结果、SQLite 数据和运行备份必须留在本地。
 
-当前已经把这套边界写进 `.gitignore`、`legacy_jobflow_reference/.gitignore`、`scripts/privacy_audit.ps1` 和 GitHub Actions，所以未来同事协作时也会按同一规则执行。
+当前已经把这套边界写进 `.gitignore`、`scripts/privacy_audit.ps1` 和 GitHub Actions，所以未来同事协作时也会按同一规则执行。
 
 ### 文档导航
 
@@ -225,7 +222,7 @@ Recommended steps:
 5. If Windows is cautious about launching the `.exe` directly, use `START_JOBFLOW_DESKTOP.cmd` instead.
 6. After the first launch, enter your API settings in the app and start using it.
 
-The release package already includes the desktop runtime, portable Node, demo candidate seed, and safe templates. End users do not need to install Python locally.
+The release package already includes the desktop runtime, demo candidate seed, and safe templates. End users do not need to install Python locally.
 
 The release package does not include real candidate databases, customer data, search history, exports, or runtime backups.
 
@@ -238,7 +235,6 @@ Development environment requirements:
 - Windows-first development environment
 - Python 3.10+
 - An OpenAI API key
-- A usable Node.js runtime for the legacy engine, or the portable Node binaries under `desktop_app/runtime/tools/`
 
 The Windows release package downloaded from GitHub Releases does not require a separate local Python installation.
 
@@ -250,7 +246,6 @@ Supported environment variables:
 - `AZURE_OPENAI_API_KEY`
 - `AZURE_OPENAI_ENDPOINT`
 - `AZURE_OPENAI_DEPLOYMENT`
-- `JOBFLOW_NODE_PATH`
 - `JOBFLOW_PYTHON_PATH`
 
 Source-start option A: start from the repository root
@@ -282,16 +277,16 @@ Those details stay in a separate document instead of being expanded on the GitHu
 
 ### What The Repository Can Do Today
 
-Today the repository contains two practical layers: an evolving local desktop workspace and a legacy job discovery engine that still powers part of the search pipeline.
+Today the repository contains an evolving local desktop workspace plus a Python-native search pipeline that powers company-first discovery and result maintenance.
 
 Current implemented capabilities include:
 
 - Local candidate management for names, contact info, location preferences, notes, and resume paths
 - AI-assisted target-role setup with bilingual role names and descriptions
 - Local AI settings with API key handling, environment-variable support, and model validation
-- Company-first job discovery through the legacy engine based on candidate direction and preferences
+- Company-first job discovery through the Python search pipeline based on candidate direction and preferences
 - A results workspace for reviewing matches and maintaining focus, applied, offer, rejected, or dropped states
-- Local-first persistence through SQLite for candidate data, search settings, review states, and runtime data
+- Local-first persistence with SQLite as the primary store for candidate data, search settings, review states, and runtime data; `desktop_app/runtime/search_runs/` is only a per-candidate transient workspace
 
 ### Core Workflow
 
@@ -305,7 +300,6 @@ Current implemented capabilities include:
 | Path | Description |
 | --- | --- |
 | `desktop_app/` | The main desktop application for candidate workspaces, AI settings, result review, and follow-up workflows |
-| `legacy_jobflow_reference/` | The legacy job discovery engine still used as the current search execution layer |
 | `docs/` | Repository-facing documentation for positioning, architecture, roadmap, and setup guidance |
 | `README_RELEASE.txt` | A short release-package startup note |
 | `START_JOBFLOW_DESKTOP.cmd` | A Windows entry point to start the desktop app quickly |
@@ -319,13 +313,13 @@ Things the project should not overclaim today:
 - It is not a broad, mass-market job recommendation product
 - It is not an automatic application system
 - It is not yet a fully polished commercial desktop product
-- It is not yet a fully independent architecture divorced from the legacy engine
+- It is not yet the final long-term architecture for every platform and operating mode
 
 ### Public Repository Boundary
 
 The public repository keeps only source code, documentation, demo seeds, and safe example templates. Personal resumes, company pools, search outputs, SQLite data, and runtime backups must remain local.
 
-This boundary is now enforced through `.gitignore`, `legacy_jobflow_reference/.gitignore`, `scripts/privacy_audit.ps1`, and GitHub Actions so future collaborators follow the same rules by default.
+This boundary is now enforced through `.gitignore`, `scripts/privacy_audit.ps1`, and GitHub Actions so future collaborators follow the same rules by default.
 
 ### Documentation
 

@@ -16,7 +16,7 @@ Important boundaries:
 - [AI Agent Discovery](https://raw.githubusercontent.com/liuyingxuvka/Job-Hunter/main/docs/AI_AGENT_DISCOVERY.md): search-oriented summary of capabilities, CLI surface, and intended users.
 - [AI Integration Notes](https://raw.githubusercontent.com/liuyingxuvka/Job-Hunter/main/docs/AI_INTEGRATION.md): current integration surface, JSON conventions, planned MCP direction, and privacy rules.
 - [Repository Boundary](https://raw.githubusercontent.com/liuyingxuvka/Job-Hunter/main/docs/REPOSITORY_BOUNDARY.md): what can be published and what must stay local.
-- [Architecture Overview](https://raw.githubusercontent.com/liuyingxuvka/Job-Hunter/main/docs/ARCHITECTURE.md): system structure and the relationship between the desktop app and the legacy engine.
+- [Architecture Overview](https://raw.githubusercontent.com/liuyingxuvka/Job-Hunter/main/docs/ARCHITECTURE.md): system structure and the relationship between the desktop app and the Python-native search stack.
 
 ## Capability Surface
 

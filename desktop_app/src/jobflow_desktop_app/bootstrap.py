@@ -9,8 +9,8 @@ from .db.repositories.overview import OverviewRepository
 from .db.repositories.profiles import SearchProfileRepository
 from .db.repositories.settings import AppSettingsRepository
 from .paths import AppPaths, build_app_paths
-from .services.app_context import AppContext
-from .services.demo_seed import ensure_demo_candidate_seeded
+from .app.context import AppContext
+from .db.seeds.demo_candidate import ensure_demo_candidate_seeded
 
 
 def ensure_runtime_directories(paths: AppPaths) -> None:
@@ -19,7 +19,7 @@ def ensure_runtime_directories(paths: AppPaths) -> None:
     paths.exports_dir.mkdir(parents=True, exist_ok=True)
     paths.logs_dir.mkdir(parents=True, exist_ok=True)
     (paths.runtime_dir / "backups").mkdir(parents=True, exist_ok=True)
-    (paths.runtime_dir / "legacy_runs").mkdir(parents=True, exist_ok=True)
+    (paths.runtime_dir / "search_runs").mkdir(parents=True, exist_ok=True)
 
 
 def ensure_working_directory(paths: AppPaths) -> None:

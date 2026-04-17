@@ -15,13 +15,13 @@ The repository currently centers on a local, candidate-centric job discovery wor
 - candidate profile management, including identity, contact details, location preferences, notes, and resume paths
 - target-role setup with bilingual role names and descriptions
 - AI settings and model validation for local desktop usage
-- company-first job discovery and search execution through the current legacy engine layer
+- company-first job discovery and search execution through the current Python-native search layer
 - search-result review, follow-up state, and local persistence
 
 - 候选人档案管理，包括身份信息、联系方式、地区偏好、备注和简历路径
 - 目标岗位设立，支持中英文岗位名称与说明
 - 面向本地桌面使用的 AI 设置与模型校验
-- 通过当前旧版引擎层进行公司优先的岗位发现和搜索执行
+- 通过当前 Python 原生搜索层进行公司优先的岗位发现和搜索执行
 - 搜索结果审核、后续状态维护和本地持久化
 
 For an AI assistant, the useful mental model is: this repo is a local workspace that turns candidate input into target-role definitions, search context, discovery output, and ongoing review state.
@@ -103,9 +103,9 @@ cd .\desktop_app
 .\.venv\Scripts\jobflow-agent get-candidate --candidate-id <candidate-id>
 ```
 
-A headless CLI is still the most practical first step for agents. The current implementation should be treated as an early compatibility surface that can grow over time.
+A headless CLI is still the most practical first step for agents. The current implementation should be treated as an early machine-friendly surface that can expand over time.
 
-无头 CLI 仍然是最现实的第一步。当前实现应被视为早期兼容层，后续会继续扩展。
+无头 CLI 仍然是最现实的第一步。当前实现应被视为早期但明确的机器友好入口，后续会继续扩展。
 
 Next useful commands:
 

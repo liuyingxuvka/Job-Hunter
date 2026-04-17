@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -12,11 +12,17 @@ from PySide6.QtWidgets import (
     QStatusBar,
 )
 
-from ..db.repositories.settings import OpenAISettings
-from ..services.app_context import AppContext
-from ..services.model_catalog import fetch_available_models, filter_response_usable_models
+from .context import AppContext
+from ..ai.client import (
+    OpenAIResponsesClient,
+    OpenAIResponsesError,
+    build_text_input_messages,
+    parse_response_json,
+)
+from ..ai.model_catalog import fetch_available_models
 from .theme import apply_theme
-from .ui.pages import CandidateDirectoryPage, CandidateWorkspacePage
+from .pages.candidate_directory import CandidateDirectoryPage
+from .pages.workspace import CandidateWorkspacePage
 
 
 def _t(language: str, zh: str, en: str) -> str:
@@ -37,6 +43,43 @@ def _resolve_app_icon(context: AppContext) -> QIcon | None:
     return None
 
 
+def _validate_structured_model_request(
+    api_key: str,
+    model_id: str,
+    *,
+    api_base_url: str = "",
+    timeout_seconds: int = 8,
+) -> tuple[bool, str]:
+    client = OpenAIResponsesClient(
+        api_key=str(api_key or "").strip(),
+        api_base_url=str(api_base_url or "").strip(),
+        timeout_seconds=max(1, int(timeout_seconds)),
+    )
+    try:
+        response = client.create_json_schema(
+            model=str(model_id or "").strip(),
+            input_payload=build_text_input_messages(
+                "Return only JSON that matches the schema.",
+                "Respond with ok=true.",
+            ),
+            schema_name="jobflow_model_validation",
+            schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                },
+                "required": ["ok"],
+                "additionalProperties": False,
+            },
+        )
+        parsed = parse_response_json(response, "AI model structured validation")
+    except OpenAIResponsesError as exc:
+        return False, str(exc or "").strip()
+    if parsed.get("ok") is True:
+        return True, ""
+    return False, "AI model validation returned an unexpected JSON payload."
+
+
 class _AIValidationWorker(QObject):
     finished = Signal(object)
 
@@ -47,14 +90,12 @@ class _AIValidationWorker(QObject):
     @Slot()
     def run(self) -> None:
         settings_repo = self.context.settings
-        stored_settings = settings_repo.get_openai_settings()
         effective_settings = settings_repo.get_effective_openai_settings()
         api_key = effective_settings.api_key.strip()
         if not api_key:
             self.finished.emit(
                 {
                     "state": "missing",
-                    "stored_settings": stored_settings,
                 }
             )
             return
@@ -70,45 +111,46 @@ class _AIValidationWorker(QObject):
                 {
                     "state": "invalid",
                     "error": str(result.error or "").strip(),
-                    "stored_settings": stored_settings,
                 }
             )
             return
 
-        preferred_models = [
-            effective_settings.model.strip(),
-            *settings_repo.get_openai_model_catalog(),
-            "gpt-5-mini",
-            "gpt-4.1-mini",
-            "gpt-4o-mini",
-            "gpt-4.1-nano",
-            "gpt-5-nano",
-            "gpt-3.5-turbo",
-            "gpt-5",
-        ]
-        usable_models = filter_response_usable_models(
-            api_key=api_key,
-            models=result.models,
-            api_base_url=base_url,
-            timeout_seconds=6,
-            max_probe=8,
-            preferred_models=preferred_models,
-            stop_after=4,
-            probe_fallback=True,
-        )
         current_model = effective_settings.model.strip()
-        current_model_usable = bool(current_model) and any(
-            item.casefold() == current_model.casefold() for item in usable_models
+        if not current_model:
+            self.finished.emit(
+                {
+                    "state": "model_unverified",
+                    "current_model": "",
+                    "error": "No model is currently saved.",
+                }
+            )
+            return
+
+        current_model_in_catalog = any(
+            str(item or "").strip().casefold() == current_model.casefold() for item in result.models
         )
-        selected_model = current_model if current_model_usable else (usable_models[0] if usable_models else "")
+        if not current_model_in_catalog:
+            self.finished.emit(
+                {
+                    "state": "model_unverified",
+                    "current_model": current_model,
+                    "error": f"The saved model {current_model} is not present in the current model catalog.",
+                }
+            )
+            return
+
+        current_model_usable, validation_error = _validate_structured_model_request(
+            api_key=api_key,
+            model_id=current_model,
+            api_base_url=base_url,
+            timeout_seconds=8,
+        )
         self.finished.emit(
             {
-                "state": "ok" if usable_models else "model_unverified",
-                "stored_settings": stored_settings,
+                "state": "ok" if current_model_usable else "model_unverified",
                 "current_model": current_model,
                 "current_model_usable": current_model_usable,
-                "selected_model": selected_model,
-                "usable_models": usable_models,
+                "error": str(validation_error or "").strip(),
             }
         )
 
@@ -118,10 +160,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.context = context
         self.ui_language = self.context.settings.get_ui_language()
-        self.current_candidate_id: int | None = None
         self._ai_status_level = "idle"
         self._ai_status_model_name = ""
-        self._ai_previous_model = ""
         self._ai_status_error = ""
         self._ai_validation_thread: QThread | None = None
         self._ai_validation_worker: _AIValidationWorker | None = None
@@ -138,6 +178,20 @@ class MainWindow(QMainWindow):
         self.refresh()
         QTimer.singleShot(0, self._warmup_model_catalog)
 
+    @property
+    def current_candidate_id(self) -> int | None:
+        page = getattr(self, "candidate_directory_page", None)
+        if not isinstance(page, CandidateDirectoryPage):
+            return None
+        return page.selected_candidate_id()
+
+    @current_candidate_id.setter
+    def current_candidate_id(self, candidate_id: int | None) -> None:
+        page = getattr(self, "candidate_directory_page", None)
+        if not isinstance(page, CandidateDirectoryPage):
+            return
+        page.set_selected_candidate_id(candidate_id, emit_selection=False)
+
     def _shutdown_ai_validation(self, wait_ms: int = 2000) -> None:
         thread = self._ai_validation_thread
         if isinstance(thread, QThread) and thread.isRunning():
@@ -147,7 +201,11 @@ class MainWindow(QMainWindow):
         try:
             if isinstance(getattr(self, "workspace_page", None), CandidateWorkspacePage):
                 self.workspace_page.shutdown_background_work(wait_ms=8000)
-            self._shutdown_ai_validation(wait_ms=2000)
+            # Validation can spend up to ~16 seconds across model list fetch and
+            # a structured JSON smoke request, so give shutdown enough headroom
+            # to avoid tearing
+            # down Qt while the worker thread is still alive.
+            self._shutdown_ai_validation(wait_ms=20000)
         finally:
             super().closeEvent(event)
 
@@ -173,12 +231,18 @@ class MainWindow(QMainWindow):
         self._apply_ai_status()
 
     def refresh(self) -> None:
-        self.candidate_directory_page.reload(select_candidate_id=self.current_candidate_id)
-
-        if self.current_candidate_id is not None and self.context.candidates.get(self.current_candidate_id) is None:
-            self.current_candidate_id = None
-
-        self.workspace_page.set_candidate(self.current_candidate_id)
+        candidate_id = self.current_candidate_id
+        if candidate_id is not None and self.context.candidates.get(candidate_id) is None:
+            candidate_id = None
+        self.candidate_directory_page.reload(select_candidate_id=candidate_id, emit_selection=False)
+        if candidate_id is None and self.candidate_directory_page.records:
+            candidate_id = self.candidate_directory_page.records[0].candidate_id
+            self.candidate_directory_page.set_selected_candidate_id(
+                candidate_id,
+                emit_selection=False,
+            )
+        self.current_candidate_id = candidate_id
+        self.workspace_page.set_candidate(candidate_id)
         self._update_status_bar()
 
     def _set_current_candidate(self, candidate_id: int | None) -> None:
@@ -188,15 +252,8 @@ class MainWindow(QMainWindow):
         if self.stack.currentWidget() is self.workspace_page:
             self._start_ai_health_check()
 
-    def _open_workspace(self) -> None:
-        candidate_id = self.current_candidate_id
-        if candidate_id is None:
-            candidate_id = self.candidate_directory_page.current_candidate_id
-        if candidate_id is None:
-            current_item = self.candidate_directory_page.candidate_list.currentItem()
-            if current_item is not None:
-                raw_candidate_id = current_item.data(Qt.UserRole)
-                candidate_id = int(raw_candidate_id) if raw_candidate_id is not None else None
+    def _open_workspace(self, candidate_id: int | None = None) -> None:
+        candidate_id = candidate_id if candidate_id is not None else self.current_candidate_id
         if candidate_id is None:
             self.stack.setCurrentWidget(self.candidate_directory_page)
             return
@@ -244,15 +301,14 @@ class MainWindow(QMainWindow):
     def _build_ai_status_texts(self) -> tuple[str, str]:
         level = self._ai_status_level
         model_name = str(self._ai_status_model_name or "").strip()
-        previous_model = str(self._ai_previous_model or "").strip()
         error = str(self._ai_status_error or "").strip()
         if level == "checking":
             return (
                 _t(self.ui_language, "正在验证", "Checking"),
                 _t(
                     self.ui_language,
-                    "正在后台验证 AI Key 和当前模型可用性。你可以继续操作，验证完成后会自动更新状态。",
-                    "Validating the AI key and current model in the background. You can keep working while the status updates automatically.",
+                    "正在后台验证 AI Key 和当前保存模型的可用性。你可以继续操作，验证完成后会自动更新状态。",
+                    "Validating the AI key and the currently saved model in the background. You can keep working while the status updates automatically.",
                 ),
             )
         if level == "missing":
@@ -260,8 +316,8 @@ class MainWindow(QMainWindow):
                 _t(self.ui_language, "未配置", "Not configured"),
                 _t(
                     self.ui_language,
-                    "尚未检测到可用的 AI Key。请在右上角“AI 设置”中检查环境变量或直接填写 Key。",
-                    "No usable AI key was detected yet. Check the environment variable or enter the key in 'AI Settings'.",
+                    "尚未检测到可用的 AI Key。请在右上角“设置 / Settings”中检查环境变量或直接填写 Key。",
+                    "No usable AI key was detected yet. Check the environment variable or enter the key in 'Settings / 设置'.",
                 ),
             )
         if level == "invalid":
@@ -269,8 +325,8 @@ class MainWindow(QMainWindow):
                 _t(self.ui_language, "校验失败", "Validation failed"),
                 _t(
                     self.ui_language,
-                    f"AI Key 校验失败。请打开右上角“AI 设置”检查 Key、环境变量或接口地址。{('错误：' + error) if error else ''}",
-                    f"AI key validation failed. Open 'AI Settings' in the top-right to check the key, environment variable, or API base URL.{(' Error: ' + error) if error else ''}",
+                    f"AI Key 校验失败。请打开右上角“设置 / Settings”检查 Key、环境变量或接口地址。{('错误：' + error) if error else ''}",
+                    f"AI key validation failed. Open 'Settings / 设置' in the top-right to check the key, environment variable, or API base URL.{(' Error: ' + error) if error else ''}",
                 ),
             )
         if level == "model_unverified":
@@ -278,21 +334,16 @@ class MainWindow(QMainWindow):
                 _t(self.ui_language, "模型待确认", "Model needs re-check"),
                 _t(
                     self.ui_language,
-                    "AI Key 已读取到，但当前保存模型未通过快速验证。建议打开“AI 设置”重新检测模型。",
-                    "The AI key was found, but the saved model did not pass quick validation. Open 'AI Settings' and detect models again.",
-                ),
-            )
-        if level == "switched":
-            return (
-                _t(
-                    self.ui_language,
-                    f"已切换到 {model_name}" if model_name else "已自动切换模型",
-                    f"Switched to {model_name}" if model_name else "Model switched",
-                ),
-                _t(
-                    self.ui_language,
-                    f"AI 已验证可用，但原模型 {previous_model or '未设置'} 当前不可用，已自动切换为 {model_name}。",
-                    f"AI is verified and ready, but the previous model {previous_model or 'not set'} is not usable now, so it was switched to {model_name}.",
+                    (
+                        f"AI Key 已读取到，但当前保存模型 {model_name or '未设置'} 未通过验证。"
+                        "请打开“设置 / Settings”重新加载模型列表并重新选择。"
+                        f"{(' 详细信息：' + error) if error else ''}"
+                    ),
+                    (
+                        f"The AI key was found, but the saved model {model_name or 'not set'} did not pass validation. "
+                        "Open 'Settings / 设置' to reload the model list and choose again."
+                        f"{(' Details: ' + error) if error else ''}"
+                    ),
                 ),
             )
         if level == "ready":
@@ -327,12 +378,10 @@ class MainWindow(QMainWindow):
         level: str,
         *,
         model_name: str = "",
-        previous_model: str = "",
         error: str = "",
     ) -> None:
         self._ai_status_level = str(level or "idle").strip() or "idle"
         self._ai_status_model_name = str(model_name or "").strip()
-        self._ai_previous_model = str(previous_model or "").strip()
         self._ai_status_error = str(error or "").strip()
         self._apply_ai_status()
 
@@ -390,62 +439,27 @@ class MainWindow(QMainWindow):
             self._set_ai_status("invalid", error=str(data.get("error") or ""))
             return
         if state == "model_unverified":
-            self._set_ai_status("model_unverified")
+            self._set_ai_status(
+                "model_unverified",
+                model_name=str(data.get("current_model") or "").strip(),
+                error=str(data.get("error") or "").strip(),
+            )
             return
         if state != "ok":
             self._set_ai_status("invalid")
             return
 
-        stored_settings = data.get("stored_settings")
         current_model = str(data.get("current_model") or "").strip()
         current_model_usable = bool(data.get("current_model_usable"))
-        selected_model = str(data.get("selected_model") or "").strip()
-        usable_models = data.get("usable_models") if isinstance(data.get("usable_models"), list) else []
-
-        if usable_models:
-            merged_catalog = self.context.settings.get_openai_model_catalog()
-            seen = {item.casefold() for item in merged_catalog}
-            for item in usable_models:
-                text = str(item or "").strip()
-                if not text or text.casefold() in seen:
-                    continue
-                seen.add(text.casefold())
-                merged_catalog.append(text)
-            self.context.settings.save_openai_model_catalog(merged_catalog)
-
-        if (
-            selected_model
-            and not current_model_usable
-            and isinstance(stored_settings, OpenAISettings)
-        ):
-            self.context.settings.save_openai_settings(
-                OpenAISettings(
-                    api_key=stored_settings.api_key,
-                    model=selected_model,
-                    api_key_source=stored_settings.api_key_source,
-                    api_key_env_var=stored_settings.api_key_env_var,
-                )
-            )
-            self._set_ai_status(
-                "switched",
-                model_name=selected_model,
-                previous_model=current_model,
-            )
-            return
-
         if current_model_usable:
-            self._set_ai_status("ready", model_name=selected_model or current_model)
+            self._set_ai_status("ready", model_name=current_model)
             return
 
-        if selected_model:
-            self._set_ai_status(
-                "switched",
-                model_name=selected_model,
-                previous_model=current_model,
-            )
-            return
-
-        self._set_ai_status("model_unverified")
+        self._set_ai_status(
+            "model_unverified",
+            model_name=current_model,
+            error=str(data.get("error") or "").strip(),
+        )
 
 
 def run_desktop_app(context: AppContext) -> int:

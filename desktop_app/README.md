@@ -14,6 +14,7 @@
 - [`README.md`](../README.md)
 - [`docs/PRODUCT_POSITIONING.md`](../docs/PRODUCT_POSITIONING.md)
 - [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md)
+- [`docs/DESKTOP_APP_MODULE_MAP.md`](../docs/DESKTOP_APP_MODULE_MAP.md)
 - [`docs/ROADMAP.md`](../docs/ROADMAP.md)
 
 ### 当前子项目职责
@@ -26,7 +27,7 @@
 - 目标岗位方向设立
 - AI 设置与模型验证
 - 搜索结果查看与人工维护
-- 旧版岗位发现引擎的桌面化入口
+- `search/` 下的 Python 原生搜索编排与结果维护入口
 
 ### 当前已落地的内容
 
@@ -39,15 +40,17 @@
 - 搜索 Profile 维护
 - AI Settings 对话框，支持直接 Key、环境变量和模型检测
 - 中英双语岗位方向设立与描述维护
-- 旧版搜索引擎桥接运行
+- `search/` 下的 Python 原生搜索执行链路
 - 搜索结果查看与状态维护
+
+当前代码里，搜索编排的规范入口已经迁到 `src/jobflow_desktop_app/search/orchestration/`，并进一步拆成了桌面 runner、search session 编排、运行时配置组装、公司发现 query 规划、候选人搜索信号推导、session runtime helper 和 resume gate 几个子模块；进度/状态簿记的规范入口在 `src/jobflow_desktop_app/search/state/`。源码主线现在直接依赖真实模块路径，不再通过中间转发层。
 
 ### 当前边界
 
 以下内容暂时不要把它理解成已经完成：
 
 - 完整的商业化桌面产品
-- 完全独立于旧版引擎的新搜索架构
+- 已完全定型、不会继续收敛的最终长期架构
 - 已经补齐的全套设计、数据库和流程文档
 - 完整的自动化测试体系
 
@@ -74,7 +77,6 @@
 - `PySide6`
 - `pypdf`（用于读取 PDF 简历文本）
 - OpenAI 或兼容接口配置
-- Node.js，或 `runtime/tools/` 下的便携版本
 
 下载好的 Windows 发布包已经内置桌面运行时，不需要额外安装本地 Python。
 
@@ -112,7 +114,7 @@ cd .\desktop_app
 .\run_release.ps1
 ```
 
-这个脚本会自动寻找本地 Python，并在可用时补齐 `PYTHONPATH` 和 Node 路径。
+这个脚本会自动寻找本地 Python，并在可用时补齐 `PYTHONPATH`。
 
 它更适合源码工作树；GitHub Release 里的发布包会直接提供 `Jobflow Desktop.exe`。
 
@@ -121,7 +123,8 @@ cd .\desktop_app
 | Path | 说明 |
 | --- | --- |
 | `src/jobflow_desktop_app/` | 桌面应用源码 |
-| `runtime/` | 本地运行数据、日志、导出和旧版搜索运行结果 |
+| `src/jobflow_desktop_app/search/` | Python 原生搜索模块，包含 orchestration、state、analysis、companies、output、stages |
+| `runtime/` | 本地运行数据、日志、导出和搜索运行结果 |
 | `assets/` | 图标等静态资源 |
 | `run_release.ps1` | Windows 启动脚本 |
 
@@ -136,6 +139,7 @@ If you are new to the repository, start from:
 - [`README.md`](../README.md)
 - [`docs/PRODUCT_POSITIONING.md`](../docs/PRODUCT_POSITIONING.md)
 - [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md)
+- [`docs/DESKTOP_APP_MODULE_MAP.md`](../docs/DESKTOP_APP_MODULE_MAP.md)
 - [`docs/ROADMAP.md`](../docs/ROADMAP.md)
 
 ### Current Responsibility
@@ -148,7 +152,7 @@ The current focus is on:
 - target-role setup
 - AI settings and model validation
 - result review and manual state maintenance
-- a desktop entry point into the legacy discovery engine
+- a desktop entry point into the Python-native search orchestration under `search/`
 
 ### What Is Implemented Today
 
@@ -161,15 +165,17 @@ Based on the current codebase, confirmed capabilities include:
 - search-profile management
 - an AI settings dialog with direct key input, environment-variable support, and model detection
 - bilingual target-role setup and description management
-- legacy search engine bridging
+- a Python-native search execution pipeline under `search/`
 - result review and state maintenance
+
+In the current codebase, the canonical search orchestration entrypoint lives under `src/jobflow_desktop_app/search/orchestration/`, and is now split into focused helper modules for the desktop runner, search-session orchestration, runtime-config assembly, company-discovery query planning, candidate search signals, session runtime helpers, and the resume gate. The canonical progress/state bookkeeping entrypoint lives under `src/jobflow_desktop_app/search/state/`. The active source tree now imports real modules directly instead of relying on forwarding shims.
 
 ### Current Boundaries
 
 The following should not be interpreted as fully completed yet:
 
 - a polished commercial desktop product
-- a fully independent search architecture without the legacy engine
+- a fully finalized long-term architecture with no further cleanup work remaining
 - a fully finished set of design, database, and flow documents
 - complete automated test coverage
 
@@ -196,7 +202,6 @@ Development dependencies:
 - `PySide6`
 - `pypdf` (used to extract text from PDF resumes)
 - OpenAI or a compatible API endpoint configuration
-- Node.js, or the portable runtime under `runtime/tools/`
 
 The packaged Windows release already bundles the desktop runtime and does not require a separate local Python installation.
 
@@ -234,7 +239,7 @@ cd .\desktop_app
 .\run_release.ps1
 ```
 
-This script locates a usable Python runtime and fills in `PYTHONPATH` and Node-related paths when available.
+This script locates a usable Python runtime and fills in `PYTHONPATH` when available.
 
 It is intended for the source checkout; the GitHub Release package provides `Jobflow Desktop.exe` directly.
 
@@ -243,6 +248,7 @@ It is intended for the source checkout; the GitHub Release package provides `Job
 | Path | Description |
 | --- | --- |
 | `src/jobflow_desktop_app/` | Desktop application source code |
-| `runtime/` | Local runtime data, logs, exports, and legacy run outputs |
+| `src/jobflow_desktop_app/search/` | Python-native search modules, including orchestration, state, analysis, companies, output, and stages |
+| `runtime/` | Local runtime data, logs, exports, and per-candidate search run outputs |
 | `assets/` | Static assets such as icons |
 | `run_release.ps1` | Windows launch script |

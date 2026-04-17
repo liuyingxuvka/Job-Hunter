@@ -20,13 +20,13 @@ GitHub 首屏最重要的是让访问者在 10 秒内看懂三件事：
 
 1. 这是给谁用的
 2. 它和通用招聘平台有什么不同
-3. 当前主入口是 `desktop_app/`，`legacy_jobflow_reference/` 是旧版参考引擎
+3. 当前主入口是 `desktop_app/`，并且桌面端已经承载 Python 原生搜索主线
 
 The first screen of the repository should let a visitor understand three things within ten seconds:
 
 1. who the product is for
 2. how it differs from generic job platforms
-3. that `desktop_app/` is the main entry point and `legacy_jobflow_reference/` is the older engine layer
+3. that `desktop_app/` is the main entry point and now owns the Python-native search path
 
 ## Topics 建议 / Suggested Topics
 

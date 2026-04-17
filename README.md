@@ -52,12 +52,12 @@ Job Hunter 不是一个面向大众求职场景的职位推荐器。它更适合
 - 所有发布版本：
   [https://github.com/liuyingxuvka/Job-Hunter/releases](https://github.com/liuyingxuvka/Job-Hunter/releases)
 - 应下载的文件：
-  `Job-Hunter-<version>-win64.zip`
+  `Job-Hunter-[version]-win64.zip`
 
 推荐步骤：
 
 1. 打开上面的 `latest release` 链接。
-2. 下载 `Job-Hunter-<version>-win64.zip`。
+2. 下载 `Job-Hunter-[version]-win64.zip`。
 3. 解压到一个普通文件夹，不要直接在 zip 压缩包里运行。
 4. 双击 `Jobflow Desktop.exe`。
 5. 如果 Windows 对直接启动 `.exe` 比较严格，再改用 `START_JOBFLOW_DESKTOP.cmd`。
@@ -225,12 +225,12 @@ If you are not a developer and just want to use the app, do not start from the s
 - All releases:
   [https://github.com/liuyingxuvka/Job-Hunter/releases](https://github.com/liuyingxuvka/Job-Hunter/releases)
 - File to download:
-  `Job-Hunter-<version>-win64.zip`
+  `Job-Hunter-[version]-win64.zip`
 
 Recommended steps:
 
 1. Open the `latest release` link above.
-2. Download `Job-Hunter-<version>-win64.zip`.
+2. Download `Job-Hunter-[version]-win64.zip`.
 3. Extract it to a normal folder instead of running it inside the zip archive.
 4. Double-click `Jobflow Desktop.exe`.
 5. If Windows is cautious about launching the `.exe` directly, use `START_JOBFLOW_DESKTOP.cmd` instead.

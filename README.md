@@ -6,6 +6,14 @@
 > 本 README 先给中文，再给英文。普通用户请直接看 Windows 下载部分；开发者和协作者再看源码说明。  
 > This README starts with Chinese and ends with English. End users should go straight to the Windows download section; developers and collaborators can use the source instructions.
 
+## Shared Preview / 共享预览
+
+| Candidate Entry / 候选人入口 | Search Workspace / 搜索工作台 |
+| --- | --- |
+| ![Job Hunter candidate entry](docs/images/readme-screenshot-directory.png) | ![Job Hunter search workspace](docs/images/readme-screenshot-search-results.png) |
+
+![Job Hunter workflow](docs/images/readme-workflow.svg)
+
 ## 中文说明
 
 ### 项目定位

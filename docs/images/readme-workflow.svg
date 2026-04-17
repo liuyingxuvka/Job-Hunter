@@ -1,0 +1,42 @@
+<svg width="1400" height="230" viewBox="0 0 1400 230" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Job Hunter workflow</title>
+  <desc id="desc">A simple four-step workflow showing how Job Hunter moves from candidate profile to company-first discovery and result tracking.</desc>
+
+  <rect x="16" y="16" width="1368" height="198" rx="28" fill="#F4F8FC" stroke="#D4E1EB" stroke-width="2"/>
+
+  <text x="44" y="58" fill="#123456" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="700">Company-first search flow</text>
+  <text x="44" y="88" fill="#486581" font-family="Segoe UI, Arial, sans-serif" font-size="16">Find the right companies before chasing the right roles.</text>
+
+  <rect x="44" y="120" width="280" height="64" rx="18" fill="#FFFFFF" stroke="#D4E1EB" stroke-width="2"/>
+  <circle cx="82" cy="152" r="18" fill="#123456"/>
+  <text x="76" y="158" fill="#FFFFFF" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="700">1</text>
+  <text x="112" y="145" fill="#123456" font-family="Segoe UI, Arial, sans-serif" font-size="20" font-weight="700">Candidate Profile</text>
+  <text x="112" y="167" fill="#486581" font-family="Segoe UI, Arial, sans-serif" font-size="14">Resume, location, and experience</text>
+
+  <path d="M340 152H390" stroke="#9FB3C8" stroke-width="4" stroke-linecap="round"/>
+  <path d="M380 142L396 152L380 162" stroke="#9FB3C8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <rect x="406" y="120" width="280" height="64" rx="18" fill="#FFFFFF" stroke="#D4E1EB" stroke-width="2"/>
+  <circle cx="444" cy="152" r="18" fill="#1F6F8B"/>
+  <text x="438" y="158" fill="#FFFFFF" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="700">2</text>
+  <text x="474" y="145" fill="#123456" font-family="Segoe UI, Arial, sans-serif" font-size="20" font-weight="700">Target Roles</text>
+  <text x="474" y="167" fill="#486581" font-family="Segoe UI, Arial, sans-serif" font-size="14">Define specific search intent</text>
+
+  <path d="M702 152H752" stroke="#9FB3C8" stroke-width="4" stroke-linecap="round"/>
+  <path d="M742 142L758 152L742 162" stroke="#9FB3C8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <rect x="768" y="120" width="280" height="64" rx="18" fill="#FFFFFF" stroke="#D4E1EB" stroke-width="2"/>
+  <circle cx="806" cy="152" r="18" fill="#147D64"/>
+  <text x="800" y="158" fill="#FFFFFF" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="700">3</text>
+  <text x="836" y="145" fill="#123456" font-family="Segoe UI, Arial, sans-serif" font-size="20" font-weight="700">Find Companies First</text>
+  <text x="836" y="167" fill="#486581" font-family="Segoe UI, Arial, sans-serif" font-size="14">Discover employers before roles</text>
+
+  <path d="M1064 152H1114" stroke="#9FB3C8" stroke-width="4" stroke-linecap="round"/>
+  <path d="M1104 142L1120 152L1104 162" stroke="#9FB3C8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <rect x="1130" y="120" width="224" height="64" rx="18" fill="#FFFFFF" stroke="#D4E1EB" stroke-width="2"/>
+  <circle cx="1168" cy="152" r="18" fill="#B86E00"/>
+  <text x="1162" y="158" fill="#FFFFFF" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="700">4</text>
+  <text x="1198" y="145" fill="#123456" font-family="Segoe UI, Arial, sans-serif" font-size="20" font-weight="700">Review Jobs</text>
+  <text x="1198" y="167" fill="#486581" font-family="Segoe UI, Arial, sans-serif" font-size="14">Track, filter, and follow up</text>
+</svg>

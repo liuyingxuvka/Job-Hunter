@@ -11,6 +11,8 @@ from .db.repositories.settings import AppSettingsRepository
 from .paths import AppPaths, build_app_paths
 from .app.context import AppContext
 from .db.seeds.demo_candidate import ensure_demo_candidate_seeded
+from .search.state.runtime_db_mirror import SearchRuntimeMirror
+from .search.state.runtime_recovery import recover_interrupted_search_runs
 
 
 def ensure_runtime_directories(paths: AppPaths) -> None:
@@ -24,6 +26,11 @@ def ensure_runtime_directories(paths: AppPaths) -> None:
 
 def ensure_working_directory(paths: AppPaths) -> None:
     os.chdir(paths.project_root)
+
+
+def recover_interrupted_runtime_state(context: AppContext) -> list[int]:
+    runtime_mirror = SearchRuntimeMirror(context.database)
+    return recover_interrupted_search_runs(runtime_mirror)
 
 
 def bootstrap_application() -> AppContext:
@@ -40,5 +47,6 @@ def bootstrap_application() -> AppContext:
         settings=AppSettingsRepository(database),
         overview=OverviewRepository(database),
     )
+    recover_interrupted_runtime_state(context)
     ensure_demo_candidate_seeded(context)
     return context

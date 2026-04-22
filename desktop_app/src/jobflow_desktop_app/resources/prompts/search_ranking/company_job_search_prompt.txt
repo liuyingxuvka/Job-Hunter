@@ -1,0 +1,29 @@
+Company: {company_name}
+Official website: {company_website}
+Known jobs entry page: {jobs_page_url}
+Known jobs page type: {page_type}
+
+Task:
+- Use web search to find as many concrete public job detail pages for this same company as you can identify confidently, up to {max_jobs}.
+- Focus on concrete employee requisition/detail pages, ATS detail pages, or PDF job specifications tied to a specific role.
+- Treat this as a company-level job enumeration task, not a candidate-matching task.
+- Prefer official company domains, official hosted ATS boards, and concrete public platform detail pages for this same company.
+- Use the company name, known jobs entry page, and sample detail URLs as hints for the company's real job-detail URL pattern or hosted board.
+- If the official careers page is only a brand page or gateway, follow through via web search to the real public jobs board or concrete public job detail pages.
+- These job URLs are already known; do not return them again:
+{known_job_urls_json}
+- Do not invent URLs, IDs, or hostnames.
+- Exclude generic careers homepages, list/filter/search pages, saved-jobs pages, team/category pages, departments, locations, blog/news pages, privacy/contact pages, partner sign-up pages, freelancer registration pages, talent communities, and general application forms.
+- Professional job platforms are acceptable only when the page is a concrete public job detail page for this same company.
+- Normalize posting dates to YYYY-MM-DD only when you are confident.
+- Put any active/closed/easy-apply hint into availabilityHint using a very short phrase; otherwise use an empty string.
+- Keep summary extremely short and factual, ideally under 12 words.
+
+Search query:
+{query}
+
+Sample official job detail URLs:
+{sample_job_urls_json}
+
+Output:
+- Return only JSON matching the schema.

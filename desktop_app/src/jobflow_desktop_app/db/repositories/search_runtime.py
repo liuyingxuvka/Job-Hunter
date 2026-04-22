@@ -170,16 +170,12 @@ class SearchRunRepository:
         search_run_id: int,
         *,
         config_json: str | None = None,
-        resume_config_json: str | None = None,
     ) -> None:
         fields: list[str] = []
         params: list[object] = []
         if config_json is not None:
             fields.append("config_json = ?")
             params.append(config_json)
-        if resume_config_json is not None:
-            fields.append("resume_config_json = ?")
-            params.append(resume_config_json)
         if not fields:
             return
         fields.append("updated_at = CURRENT_TIMESTAMP")
@@ -357,16 +353,58 @@ class SearchRunRepository:
             for row in rows
         ]
 
+    def running_runs(self, *, candidate_id: int | None = None) -> list[SearchRunSnapshot]:
+        query = """
+            SELECT
+              id,
+              candidate_id,
+              run_dir,
+              status,
+              current_stage,
+              last_message,
+              last_event,
+              started_at,
+              updated_at,
+              jobs_found_count,
+              jobs_scored_count,
+              jobs_recommended_count
+            FROM search_runs
+            WHERE status = 'running'
+        """
+        params: tuple[object, ...]
+        if candidate_id is None:
+            params = ()
+        else:
+            query += " AND candidate_id = ?"
+            params = (int(candidate_id),)
+        query += " ORDER BY id DESC"
+        with self.database.session() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [
+            SearchRunSnapshot(
+                search_run_id=int(row["id"]),
+                candidate_id=int(row["candidate_id"]),
+                run_dir=_text(row["run_dir"]),
+                status=_text(row["status"]),
+                current_stage=_text(row["current_stage"]),
+                last_message=_text(row["last_message"]),
+                last_event=_text(row["last_event"]),
+                started_at=_text(row["started_at"]),
+                updated_at=_text(row["updated_at"]),
+                jobs_found_count=int(row["jobs_found_count"] or 0),
+                jobs_scored_count=int(row["jobs_scored_count"] or 0),
+                jobs_recommended_count=int(row["jobs_recommended_count"] or 0),
+            )
+            for row in rows
+        ]
+
     def load_config_payload(
         self,
         search_run_id: int,
-        *,
-        resume: bool = False,
     ) -> dict[str, Any]:
-        column = "resume_config_json" if resume else "config_json"
         with self.database.session() as connection:
             row = connection.execute(
-                f"SELECT {column} AS payload_json FROM search_runs WHERE id = ?",
+                "SELECT config_json AS payload_json FROM search_runs WHERE id = ?",
                 (int(search_run_id),),
             ).fetchone()
         if row is None:
@@ -1087,12 +1125,10 @@ class SearchRunJobRepository:
                   date_found,
                   match_score,
                   analysis_completed,
-                  recommended,
-                  pending_resume,
                   job_json,
                   updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """,
                 [
                     (
@@ -1109,8 +1145,6 @@ class SearchRunJobRepository:
                         _text(row.get("date_found")),
                         row.get("match_score"),
                         1 if bool(row.get("analysis_completed")) else 0,
-                        1 if bool(row.get("recommended")) else 0,
-                        1 if bool(row.get("pending_resume")) else 0,
                         _text(row.get("job_json")),
                     )
                     for row in rows

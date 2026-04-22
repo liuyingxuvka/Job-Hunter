@@ -1,16 +1,27 @@
 from __future__ import annotations
 
 import json
-import random
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Callable
 from urllib.parse import urlparse
 
 from ..analysis.service import ResponseRequestClient
-from ...ai.client import build_json_schema_request, build_text_input_messages, parse_response_json
+from ...ai.client import (
+    OpenAIResponsesError,
+    build_json_schema_request,
+    build_text_input_messages,
+    parse_response_json,
+)
+from ...prompt_assets import load_prompt_asset
 
 DISCOVERY_COMPANIES_PER_QUERY_CAP = 12
+DIRECT_COMPANY_DISCOVERY_DEFAULT_COUNT = 5
+DIRECT_COMPANY_DISCOVERY_PROMPT = load_prompt_asset(
+    "search_discovery",
+    "company_direct_discovery_prompt.txt",
+)
+DIRECT_COMPANY_DISCOVERY_RETRY_LIMIT = 1
 
 _COMPANY_DISCOVERY_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -24,10 +35,11 @@ _COMPANY_DISCOVERY_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "name": {"type": "string"},
                     "website": {"type": "string"},
+                    "businessSummary": {"type": "string"},
                     "tags": {"type": "array", "items": {"type": "string"}},
                     "region": {"type": "string"},
                 },
-                "required": ["name", "website", "tags", "region"],
+                "required": ["name", "website", "businessSummary", "tags", "region"],
             },
         }
     },
@@ -113,29 +125,8 @@ def merge_source_evidence(existing: object, incoming: object) -> dict[str, Any]:
 
 
 def derive_discovery_tags_from_text(text: object) -> list[str]:
-    input_text = str(text or "").casefold()
-    if not input_text:
-        return []
-    rules: list[tuple[str, tuple[str, ...]]] = [
-        ("hydrogen", ("hydrogen", "h2", "氢")),
-        ("fuel_cell", ("fuel cell", "fuel-cell", "燃料电池")),
-        ("electrolyzer", ("electrolyzer", "electrolyser", "electrolysis", "电解槽", "制氢")),
-        ("battery", ("battery", "bms", "储能", "电池")),
-        ("digital_twin", ("digital twin", "digital-twin", "数字孪生")),
-        ("phm", ("phm", "prognostics", "health management", "健康管理")),
-        ("condition_monitoring", ("condition monitoring", "asset health", "状态监测")),
-        ("mbse", ("mbse", "sysml", "systems engineering", "系统工程")),
-        ("validation", ("validation", "verification", "v&v", "验证", "确认")),
-        ("reliability", ("reliability", "durability", "aging", "可靠性", "耐久", "老化")),
-        ("industrial_automation", ("automation", "controls", "plc", "scada", "工业自动化", "控制")),
-        ("automotive", ("automotive", "vehicle", "powertrain", "drivetrain", "ev", "汽车", "动力总成")),
-        ("testing", ("test", "testing", "diagnostic", "诊断", "测试")),
-    ]
-    tags: list[str] = []
-    for tag, keywords in rules:
-        if any(keyword in input_text for keyword in keywords):
-            tags.append(tag)
-    return tags
+    del text
+    return []
 
 
 def build_company_identity_keys(company: Mapping[str, Any]) -> list[str]:
@@ -166,6 +157,7 @@ def normalize_company_candidate(raw: object) -> dict[str, Any]:
     item["name"] = str(item.get("name") or "").strip()
     item["website"] = normalize_url(item.get("website"))
     item["careersUrl"] = normalize_url(item.get("careersUrl"))
+    item["businessSummary"] = str(item.get("businessSummary") or "").strip()
     item["tags"] = merge_unique_strings(
         item.get("tags") if isinstance(item.get("tags"), list) else [],
         derive_discovery_tags_from_text(
@@ -175,6 +167,7 @@ def normalize_company_candidate(raw: object) -> dict[str, Any]:
                     item.get("name"),
                     item.get("website"),
                     item.get("careersUrl"),
+                    item.get("businessSummary"),
                     " ".join(item.get("tags") or []) if isinstance(item.get("tags"), list) else "",
                 )
                 if str(part or "").strip()
@@ -231,6 +224,7 @@ def merge_company_candidates(existing: object, incoming: object) -> dict[str, An
     out["name"] = choose_text(left.get("name"), right.get("name"))
     out["website"] = choose_text(left.get("website"), right.get("website"))
     out["careersUrl"] = choose_text(left.get("careersUrl"), right.get("careersUrl"))
+    out["businessSummary"] = choose_text(left.get("businessSummary"), right.get("businessSummary"))
     out["source"] = choose_text(left.get("source"), right.get("source"))
     out["tags"] = merge_unique_strings(left.get("tags"), right.get("tags"))
     out["discoverySources"] = merge_unique_strings(
@@ -315,78 +309,179 @@ def decay_company_repeat_counts(companies: list[dict[str, Any]]) -> bool:
     return changed
 
 
-def normalize_company_discovery_query_stats(raw: object) -> dict[str, int]:
-    source = dict(raw) if isinstance(raw, Mapping) else {}
-    normalized: dict[str, int] = {}
-    for raw_key, raw_value in source.items():
-        key = str(raw_key or "").strip()
-        if not key:
-            continue
-        if isinstance(raw_value, Mapping):
-            value = raw_value.get("noNewCompanyCount")
-        else:
-            value = raw_value
-        count = max(0, int(_coerce_number(value) or 0))
-        if count > 0:
-            normalized[key] = count
-    return normalized
-
-
-def get_discovery_query_bad_score(query_stats: Mapping[str, int], query: object) -> int:
-    key = str(query or "").strip()
-    if not key:
-        return 0
-    return max(0, int(_coerce_number(query_stats.get(key)) or 0))
-
-
-def set_discovery_query_bad_score(query_stats: dict[str, int], query: object, value: object) -> bool:
-    key = str(query or "").strip()
-    if not key:
-        return False
-    next_value = max(0, int(_coerce_number(value) or 0))
-    current = get_discovery_query_bad_score(query_stats, key)
-    if next_value <= 0:
-        query_stats.pop(key, None)
-    else:
-        query_stats[key] = next_value
-    return current != next_value
-
-
-def sample_weighted_discovery_queries(
-    raw_queries: object,
-    query_stats: Mapping[str, int],
-    limit: int,
-    *,
-    rng: random.Random | None = None,
-    used_queries: set[str] | None = None,
-) -> list[str]:
-    deduped: list[str] = []
+def _normalize_string_list(raw: object) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    values: list[str] = []
     seen: set[str] = set()
-    for raw_query in raw_queries if isinstance(raw_queries, list) else []:
-        query = str(raw_query or "").strip()
-        if not query:
+    for item in raw:
+        text = str(item or "").strip()
+        if not text:
             continue
-        key = query.casefold()
+        key = text.casefold()
         if key in seen:
             continue
         seen.add(key)
-        deduped.append(query)
-    if not deduped:
-        return []
-    pool = [query for query in deduped if not (used_queries and query in used_queries)]
-    if not pool:
-        pool = list(deduped)
-    target = max(0, min(len(pool), int(limit)))
-    generator = rng or random.Random()
-    selected: list[str] = []
-    while pool and len(selected) < target:
-        weights = [1.0 / (1.0 + get_discovery_query_bad_score(query_stats, query)) for query in pool]
-        picked = generator.choices(pool, weights=weights, k=1)[0]
-        pool.remove(picked)
-        selected.append(picked)
-        if used_queries is not None:
-            used_queries.add(picked)
-    return selected
+        values.append(text)
+    return values
+
+
+def _truncate_text(value: object, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def build_company_discovery_existing_company_names(
+    companies: object,
+    *,
+    limit: int = 24,
+) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for raw_company in companies if isinstance(companies, list) else []:
+        if not isinstance(raw_company, Mapping):
+            continue
+        name = str(raw_company.get("name") or "").strip()
+        if not name:
+            continue
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(name)
+        if len(output) >= max(1, int(limit)):
+            break
+    return output
+
+
+def _normalize_company_discovery_input(raw_input: Mapping[str, Any] | None) -> dict[str, Any]:
+    payload = dict(raw_input) if isinstance(raw_input, Mapping) else {}
+    return {
+        "summary": _truncate_text(payload.get("summary"), 240),
+        "targetRoles": _normalize_string_list(payload.get("targetRoles"))[:6],
+        "desiredWorkDirections": _normalize_string_list(payload.get("desiredWorkDirections"))[:18],
+        "avoidBusinessAreas": _normalize_string_list(payload.get("avoidBusinessAreas"))[:10],
+        "locationPreference": _truncate_text(payload.get("locationPreference"), 160),
+    }
+
+
+def _company_discovery_input(config: Mapping[str, Any]) -> dict[str, Any]:
+    company_discovery = (
+        dict(config.get("companyDiscovery"))
+        if isinstance(config.get("companyDiscovery"), Mapping)
+        else {}
+    )
+    raw_input = company_discovery.get("companyDiscoveryInput")
+    return _normalize_company_discovery_input(
+        raw_input if isinstance(raw_input, Mapping) else {}
+    )
+
+
+def _build_direct_company_discovery_user_text(
+    *,
+    candidate_context: Mapping[str, Any],
+    company_count: int,
+    existing_companies: list[str] | None = None,
+) -> str:
+    payload: dict[str, Any] = {
+        "candidateContext": dict(candidate_context),
+        "desiredCompanyCount": max(1, int(company_count)),
+    }
+    normalized_existing_companies = _normalize_string_list(existing_companies)[:24]
+    if normalized_existing_companies:
+        payload["existingCompanies"] = normalized_existing_companies
+    return (
+        "Candidate discovery input:\n"
+        + json.dumps(payload, ensure_ascii=False, indent=2)
+        + f"\n\nReturn up to {max(1, int(company_count))} companies."
+        + "\nDo not repeat any company listed in existingCompanies."
+        + "\nIf existingCompanies is present, broaden to different employers outside that set."
+        + "\nOutput only JSON matching the schema."
+    )
+
+
+def _is_timeout_error(exc: Exception) -> bool:
+    message = str(exc or "").strip().casefold()
+    return isinstance(exc, OpenAIResponsesError) and "timed out" in message
+
+
+def discover_companies_for_candidate(
+    client: ResponseRequestClient,
+    *,
+    model: str,
+    candidate_context: Mapping[str, Any] | None,
+    company_count: int,
+    existing_companies: list[str] | None = None,
+    retry_limit: int = DIRECT_COMPANY_DISCOVERY_RETRY_LIMIT,
+    progress_callback: Callable[[str], None] | None = None,
+) -> list[dict[str, Any]]:
+    normalized_context = _normalize_company_discovery_input(candidate_context)
+    normalized_existing_companies = _normalize_string_list(existing_companies)[:24]
+    request = build_json_schema_request(
+        model=model,
+        input_payload=build_text_input_messages(
+            DIRECT_COMPANY_DISCOVERY_PROMPT,
+            _build_direct_company_discovery_user_text(
+                candidate_context=normalized_context,
+                company_count=company_count,
+                existing_companies=normalized_existing_companies,
+            ),
+        ),
+        schema_name="direct_company_list",
+        schema=_COMPANY_DISCOVERY_SCHEMA,
+        use_web_search=True,
+    )
+    last_exc: Exception | None = None
+    max_attempts = max(1, int(retry_limit) + 1)
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = client.create(request)
+            data = parse_response_json(response, "Direct company discovery")
+            companies = data.get("companies", [])
+            if not isinstance(companies, list):
+                return []
+            discovered_at = now_iso()
+            discovered: list[dict[str, Any]] = []
+            for raw_company in companies:
+                if not isinstance(raw_company, Mapping):
+                    continue
+                region = str(raw_company.get("region") or "").strip()
+                region_tag = f"region:{region.upper()}" if region else ""
+                item = normalize_company_candidate(
+                    {
+                        **dict(raw_company),
+                        "source": "web_search",
+                        "discoverySources": ["web_search"],
+                        "signalCount": int(_coerce_number(raw_company.get("signalCount")) or 1),
+                        "lastSeen": discovered_at,
+                        "sourceEvidence": {
+                            "webSearch": {
+                                "mode": "candidate_direct",
+                                "discoveredAt": discovered_at,
+                            }
+                        },
+                    }
+                )
+                if region_tag:
+                    item["tags"] = merge_unique_strings(item.get("tags"), [region_tag])
+                if item.get("name"):
+                    discovered.append(item)
+            return discovered
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= max_attempts or not _is_timeout_error(exc):
+                raise
+            if progress_callback is not None:
+                progress_callback(
+                    "Python direct company discovery timed out; retrying once."
+                )
+    if last_exc is not None:
+        raise last_exc
+    return []
 
 
 def build_repeated_company_avoid_list(companies: object, limit: int = 60) -> list[str]:
@@ -407,111 +502,11 @@ def build_repeated_company_avoid_list(companies: object, limit: int = 60) -> lis
     return output
 
 
-def discover_companies_from_query(
-    client: ResponseRequestClient,
-    *,
-    model: str,
-    query: str,
-    excluded_companies: list[str] | None = None,
-    adjacent_scope: bool = False,
-) -> list[dict[str, Any]]:
-    excluded_list = [
-        str(item or "").strip()
-        for item in (excluded_companies or [])
-        if str(item or "").strip()
-    ][:60]
-    exclusion_section = ""
-    if excluded_list:
-        exclusion_section = (
-            "Already-covered companies to avoid returning again:\n"
-            + "\n".join(f"- {item}" for item in excluded_list)
-            + "\n\nRules for this exclusion list:\n"
-            + "- Do not return the same company again.\n"
-            + "- Do not return the same legal entity under a slightly different name.\n"
-            + "- Do not return the same official domain again.\n"
-            + "- Prefer competitors, adjacent suppliers, regional alternatives, or similar companies outside this list.\n\n"
-        )
-    if adjacent_scope:
-        user_text = (
-            "Find real companies with official websites operating in adjacent technical business domains around "
-            "MBSE, systems engineering, requirements/traceability, verification & validation, integration, "
-            "reliability/durability, diagnostics, digital twin/PHM, technical interface, and owner engineering.\n"
-            "Prefer companies whose products, platforms, or industrial programs sit in automotive & complex equipment, "
-            "industrial equipment & automation, aerospace & high-end manufacturing, plus energy/infrastructure systems "
-            "with strong systems-engineering needs.\n"
-            "Return only real companies with official websites (no aggregators).\n"
-            "Region should be one of: Global, EU, US, CN, JP, KR, CA, AU, UK, CH, IL, IN, ME, AE, SA, ES, PT, SE, NO, DK, NL, FR, DE.\n"
-            "Tags should be short lowercase keywords, e.g. mbse, systems, requirements, traceability, verification, validation, "
-            "integration, reliability, durability, digital_twin, phm, technical_interface, owner_engineering, automotive, "
-            "complex_equipment, industrial_automation, aerospace, high_end_manufacturing, energy, infrastructure.\n\n"
-            f"{exclusion_section}Query:\n{query}\n\n"
-            f"Return up to {DISCOVERY_COMPANIES_PER_QUERY_CAP} companies.\n"
-            "Output only JSON matching the schema."
-        )
-    else:
-        user_text = (
-            "Find real companies with official websites operating in the business or technical area suggested by the query.\n"
-            "Return only real companies with official websites (no aggregators).\n"
-            "Prefer companies with meaningful products, platforms, industrial programs, or R&D activity in that area.\n"
-            "Region should be one of: Global, EU, US, CN, JP, KR, CA, AU, UK, CH, IL, IN, ME, AE, SA, ES, PT, SE, NO, DK, NL, FR, DE.\n"
-            "Tags should be short lowercase keywords that describe the company business area, product area, or industry segment.\n\n"
-            f"{exclusion_section}Query:\n{query}\n\n"
-            f"Return up to {DISCOVERY_COMPANIES_PER_QUERY_CAP} companies.\n"
-            "Output only JSON matching the schema."
-        )
-    request = build_json_schema_request(
-        model=model,
-        input_payload=build_text_input_messages(
-            "You identify real companies and return only structured JSON.",
-            user_text,
-        ),
-        schema_name="company_list",
-        schema=_COMPANY_DISCOVERY_SCHEMA,
-        use_web_search=True,
-    )
-    response = client.create(request)
-    data = parse_response_json(response, f"Company list discovery ({query})")
-    companies = data.get("companies", [])
-    if not isinstance(companies, list):
-        return []
-    discovered_at = now_iso()
-    discovered: list[dict[str, Any]] = []
-    for raw_company in companies:
-        if not isinstance(raw_company, Mapping):
-            continue
-        region = str(raw_company.get("region") or "").strip()
-        region_tag = f"region:{region.upper()}" if region else ""
-        item = normalize_company_candidate(
-            {
-                **dict(raw_company),
-                "source": "web_search",
-                "discoverySources": ["web_search"],
-                "signalCount": int(_coerce_number(raw_company.get("signalCount")) or 1),
-                "lastSeen": discovered_at,
-                "sourceEvidence": {
-                    "webSearch": {
-                        "query": str(query or "").strip(),
-                        "discoveredAt": discovered_at,
-                    }
-                },
-            }
-        )
-        if region_tag:
-            item["tags"] = merge_unique_strings(item.get("tags"), [region_tag])
-        if item.get("name"):
-            discovered.append(item)
-    return discovered
-
-
 def auto_discover_companies_in_pool(
     client: ResponseRequestClient,
     *,
     config: Mapping[str, Any],
     companies: object,
-    query_stats: object = None,
-    query_budget: int | None = None,
-    max_new_companies: int | None = None,
-    rng: random.Random | None = None,
     progress_callback: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     company_discovery = config.get("companyDiscovery")
@@ -521,9 +516,7 @@ def auto_discover_companies_in_pool(
             "added": 0,
             "total": 0,
             "newCompanies": [],
-            "queryCount": 0,
             "companies": [],
-            "queryStats": {},
             "changed": False,
         }
     if company_discovery.get("enableAutoDiscovery") is False:
@@ -536,16 +529,12 @@ def auto_discover_companies_in_pool(
             "added": 0,
             "total": len(normalized_companies),
             "newCompanies": [],
-            "queryCount": 0,
             "companies": normalized_companies,
-            "queryStats": normalize_company_discovery_query_stats(query_stats),
             "changed": False,
         }
     model = str(company_discovery.get("model") or "").strip()
     if not model:
         raise ValueError("companyDiscovery.model is required for Python company discovery.")
-
-    normalized_query_stats = normalize_company_discovery_query_stats(query_stats)
     normalized_companies = [
         normalize_company_candidate(item)
         for item in source_companies
@@ -558,89 +547,56 @@ def auto_discover_companies_in_pool(
         for key in build_company_identity_keys(company):
             key_to_index[key] = index
 
-    all_queries = [
-        str(item or "").strip()
-        for item in company_discovery.get("queries", [])
-        if str(item or "").strip()
-    ]
-    if not all_queries:
+    existing_companies = build_company_discovery_existing_company_names(
+        normalized_companies,
+        limit=60,
+    )
+    candidate_context = _company_discovery_input(config)
+    has_candidate_context = any(
+        bool(value) if isinstance(value, list) else bool(str(value or "").strip())
+        for value in candidate_context.values()
+    )
+    if not has_candidate_context:
         return {
             "added": 0,
             "total": len(normalized_companies),
             "newCompanies": [],
-            "queryCount": 0,
             "companies": normalized_companies,
-            "queryStats": dict(normalized_query_stats),
             "changed": changed,
         }
-    limit = max(0, int(query_budget if query_budget is not None else len(all_queries)))
-    used_queries: set[str] = set()
-    selected_queries = sample_weighted_discovery_queries(
-        all_queries,
-        normalized_query_stats,
-        limit,
-        rng=rng,
-        used_queries=used_queries,
-    )
-    new_company_cap = max(
-        0,
+    company_count = max(
+        1,
         int(
-            max_new_companies
-            if max_new_companies is not None
-            else company_discovery.get("maxNewCompaniesPerRun") or 0
+            company_discovery.get("maxCompaniesPerCall")
+            or DIRECT_COMPANY_DISCOVERY_DEFAULT_COUNT
         ),
     )
-    if new_company_cap <= 0:
-        return {
-            "added": 0,
-            "total": len(normalized_companies),
-            "newCompanies": [],
-            "queryCount": 0,
-            "companies": normalized_companies,
-            "queryStats": dict(normalized_query_stats),
-            "changed": changed,
-        }
-
-    excluded_companies = build_repeated_company_avoid_list(normalized_companies, limit=60)
-    new_companies: list[dict[str, Any]] = []
-    adjacent_scope = str(
-        (config.get("candidate") or {}).get("scopeProfile") if isinstance(config.get("candidate"), Mapping) else ""
-    ).strip() == "adjacent_mbse"
-
-    for query in selected_queries:
-        if progress_callback is not None:
-            progress_callback(f"Python company discovery query: {query}")
-        discovered = discover_companies_from_query(
-            client,
-            model=model,
-            query=query,
-            excluded_companies=excluded_companies,
-            adjacent_scope=adjacent_scope,
+    if progress_callback is not None:
+        progress_callback(
+            f"Python direct company discovery request: up to {company_count} companies."
         )
-        added_for_query = 0
-        for item in discovered:
-            merged = add_or_merge_company_candidate(normalized_companies, key_to_index, item)
-            if merged["changed"]:
-                changed = True
-            if merged["isNew"] and merged["company"]:
-                new_companies.append(merged["company"])
-                excluded_companies.append(str(merged["company"].get("name") or "").strip())
-                added_for_query += 1
-            if len(new_companies) >= new_company_cap:
-                break
-        next_bad_score = 0 if added_for_query > 0 else get_discovery_query_bad_score(normalized_query_stats, query) + 1
-        if set_discovery_query_bad_score(normalized_query_stats, query, next_bad_score):
+    discovered = discover_companies_for_candidate(
+        client,
+        model=model,
+        candidate_context=candidate_context,
+        company_count=company_count,
+        existing_companies=existing_companies,
+        progress_callback=progress_callback,
+    )
+    changed = changed or bool(discovered)
+    new_companies: list[dict[str, Any]] = []
+    for item in discovered:
+        merged = add_or_merge_company_candidate(normalized_companies, key_to_index, item)
+        if merged["changed"]:
             changed = True
-        if len(new_companies) >= new_company_cap:
-            break
+        if merged["isNew"] and merged["company"]:
+            new_companies.append(merged["company"])
 
     return {
         "added": len(new_companies),
         "total": len(normalized_companies),
         "newCompanies": new_companies,
-        "queryCount": len(selected_queries),
         "companies": normalized_companies,
-        "queryStats": dict(normalized_query_stats),
         "changed": changed,
     }
 
@@ -671,19 +627,17 @@ def _coerce_positive_int(value: object) -> int | None:
 
 __all__ = [
     "DISCOVERY_COMPANIES_PER_QUERY_CAP",
+    "DIRECT_COMPANY_DISCOVERY_DEFAULT_COUNT",
     "add_or_merge_company_candidate",
     "auto_discover_companies_in_pool",
+    "build_company_discovery_existing_company_names",
     "build_company_identity_keys",
     "build_repeated_company_avoid_list",
     "company_domain",
     "decay_company_repeat_counts",
     "derive_discovery_tags_from_text",
-    "discover_companies_from_query",
-    "get_discovery_query_bad_score",
+    "discover_companies_for_candidate",
     "merge_company_candidates",
     "normalize_company_candidate",
-    "normalize_company_discovery_query_stats",
     "normalize_company_name",
-    "sample_weighted_discovery_queries",
-    "set_discovery_query_bad_score",
 ]

@@ -88,6 +88,52 @@ class RunStateTests(unittest.TestCase):
         self.assertEqual(len(merged), 1)
         self.assertEqual(merged[0]["location"], "Munich")
 
+    def test_collect_resume_pending_jobs_skips_current_run_suspended_job(self) -> None:
+        pending = run_state.collect_resume_pending_jobs_from_job_lists(
+            [
+                {
+                    "title": "Suspended",
+                    "company": "Acme Robotics",
+                    "url": "https://example.com/jobs/a",
+                    "dateFound": "2026-04-14T12:00:00Z",
+                    "analysis": {},
+                    "processingState": {
+                        "technicalFailureCount": 1,
+                        "suspendedRunId": 88,
+                    },
+                },
+                {
+                    "title": "Healthy",
+                    "company": "Beta Systems",
+                    "url": "https://example.com/jobs/b",
+                    "dateFound": "2026-04-14T12:01:00Z",
+                    "analysis": {},
+                },
+            ],
+            current_run_id=88,
+        )
+
+        self.assertEqual([item["title"] for item in pending], ["Healthy"])
+
+    def test_collect_resume_pending_jobs_skips_abandoned_job(self) -> None:
+        pending = run_state.collect_resume_pending_jobs_from_job_lists(
+            [
+                {
+                    "title": "Abandoned",
+                    "company": "Acme Robotics",
+                    "url": "https://example.com/jobs/a",
+                    "dateFound": "2026-04-14T12:00:00Z",
+                    "analysis": {},
+                    "processingState": {
+                        "technicalFailureCount": 3,
+                        "abandoned": True,
+                    },
+                }
+            ],
+        )
+
+        self.assertEqual(pending, [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -61,48 +61,39 @@ class ResumeReadResult:
 class CandidateSemanticProfile:
     source_signature: str = ""
     summary: str = ""
-    background_keywords: tuple[str, ...] = ()
-    target_direction_keywords: tuple[str, ...] = ()
-    core_business_areas: tuple[str, ...] = ()
-    adjacent_business_areas: tuple[str, ...] = ()
-    exploration_business_areas: tuple[str, ...] = ()
+    company_discovery_primary_anchors: tuple[str, ...] = ()
+    company_discovery_secondary_anchors: tuple[str, ...] = ()
+    job_fit_core_terms: tuple[str, ...] = ()
+    job_fit_support_terms: tuple[str, ...] = ()
     avoid_business_areas: tuple[str, ...] = ()
-    strong_capabilities: tuple[str, ...] = ()
-    seniority_signals: tuple[str, ...] = ()
 
     def is_usable(self) -> bool:
         return bool(
-            self.core_business_areas
-            or self.adjacent_business_areas
-            or self.exploration_business_areas
-            or self.background_keywords
-            or self.target_direction_keywords
-            or self.strong_capabilities
+            self.summary
+            or self.company_discovery_primary_anchors
+            or self.company_discovery_secondary_anchors
+            or self.job_fit_core_terms
+            or self.job_fit_support_terms
         )
 
     def to_payload(self) -> dict[str, Any]:
         return {
             "source_signature": self.source_signature,
             "summary": self.summary,
-            "background_keywords": list(self.background_keywords),
-            "target_direction_keywords": list(self.target_direction_keywords),
-            "core_business_areas": list(self.core_business_areas),
-            "adjacent_business_areas": list(self.adjacent_business_areas),
-            "exploration_business_areas": list(self.exploration_business_areas),
+            "company_discovery_primary_anchors": list(self.company_discovery_primary_anchors),
+            "company_discovery_secondary_anchors": list(self.company_discovery_secondary_anchors),
+            "job_fit_core_terms": list(self.job_fit_core_terms),
+            "job_fit_support_terms": list(self.job_fit_support_terms),
             "avoid_business_areas": list(self.avoid_business_areas),
-            "strong_capabilities": list(self.strong_capabilities),
-            "seniority_signals": list(self.seniority_signals),
         }
 
     def company_discovery_phrase_library_en(self) -> tuple[str, ...]:
         return _normalize_phrase_library_list(
             [
-                *self.target_direction_keywords,
-                *self.background_keywords,
-                *self.core_business_areas,
-                *self.strong_capabilities,
-                *self.adjacent_business_areas,
-                *self.exploration_business_areas,
+                *self.company_discovery_primary_anchors,
+                *self.company_discovery_secondary_anchors,
+                *self.job_fit_core_terms,
+                *self.job_fit_support_terms,
             ],
             max_items=100,
         )
@@ -110,12 +101,8 @@ class CandidateSemanticProfile:
     def job_search_phrase_library_en(self) -> tuple[str, ...]:
         return _normalize_phrase_library_list(
             [
-                *self.target_direction_keywords,
-                *self.background_keywords,
-                *self.core_business_areas,
-                *self.strong_capabilities,
-                *self.adjacent_business_areas,
-                *self.exploration_business_areas,
+                *self.job_fit_core_terms,
+                *self.job_fit_support_terms,
             ],
             max_items=100,
         )

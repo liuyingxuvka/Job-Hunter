@@ -247,7 +247,7 @@ desktop_app/runtime/
 #### `search/companies/`
 
 - 公司发现、公司筛选、来源抓取、公司状态推进。
-- `selection.py` 当前已经收成纯启发式公司选择：产品主入口收敛为 `select_companies_for_run()`，内部先经过 cooldown/eligibility gate，再按生命周期优先、pending 优先、支持信号排序和 rotation window 组织批次；其中支持信号当前主要收敛为 manual priority 和 region weight，并且会先做一次归一化，不再为每家公司重复解析配置，也不再保留默认 LLM company-fit 支路；`majorCompanyKeywords` 现在只作为 fallback override 保留，不再参与 selection 排序。
+- `selection.py` 当前已经收成纯启发式公司选择：产品主入口收敛为 `select_companies_for_run()`，内部先经过 cooldown/eligibility gate，再按生命周期优先、pending 优先、支持信号排序和 rotation window 组织批次；其中支持信号当前主要收敛为 manual priority 和 region weight，并且会先做一次归一化，不再为每家公司重复解析配置，也不再保留默认 LLM company-fit 支路；`majorCompanyKeywords` 已从主链退场。
 - `sources.py` 保留公司来源抓取门面与公司状态推进。
 - `company_sources_ats.py` 负责 supported ATS 分流与 ATS 元信息解析。
 - `company_sources_careers.py` 负责 careers discovery、fallback query 规划和 AI web-search fallback。
@@ -272,9 +272,9 @@ desktop_app/runtime/
   `search_session_orchestrator.py` 负责 timed search session 的主循环门面与轮次推进，并通过 round-level helper/outcome 收敛 company round、finalize 和输出刷新；其中 `RoundProgress` 已经把推荐岗位增长算作真实进展，并在 discovery round 尚未开始前就超时时显式报错；
   `search_session_runtime.py` 负责 session runtime dataclass、阶段执行与终态 helper；
   `search_session_resume_gate.py` 负责 resume/finalize gate 状态机；
-  `runtime_config_builder.py` 负责运行时配置组装，并通过 `RuntimeCandidateInputPrep` / `RuntimeCandidateConfigContext` / `RuntimeConfigSections` 这些 seam 把候选人输入准备、稳定 discovery 上下文与 section dict 明确分开；其中 company-discovery queries 已不再长期保存在 candidate context 里，而是按 rotation seed 显式生成，同时 runtime section 写入已经收成统一的 bulk-update 路径，`maxCompaniesPerRun` 的有效值解析也已经收成共享 helper；`runtime_defaults.py` 现在主要保留较稳定的 canonical 用户配置面，而像 `maxJobsPerQuery`、`maxCompaniesPerRun`、`maxJobsPerCompany`、`companyRotationIntervalDays`、`maxNewCompaniesPerRun` 和分析阶段 job caps 这类运行时派生字段，已经退到 builder/strategy 在具体阶段显式注入；`runtime_strategy.py` 侧的 adaptive search 也已经进一步压成 `passWorkBudgetSeconds`、`companyBatchSize`、`discoveryBreadth`、`cooldownBaseDays` 四个高层 knob，并由共享的 `analysis_work_cap` 派生分析阶段预算；
-  `company_discovery_queries.py` 负责公司发现 query 规划，并已经明确分成 anchor 前置规划和纯 planner 两层：先从候选人输入、已解析 search signals 和最近 run feedback 生成 anchor plan / discovery profile，再把这些稳定输入通过共享 query 模板转成 query list；当前 discovery bucket 里仍保留 `phrase_limit`、`query_limit`、`minimum_anchor_count` 三个显式行为参数，因为它们分别控制 anchor 截断、query 预算/轮转分布和稀疏输入下默认 anchor 回填，不是同一件事的不同名字；
-  `candidate_search_signals.py` 负责候选人搜索信号、关键词清洗，以及按 semantic / candidate / profile 三组组织目标导向 / 背景导向 / discovery 提示这些更薄的语义分组。
+`runtime_config_builder.py` 负责运行时配置组装，并通过 `RuntimeCandidateInputPrep` / `RuntimeCandidateConfigContext` / `RuntimeConfigSections` 这些 seam 把候选人输入准备、稳定 discovery 上下文与 section dict 明确分开；其中 canonical 候选人输入现在以 `scopeProfiles` 与 `targetRoles` 为主语义，company-discovery queries 已不再长期保存在 candidate context 里，而是按 rotation seed 显式生成，同时 runtime section 写入已经收成统一的 bulk-update 路径，`maxCompaniesPerRun` 的有效值解析也已经收成共享 helper；`runtime_defaults.py` 现在主要保留较稳定的 canonical 用户配置面，而像 `maxJobsPerQuery`、`maxCompaniesPerRun`、`maxJobsPerCompany`、`companyRotationIntervalDays`、`maxNewCompaniesPerRun` 和分析阶段 job caps 这类运行时派生字段，已经退到 builder/strategy 在具体阶段显式注入；`runtime_strategy.py` 侧的 adaptive search 也已经进一步压成 `passWorkBudgetSeconds`、`companyBatchSize`、`discoveryBreadth`、`cooldownBaseDays` 四个高层 knob，并由共享的 `analysis_work_cap` 派生分析阶段预算；
+`company_discovery_queries.py` 负责公司发现 query 规划，并已经明确分成 anchor 前置规划和纯 planner 两层：先从已经整理好的 semantic / candidate / profile search signals 直接形成 core / adjacent / explore 三桶 anchor，再把这些稳定输入通过共享 query 模板转成 query list；当前 discovery bucket 里仍保留 `phrase_limit`、`query_limit`、`minimum_anchor_count` 三个显式行为参数，因为它们分别控制 anchor 截断、query 预算/轮转分布和稀疏输入下默认 anchor 回填，不是同一件事的不同名字；
+`candidate_search_signals.py` 负责候选人搜索信号、关键词清洗，以及按 semantic / candidate / profile 三组组织 discovery 输入这些更薄的语义分组。
 
 #### `search/stages/`
 

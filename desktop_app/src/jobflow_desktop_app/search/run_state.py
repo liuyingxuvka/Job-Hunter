@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .state.work_unit_state import is_abandoned, is_suspended_for_run, normalize_work_unit_state
+
 
 def job_identity_key(item: dict) -> str:
     title = str(item.get("title") or "").strip().casefold()
@@ -20,6 +22,13 @@ def job_item_key(item: dict) -> str:
 def merge_job_item(existing: dict, incoming: dict) -> dict:
     merged = dict(existing)
     for key, value in incoming.items():
+        if key == "processingState":
+            normalized_state = normalize_work_unit_state(value)
+            if normalized_state:
+                merged[key] = normalized_state
+            else:
+                merged.pop(key, None)
+            continue
         if isinstance(value, dict) and isinstance(merged.get(key), dict):
             nested = dict(merged.get(key) or {})
             for nested_key, nested_value in value.items():
@@ -91,7 +100,17 @@ def merge_job_items_from_job_lists(*job_lists: list[dict]) -> list[dict]:
     return list(merged_jobs.values())
 
 
-def collect_resume_pending_jobs_from_job_lists(*job_lists: list[dict]) -> list[dict]:
+def collect_resume_pending_jobs_from_job_lists(
+    *job_lists: list[dict],
+    current_run_id: int | None = None,
+) -> list[dict]:
+    return _collect_resume_pending_jobs_from_job_lists(current_run_id, *job_lists)
+
+
+def _collect_resume_pending_jobs_from_job_lists(
+    current_run_id: int | None,
+    *job_lists: list[dict],
+) -> list[dict]:
     pending_jobs: list[dict] = []
     for item in merge_job_items_from_job_lists(*job_lists):
         if not isinstance(item, dict):
@@ -102,6 +121,11 @@ def collect_resume_pending_jobs_from_job_lists(*job_lists: list[dict]) -> list[d
             continue
         job["url"] = job_url
         if analysis_completed(job.get("analysis")):
+            continue
+        processing_state = job.get("processingState")
+        if is_abandoned(processing_state):
+            continue
+        if is_suspended_for_run(processing_state, current_run_id):
             continue
         pending_jobs.append(job)
     pending_jobs.sort(
@@ -119,10 +143,12 @@ def normalize_resume_pending_jobs(
     jobs: list[dict],
     run_dir: Path,
     include_found_details: bool = False,
+    current_run_id: int | None = None,
 ) -> list[dict]:
     del run_dir
     del include_found_details
-    return collect_resume_pending_jobs_from_job_lists(
+    return _collect_resume_pending_jobs_from_job_lists(
+        current_run_id,
         jobs if isinstance(jobs, list) else [],
     )
 
@@ -131,10 +157,11 @@ def merge_resume_pending_job_lists(
     run_dir: Path,
     *job_lists: list[dict],
     include_found_details: bool = False,
+    current_run_id: int | None = None,
 ) -> list[dict]:
     del run_dir
     del include_found_details
-    return collect_resume_pending_jobs_from_job_lists(*job_lists)
+    return _collect_resume_pending_jobs_from_job_lists(current_run_id, *job_lists)
 
 
 __all__ = [

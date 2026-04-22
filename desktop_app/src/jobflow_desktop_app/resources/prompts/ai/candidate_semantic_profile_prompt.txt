@@ -8,37 +8,38 @@ Read the candidate context and extract a structured semantic profile that will b
 
 Rules:
 1. Return strict JSON only. No Markdown. No extra explanation.
-2. Focus on business domains, technical focus areas, demonstrated experience themes, and realistic future directions.
-3. Keep "demonstrated background" separate from "future target directions".
-4. Arrays must contain short phrases, not sentences.
-5. Prefer domain/business/technology phrases over job titles.
-6. Do not use generic titles such as engineer, scientist, manager, analyst as standalone keywords.
-7. Output an ENGLISH-ONLY reusable business phrase library for search and company discovery.
-8. `core_business_areas` should stay close to what the candidate has already demonstrated.
-9. `adjacent_business_areas` should be plausible expansions, not random jumps.
-10. `exploration_business_areas` can be broader, but still defensible.
-11. `strong_capabilities` should capture methods / technical strengths, but not generic job titles.
-12. `avoid_business_areas` should list misleading directions that might be over-inferred from isolated tools or weak signals.
-13. Prefer 2-5 word English phrases that can be used directly in search.
-14. Build a large reusable phrase library, but keep quality high.
-15. Order the phrase library by priority: target directions first, then demonstrated background,
-    then strong capabilities, then adjacent exploration.
-16. Phrase-count targets:
-    - `core_business_areas`: up to 45
-    - `adjacent_business_areas`: up to 30
-    - `exploration_business_areas`: up to 15
-    - `strong_capabilities`: up to 10
-17. Do not output Chinese search phrases.
+2. Focus on reusable business directions for finding employers and matching jobs.
+3. Arrays must contain short English phrases, not sentences.
+4. Prefer business/problem-domain phrases over generic job titles.
+5. Do not use generic titles such as engineer, scientist, manager, analyst as standalone phrases.
+6. `company_discovery_primary_anchors` must be the strongest 6-12 business/problem-domain phrases for discovering matching companies.
+7. `company_discovery_primary_anchors` should be specific business directions, not broad industry buckets or employer classes.
+8. `company_discovery_secondary_anchors` can contain adjacent but still defensible company-discovery phrases.
+8a. `company_discovery_secondary_anchors` must stay domain-qualified. If a support/process phrase would be ambiguous by itself, include the domain noun that makes the employer type clear.
+8b. Do NOT output naked support/process phrases such as "vendor management", "vendor performance management", "operations excellence", "program governance", "performance management", or "quality assurance" without an explicit business domain like localization, translation, sustainability, compliance, recruiting, or customer-success.
+9. Do NOT use generic discovery anchors such as "regulated industry", "life sciences", "chemicals", "industrial operations", "financial services", or "technology companies" by themselves unless they are paired with a concrete business function.
+10. Do NOT put tools, software names, methods, or generic role titles into company-discovery anchor lists.
+11. Keep company-discovery anchors to 2-5 word English phrases that can be used directly to find employers.
+12. `job_fit_core_terms` should be the strongest terms for ranking companies and jobs after discovery.
+13. `job_fit_core_terms` may include business domains plus a few concrete domain-qualified role phrases when they are central.
+14. `job_fit_support_terms` should contain weaker but still useful supporting signals such as adjacent themes, methods, or concrete capabilities.
+15. `job_fit_support_terms` should not duplicate `job_fit_core_terms`.
+16. `avoid_business_areas` should list misleading directions that might be over-inferred from isolated tools or weak signals.
+17. Keep the overall field set compact and high-signal. Avoid near-duplicate arrays.
+18. Phrase-count targets:
+    - `company_discovery_primary_anchors`: up to 12
+    - `company_discovery_secondary_anchors`: up to 8
+    - `job_fit_core_terms`: up to 24
+    - `job_fit_support_terms`: up to 16
+    - `avoid_business_areas`: up to 10
+19. Do not output Chinese search phrases.
 
 JSON format:
 {
   "summary": "One short paragraph.",
-  "background_keywords": ["..."],
-  "target_direction_keywords": ["..."],
-  "core_business_areas": ["..."],
-  "adjacent_business_areas": ["..."],
-  "exploration_business_areas": ["..."],
+  "company_discovery_primary_anchors": ["..."],
+  "company_discovery_secondary_anchors": ["..."],
+  "job_fit_core_terms": ["..."],
+  "job_fit_support_terms": ["..."],
   "avoid_business_areas": ["..."],
-  "strong_capabilities": ["..."],
-  "seniority_signals": ["..."]
 }

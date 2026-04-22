@@ -18,9 +18,12 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from jobflow_desktop_app.ai.role_recommendations import CandidateSemanticProfile  # noqa: E402
+from jobflow_desktop_app.db.repositories.profiles import SearchProfileRecord  # noqa: E402
 from jobflow_desktop_app.search.orchestration import runtime_config_builder  # noqa: E402
-from jobflow_desktop_app.search.orchestration.company_discovery_queries import (  # noqa: E402
-    DiscoveryAnchorPlan,
+from jobflow_desktop_app.search.orchestration.candidate_search_signals import (  # noqa: E402
+    CandidateSearchSignals,
+    ProfileSearchSignals,
+    SemanticSearchSignals,
 )
 
 
@@ -76,49 +79,39 @@ class RuntimeConfigBuilderTests(unittest.TestCase):
             run_dir.mkdir(parents=True, exist_ok=True)
             semantic_profile = CandidateSemanticProfile(
                 summary="Hydrogen reliability profile",
-                background_keywords=("hydrogen systems",),
-                target_direction_keywords=("fuel cell diagnostics",),
-                core_business_areas=("electrochemical durability",),
-                adjacent_business_areas=("reliability engineering",),
-                exploration_business_areas=("industrial technology",),
-                strong_capabilities=("degradation analytics",),
+                company_discovery_primary_anchors=("hydrogen systems",),
+                company_discovery_secondary_anchors=("reliability engineering",),
+                job_fit_core_terms=("fuel cell diagnostics", "electrochemical durability"),
+                job_fit_support_terms=("degradation analytics",),
             )
 
-            discovery_anchor_plan = DiscoveryAnchorPlan(
-                core=["hydrogen systems"],
-                adjacent=["reliability"],
-                explore=["industrial technology"],
+            company_discovery_config: dict = {}
+            candidate_context = runtime_config_builder.populate_runtime_config_common(
+                runtime_mirror,
+                candidate_config={},
+                search_config={},
+                sources_config={},
+                company_discovery_config=company_discovery_config,
+                analysis_config={},
+                translation_config={},
+                fetch_config={},
+                candidate=candidate,
+                profiles=profiles,
+                run_dir=run_dir,
+                query_rotation_seed=17,
+                semantic_profile=semantic_profile,
+                model_override="",
+                signals=_FakeRunner.signals,
             )
-            with patch(
-                "jobflow_desktop_app.search.orchestration.runtime_config_builder.company_discovery_queries_module.build_discovery_anchor_plan",
-                return_value=discovery_anchor_plan,
-            ) as build_anchor_plan, patch(
-                "jobflow_desktop_app.search.orchestration.runtime_config_builder.company_discovery_queries_module.build_company_discovery_queries_from_anchor_plan",
-                return_value=["hydrogen systems companies"],
-            ) as build_queries:
-                company_discovery_queries = runtime_config_builder.populate_runtime_config_common(
-                    runtime_mirror,
-                    candidate_config={},
-                    search_config={},
-                    sources_config={},
-                    company_discovery_config={},
-                    analysis_config={},
-                    translation_config={},
-                    fetch_config={},
-                    candidate=candidate,
-                    profiles=profiles,
-                    run_dir=run_dir,
-                    query_rotation_seed=17,
-                    semantic_profile=semantic_profile,
-                    model_override="",
-                    signals=_FakeRunner.signals,
-                )
 
-            self.assertEqual(company_discovery_queries, ["hydrogen systems companies"])
-            self.assertIs(build_anchor_plan.call_args.kwargs["signals"], _FakeRunner.signals)
+            self.assertIs(candidate_context.signals, _FakeRunner.signals)
             self.assertEqual(
-                build_queries.call_args.kwargs["anchor_plan"],
-                discovery_anchor_plan,
+                company_discovery_config["companyDiscoveryInput"]["summary"],
+                "Hydrogen reliability profile",
+            )
+            self.assertIn(
+                "hydrogen systems",
+                company_discovery_config["companyDiscoveryInput"]["desiredWorkDirections"],
             )
 
     def test_build_runtime_candidate_context_reuses_injected_signals_once(self) -> None:
@@ -129,27 +122,20 @@ class RuntimeConfigBuilderTests(unittest.TestCase):
             profiles = context.profiles.list_for_candidate(candidate_id)
             self.assertIsNotNone(candidate)
 
-            runtime_mirror = None
             run_dir = context.paths.runtime_dir / "search_runs" / f"candidate_{candidate_id}"
             run_dir.mkdir(parents=True, exist_ok=True)
 
-            discovery_anchor_plan = DiscoveryAnchorPlan(core=["hydrogen systems"], adjacent=[], explore=[])
-            with patch(
-                "jobflow_desktop_app.search.orchestration.runtime_config_builder.company_discovery_queries_module.build_discovery_anchor_plan",
-                return_value=discovery_anchor_plan,
-            ):
-                built = runtime_config_builder.build_runtime_candidate_context(
-                    runtime_mirror,
-                    candidate=candidate,
-                    profiles=profiles,
-                    run_dir=run_dir,
-                    semantic_profile=None,
-                    signals=_FakeRunner.signals,
-                )
+            built = runtime_config_builder.build_runtime_candidate_context(
+                candidate=candidate,
+                profiles=profiles,
+                run_dir=run_dir,
+                semantic_profile=None,
+                signals=_FakeRunner.signals,
+            )
 
             self.assertIs(built.signals, _FakeRunner.signals)
             self.assertEqual(built.resume_path, str((run_dir / "resume.generated.md").resolve()))
-            self.assertIs(built.discovery_anchor_plan, discovery_anchor_plan)
+            self.assertIn("Systems Engineer", built.discovery_query_input["targetRoles"])
 
     def test_build_runtime_config_reuses_provided_candidate_context(self) -> None:
         with make_temp_context() as context:
@@ -164,23 +150,23 @@ class RuntimeConfigBuilderTests(unittest.TestCase):
             candidate_context = runtime_config_builder.RuntimeCandidateConfigContext(
                 candidate_inputs=runtime_config_builder.RuntimeCandidateInputPrep(
                     resume_path=str((run_dir / "resume.generated.md").resolve()),
-                    resume_text="",
-                    scope_profile="hydrogen_mainline",
-                    target_role="Systems Engineer",
+                    scope_profiles=("hydrogen_mainline",),
                     target_roles=[],
                 ),
                 signals=_FakeRunner.signals,
-                discovery_anchor_plan=DiscoveryAnchorPlan(core=["hydrogen systems"], adjacent=[], explore=[]),
+                discovery_query_input={
+                    "summary": "Hydrogen systems engineer",
+                    "targetRoles": ["Systems Engineer"],
+                    "desiredWorkDirections": ["hydrogen systems"],
+                    "avoidBusinessAreas": [],
+                    "locationPreference": "",
+                },
             )
 
             with patch.object(
                 runtime_config_builder,
                 "build_runtime_candidate_context",
                 side_effect=AssertionError("candidate context should be reused"),
-            ), patch.object(
-                runtime_config_builder,
-                "build_candidate_context_company_discovery_queries",
-                return_value=["hydrogen systems companies"],
             ):
                 runtime_config = runtime_config_builder.build_runtime_config(
                     None,
@@ -193,20 +179,22 @@ class RuntimeConfigBuilderTests(unittest.TestCase):
                 )
 
             self.assertEqual(
-                runtime_config["companyDiscovery"]["queries"],
-                ["hydrogen systems companies"],
+                runtime_config["companyDiscovery"]["companyDiscoveryInput"],
+                candidate_context.discovery_query_input,
             )
+            self.assertEqual(runtime_config["companyDiscovery"]["maxCompaniesPerCall"], 5)
             self.assertIn("maxJobsPerQuery", runtime_config["search"])
             self.assertIn("maxCompaniesPerRun", runtime_config["sources"])
             self.assertIn("maxJobsPerCompany", runtime_config["sources"])
             self.assertIn("maxJobLinksPerCompany", runtime_config["sources"])
             self.assertIn("companyRotationIntervalDays", runtime_config["sources"])
-            self.assertIn("companyRotationSeed", runtime_config["sources"])
-            self.assertIn("maxNewCompaniesPerRun", runtime_config["companyDiscovery"])
-            self.assertIn("maxCompaniesPerQuery", runtime_config["companyDiscovery"])
+            self.assertIn("maxCompaniesPerCall", runtime_config["companyDiscovery"])
             self.assertIn("maxJobsToAnalyzePerRun", runtime_config["analysis"])
             self.assertIn("jdFetchMaxJobsPerRun", runtime_config["analysis"])
             self.assertIn("postVerifyMaxJobsPerRun", runtime_config["analysis"])
+            self.assertFalse(runtime_config["analysis"]["postVerifyEnabled"])
+            self.assertFalse(runtime_config["analysis"]["postVerifyUseWebSearch"])
+            self.assertFalse(runtime_config["analysis"]["postVerifyRequireChecked"])
             self.assertEqual(
                 runtime_config["fetch"]["timeoutMs"],
                 runtime_config_builder.HTTP_REQUEST_TIMEOUT_MS,
@@ -225,29 +213,28 @@ class RuntimeConfigBuilderTests(unittest.TestCase):
             candidate_context = runtime_config_builder.RuntimeCandidateConfigContext(
                 candidate_inputs=runtime_config_builder.RuntimeCandidateInputPrep(
                     resume_path=str((run_dir / "resume.generated.md").resolve()),
-                    resume_text="",
-                    scope_profile="hydrogen_mainline",
-                    target_role="Systems Engineer",
+                    scope_profiles=("hydrogen_mainline",),
                     target_roles=[],
                 ),
                 signals=_FakeRunner.signals,
-                discovery_anchor_plan=DiscoveryAnchorPlan(core=["hydrogen systems"], adjacent=[], explore=[]),
+                discovery_query_input={
+                    "summary": "Hydrogen systems engineer",
+                    "targetRoles": ["Systems Engineer"],
+                    "desiredWorkDirections": ["hydrogen systems"],
+                    "avoidBusinessAreas": [],
+                    "locationPreference": "",
+                },
             )
 
-            with patch.object(
-                runtime_config_builder,
-                "build_candidate_context_company_discovery_queries",
-                return_value=["hydrogen systems companies"],
-            ):
-                runtime_config = runtime_config_builder.build_runtime_config(
-                    None,
-                    base_config={},
-                    candidate=candidate,
-                    profiles=profiles,
-                    run_dir=run_dir,
-                    pipeline_stage="resume_pending",
-                    candidate_context=candidate_context,
-                )
+            runtime_config = runtime_config_builder.build_runtime_config(
+                None,
+                base_config={},
+                candidate=candidate,
+                profiles=profiles,
+                run_dir=run_dir,
+                pipeline_stage="resume_pending",
+                candidate_context=candidate_context,
+            )
 
             self.assertEqual(
                 runtime_config["fetch"]["timeoutMs"],
@@ -256,36 +243,125 @@ class RuntimeConfigBuilderTests(unittest.TestCase):
             self.assertEqual(runtime_config["analysis"]["maxJobsToAnalyzePerRun"], 60)
             self.assertEqual(runtime_config["analysis"]["jdFetchMaxJobsPerRun"], 60)
             self.assertEqual(runtime_config["analysis"]["postVerifyMaxJobsPerRun"], 60)
-            self.assertFalse(runtime_config["sources"]["enableCompanySources"])
             self.assertFalse(runtime_config["companyDiscovery"]["enableAutoDiscovery"])
+            self.assertNotIn("queries", runtime_config["companyDiscovery"])
 
-    def test_build_candidate_context_company_discovery_queries_uses_anchor_plan(self) -> None:
+    def test_build_candidate_context_company_discovery_query_input_uses_semantic_and_profile_context(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(
+                context,
+                name="Localization Candidate",
+                notes="Interested in multilingual product operations.",
+            )
+            create_profile(
+                context,
+                candidate_id,
+                name="Localization Program Manager",
+                keyword_focus="translation management\nvendor management",
+                is_active=True,
+            )
+            candidate = context.candidates.get(candidate_id)
+            profiles = context.profiles.list_for_candidate(candidate_id)
+            self.assertIsNotNone(candidate)
+            semantic_profile = CandidateSemanticProfile(
+                summary="In-house localization leader for multilingual product teams.",
+                company_discovery_primary_anchors=("localization operations",),
+                company_discovery_secondary_anchors=("translation management",),
+                job_fit_core_terms=("terminology governance",),
+                job_fit_support_terms=("multilingual content operations", "Python"),
+                avoid_business_areas=("agency-only work",),
+            )
+            candidate_inputs = runtime_config_builder.RuntimeCandidateInputPrep(
+                resume_path="resume.md",
+                scope_profiles=("general_search",),
+                target_roles=[{"displayName": "Localization Program Manager"}],
+            )
+
+            query_input = runtime_config_builder.build_candidate_context_company_discovery_query_input(
+                candidate=candidate,
+                profiles=profiles,
+                semantic_profile=semantic_profile,
+                candidate_inputs=candidate_inputs,
+            )
+
+        self.assertEqual(
+            query_input["summary"],
+            "In-house localization leader for multilingual product teams.",
+        )
+        self.assertEqual(query_input["targetRoles"], ["Localization Program Manager"])
+        self.assertIn("localization operations", query_input["desiredWorkDirections"])
+        self.assertIn("translation management", query_input["desiredWorkDirections"])
+        self.assertIn("vendor management", query_input["desiredWorkDirections"])
+        self.assertIn("terminology governance", query_input["desiredWorkDirections"])
+        self.assertIn("multilingual content operations", query_input["desiredWorkDirections"])
+        self.assertNotIn("Python", query_input["desiredWorkDirections"])
+        self.assertIn("agency-only work", query_input["avoidBusinessAreas"])
+
+    def test_build_candidate_context_company_fit_terms_prioritizes_business_terms_over_tools(self) -> None:
+        signals = CandidateSearchSignals(
+            semantic=SemanticSearchSignals(
+                summary="",
+                company_discovery_primary_anchors=[],
+                company_discovery_secondary_anchors=[],
+                job_fit_core_terms=["software localization", "translation management systems"],
+                job_fit_support_terms=["linguistic quality assurance", "Python", "SQL", "memoQ"],
+                avoid_business_areas=[],
+            ),
+            profile=ProfileSearchSignals(
+                role_names=["Localization Project Manager"],
+                target_roles=["Localization Program Manager"],
+                keyword_focus_terms=["localization operations", "translation management"],
+            ),
+        )
         candidate_context = runtime_config_builder.RuntimeCandidateConfigContext(
             candidate_inputs=runtime_config_builder.RuntimeCandidateInputPrep(
                 resume_path="resume.md",
-                resume_text="resume text",
-                scope_profile="hydrogen_mainline",
-                target_role="Systems Engineer",
+                scope_profiles=("general_search",),
                 target_roles=[],
             ),
-            signals=_FakeRunner.signals,
-            discovery_anchor_plan=DiscoveryAnchorPlan(core=["hydrogen systems"], adjacent=[], explore=[]),
+            signals=signals,
+            discovery_query_input={},
         )
 
-        with patch(
-            "jobflow_desktop_app.search.orchestration.runtime_config_builder.company_discovery_queries_module.build_company_discovery_queries_from_anchor_plan",
-            return_value=["hydrogen systems companies"],
-        ) as build_queries:
-            queries = runtime_config_builder.build_candidate_context_company_discovery_queries(
-                candidate_context,
-                query_rotation_seed=11,
-            )
+        terms = runtime_config_builder.build_candidate_context_company_fit_terms(candidate_context)
 
-        self.assertEqual(queries, ["hydrogen systems companies"])
         self.assertEqual(
-            build_queries.call_args.kwargs["anchor_plan"],
-            candidate_context.discovery_anchor_plan,
+            terms["core"][:4],
+            [
+                "Localization Program Manager",
+                "localization operations",
+                "translation management",
+                "software localization",
+            ],
         )
+        self.assertIn("linguistic quality assurance", terms["support"])
+        self.assertIn("Localization Project Manager", terms["support"])
+
+    def test_build_target_roles_payload_prefers_target_role_over_profile_name_placeholder(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context, name="Localization Candidate")
+            context.profiles.save(
+                SearchProfileRecord(
+                    profile_id=None,
+                    candidate_id=candidate_id,
+                    name="Localization Search",
+                    scope_profile="general_search",
+                    target_role="Localization Program Manager",
+                    location_preference="Berlin, Germany\nRemote",
+                    role_name_i18n="",
+                    keyword_focus="software localization\ntranslation management systems",
+                    is_active=True,
+                )
+            )
+            candidate = context.candidates.get(candidate_id)
+            profiles = context.profiles.list_for_candidate(candidate_id)
+            self.assertIsNotNone(candidate)
+
+            payload = runtime_config_builder.build_target_roles_payload(candidate, profiles)
+
+            self.assertEqual(len(payload), 1)
+            self.assertEqual(payload[0]["displayName"], "Localization Program Manager")
+            self.assertEqual(payload[0]["targetRoleText"], "Localization Program Manager")
 
     def test_build_runtime_candidate_context_from_inputs_uses_prepared_inputs(self) -> None:
         with make_temp_context() as context:
@@ -297,31 +373,19 @@ class RuntimeConfigBuilderTests(unittest.TestCase):
 
             prepared_inputs = runtime_config_builder.RuntimeCandidateInputPrep(
                 resume_path="resume.md",
-                resume_text="resume text",
-                scope_profile="hydrogen_mainline",
-                target_role="Systems Engineer",
+                scope_profiles=("hydrogen_mainline",),
                 target_roles=[],
             )
-            with patch(
-                "jobflow_desktop_app.search.orchestration.runtime_config_builder.company_discovery_queries_module.build_discovery_anchor_plan",
-                return_value=DiscoveryAnchorPlan(core=["hydrogen systems"], adjacent=[], explore=[]),
-            ) as build_anchor_plan:
-                built = runtime_config_builder.build_runtime_candidate_context_from_inputs(
-                    candidate=candidate,
-                    profiles=profiles,
-                    semantic_profile=None,
-                    candidate_inputs=prepared_inputs,
-                    signals=_FakeRunner.signals,
-                    feedback_keywords=["pem", "durability"],
-                )
+            built = runtime_config_builder.build_runtime_candidate_context_from_inputs(
+                candidate=candidate,
+                profiles=profiles,
+                semantic_profile=None,
+                candidate_inputs=prepared_inputs,
+                signals=_FakeRunner.signals,
+            )
 
             self.assertIs(built.signals, _FakeRunner.signals)
-            self.assertIs(build_anchor_plan.call_args.kwargs["signals"], _FakeRunner.signals)
-            self.assertEqual(build_anchor_plan.call_args.kwargs["resume_text"], "resume text")
-            self.assertEqual(
-                build_anchor_plan.call_args.kwargs["feedback_keywords"],
-                ["pem", "durability"],
-            )
+            self.assertEqual(built.discovery_query_input["targetRoles"], [])
 
     def test_prepare_runtime_candidate_inputs_collects_once(self) -> None:
         with make_temp_context() as context:
@@ -343,50 +407,12 @@ class RuntimeConfigBuilderTests(unittest.TestCase):
                 run_dir=run_dir,
             )
 
-            self.assertEqual(prepared.scope_profile, "adjacent_mbse")
-            self.assertEqual(prepared.target_role, "Systems Engineer")
+            self.assertEqual(prepared.scope_profiles, ())
+            self.assertTrue(prepared.target_roles)
             self.assertTrue(prepared.resume_path.endswith("resume.generated.md"))
-            self.assertIn("Prepared Candidate", prepared.resume_text)
-
-    def test_refresh_runtime_candidate_context_reloads_feedback_keywords(self) -> None:
-        with make_temp_context() as context:
-            candidate_id = create_candidate(context, name="Refresh Candidate")
-            create_profile(context, candidate_id, name="Systems Engineer", is_active=True)
-            candidate = context.candidates.get(candidate_id)
-            profiles = context.profiles.list_for_candidate(candidate_id)
-            self.assertIsNotNone(candidate)
-
-            candidate_context = runtime_config_builder.RuntimeCandidateConfigContext(
-                candidate_inputs=runtime_config_builder.RuntimeCandidateInputPrep(
-                    resume_path="resume.md",
-                    resume_text="resume text",
-                    scope_profile="hydrogen_mainline",
-                    target_role="Systems Engineer",
-                    target_roles=[],
-                ),
-                signals=_FakeRunner.signals,
-                discovery_anchor_plan=DiscoveryAnchorPlan(core=["hydrogen systems"], adjacent=[], explore=[]),
-            )
-
-            runtime_mirror = SimpleNamespace(
-                load_latest_run_feedback=lambda candidate_id: {"keywords": ["digital twin", "phm"]},
-            )
-            with patch(
-                "jobflow_desktop_app.search.orchestration.runtime_config_builder.company_discovery_queries_module.build_discovery_anchor_plan",
-                return_value=DiscoveryAnchorPlan(core=["digital twin"], adjacent=["phm"], explore=[]),
-            ) as build_anchor_plan:
-                refreshed = runtime_config_builder.refresh_runtime_candidate_context(
-                    runtime_mirror,
-                    candidate=candidate,
-                    profiles=profiles,
-                    semantic_profile=None,
-                    candidate_context=candidate_context,
-                )
-
-            self.assertIsNot(refreshed, candidate_context)
-            self.assertEqual(
-                build_anchor_plan.call_args.kwargs["feedback_keywords"],
-                ["digital twin", "phm"],
+            self.assertIn(
+                "Prepared Candidate",
+                Path(prepared.resume_path).read_text(encoding="utf-8"),
             )
 
     def test_apply_runtime_candidate_context_keeps_search_priorities_without_semantic_profile(self) -> None:
@@ -399,15 +425,13 @@ class RuntimeConfigBuilderTests(unittest.TestCase):
         candidate_config: dict = {}
         search_config: dict = {}
         candidate_context = runtime_config_builder.RuntimeCandidateConfigContext(
-            candidate_inputs=runtime_config_builder.RuntimeCandidateInputPrep(
-                resume_path="resume.md",
-                resume_text="resume text",
-                scope_profile="hydrogen_mainline",
-                target_role="Systems Engineer",
-                target_roles=[],
-            ),
+                candidate_inputs=runtime_config_builder.RuntimeCandidateInputPrep(
+                    resume_path="resume.md",
+                    scope_profiles=("hydrogen_mainline",),
+                    target_roles=[],
+                ),
             signals=_FakeRunner.signals,
-            discovery_anchor_plan=DiscoveryAnchorPlan(core=["hydrogen systems"], adjacent=[], explore=[]),
+            discovery_query_input={},
         )
 
         runtime_config_builder.apply_runtime_candidate_context(
@@ -441,9 +465,12 @@ class RuntimeConfigBuilderTests(unittest.TestCase):
         self.assertNotIn("enableAutoDiscovery", config["companyDiscovery"])
         self.assertNotIn("queries", config["companyDiscovery"])
         self.assertNotIn("maxNewCompaniesPerRun", config["companyDiscovery"])
-        self.assertNotIn("maxCompaniesPerQuery", config["companyDiscovery"])
+        self.assertNotIn("maxCompaniesPerCall", config["companyDiscovery"])
         self.assertNotIn("maxJobsToAnalyzePerRun", config["analysis"])
         self.assertNotIn("postVerifyMaxJobsPerRun", config["analysis"])
+        self.assertFalse(config["analysis"]["postVerifyEnabled"])
+        self.assertFalse(config["analysis"]["postVerifyUseWebSearch"])
+        self.assertFalse(config["analysis"]["postVerifyRequireChecked"])
 
     def test_build_runtime_env_keeps_env_mode_api_key_from_named_variable(self) -> None:
         settings = SimpleNamespace(

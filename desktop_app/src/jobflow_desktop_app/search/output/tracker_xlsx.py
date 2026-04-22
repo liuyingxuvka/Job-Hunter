@@ -65,37 +65,15 @@ TRACKER_COLUMNS_BASE: list[dict[str, Any]] = [
     {"header": "Scope Profile", "key": "scopeProfile", "width": 18, "hidden": True},
 ]
 
-TRACKER_COLUMNS_ADJACENT = [
-    {"header": "副线方向", "key": "adjacentDirectionCn", "width": 20},
-    {"header": "行业簇", "key": "industryClusterCn", "width": 18},
-]
-
 @dataclass(frozen=True)
 class TrackerWorkbookWriteResult:
     path: str
     locked: bool = False
 
 
-def is_adjacent_scope(config: Mapping[str, Any] | None) -> bool:
-    candidate = config.get("candidate") if isinstance(config, Mapping) else None
-    scope_profile = ""
-    if isinstance(candidate, Mapping):
-        scope_profile = str(candidate.get("scopeProfile") or "").strip().lower()
-    if not scope_profile and isinstance(config, Mapping):
-        scope_profile = str(config.get("scopeProfile") or "").strip().lower()
-    return scope_profile == "adjacent_mbse"
-
-
 def excel_columns(config: Mapping[str, Any] | None) -> list[dict[str, Any]]:
-    columns: list[dict[str, Any]] = []
-    for index, column in enumerate(TRACKER_COLUMNS_BASE):
-        if index == 5 and is_adjacent_scope(config):
-            columns.extend(TRACKER_COLUMNS_ADJACENT)
-        adjusted = dict(column)
-        if adjusted["key"] == "summaryCn" and is_adjacent_scope(config):
-            adjusted["width"] = 44
-        columns.append(adjusted)
-    return columns
+    del config
+    return [dict(column) for column in TRACKER_COLUMNS_BASE]
 
 
 def to_human_date(value: object) -> str:
@@ -163,9 +141,8 @@ def row_to_job(row: Mapping[str, Any], config: Mapping[str, Any] | None) -> dict
     url = normalize_job_url(row.get("url") or row.get("canonicalUrl") or "")
     if not url:
         return None
-    fit_track = str(row.get("fitTrack") or "").strip() or "hydrogen_core"
-    row_scope = str(row.get("scopeProfile") or "").strip().lower()
-    adjacent_row = row_scope == "adjacent_mbse" or is_adjacent_scope(config)
+    del config
+    fit_track = str(row.get("fitTrack") or "").strip() or "direct_fit"
 
     def _number(text: object) -> int | None:
         raw = str(text or "").strip()
@@ -210,12 +187,8 @@ def row_to_job(row: Mapping[str, Any], config: Mapping[str, Any] | None) -> dict
             "matchScore": _number(row.get("matchScore")),
             "fitLevelCn": str(row.get("fitLevelCn") or ""),
             "fitTrack": fit_track,
-            "jobCluster": str(row.get("jobCluster") or TRACK_CLUSTER_LABEL.get(fit_track, TRACK_CLUSTER_LABEL["hydrogen_core"])),
-            "industryTrackCn": (
-                "副线：MBSE/系统验证/技术接口"
-                if adjacent_row
-                else TRACK_CN_LABEL.get(fit_track, TRACK_CN_LABEL["hydrogen_core"])
-            ),
+            "jobCluster": str(row.get("jobCluster") or TRACK_CLUSTER_LABEL.get(fit_track, TRACK_CLUSTER_LABEL["direct_fit"])),
+            "industryTrackCn": TRACK_CN_LABEL.get(fit_track, TRACK_CN_LABEL["direct_fit"]),
             "transferableScore": _number(row.get("transferableScore")),
             "primaryEvidenceCn": str(row.get("primaryEvidenceCn") or ""),
             "adjacentDirectionCn": str(row.get("adjacentDirectionCn") or ""),
@@ -301,12 +274,19 @@ def write_tracker_xlsx(
     sheet.append(headers)
     sheet.auto_filter.ref = f"A1:{get_column_letter(len(columns))}1"
 
-    adjacent_scope = is_adjacent_scope(config)
     scope_profile = ""
     if isinstance(config, Mapping):
         candidate = config.get("candidate")
         if isinstance(candidate, Mapping):
-            scope_profile = str(candidate.get("scopeProfile") or "").strip()
+            raw_scope_profiles = candidate.get("scopeProfiles")
+            if isinstance(raw_scope_profiles, list):
+                scope_profile = " | ".join(
+                    str(item or "").strip()
+                    for item in raw_scope_profiles
+                    if str(item or "").strip()
+                )
+            if not scope_profile:
+                scope_profile = str(candidate.get("scopeProfile") or "").strip()
 
     for job in jobs:
         analysis = job.get("analysis")

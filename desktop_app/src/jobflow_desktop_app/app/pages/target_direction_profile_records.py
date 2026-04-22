@@ -61,12 +61,9 @@ def build_new_profile_record(
         scope_profile=scope_profile,
         target_role=prepared.canonical_name,
         location_preference=candidate.preferred_locations,
-        company_focus="",
-        company_keyword_focus="",
         role_name_i18n=prepared.role_name_i18n,
         keyword_focus=prepared.keyword_focus,
         is_active=is_active,
-        queries=[],
     )
 
 
@@ -89,12 +86,9 @@ def build_updated_profile_record(
             if existing_profile is not None and existing_profile.location_preference.strip()
             else candidate.preferred_locations
         ),
-        company_focus=existing_profile.company_focus if existing_profile is not None else "",
-        company_keyword_focus=existing_profile.company_keyword_focus if existing_profile is not None else "",
         role_name_i18n=prepared.role_name_i18n,
         keyword_focus=prepared.keyword_focus,
         is_active=is_active,
-        queries=existing_profile.queries if existing_profile is not None else [],
     )
 
 

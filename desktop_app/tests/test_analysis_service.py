@@ -30,7 +30,6 @@ class AnalysisServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.config = {
             "candidate": {
-                "targetRole": "Hydrogen durability engineer",
                 "locationPreference": "Berlin / Remote",
                 "targetRoles": [
                     {
@@ -68,7 +67,7 @@ class AnalysisServiceTests(unittest.TestCase):
         }
         self.candidate_profile = {
             "summary": "Hydrogen durability and PEM degradation researcher",
-            "background_keywords": ["PEM", "degradation", "durability"],
+            "job_fit_core_terms": ["PEM", "degradation", "durability"],
         }
 
     def test_score_job_fit_low_token_mode_normalizes_payload(self) -> None:
@@ -151,6 +150,18 @@ class AnalysisServiceTests(unittest.TestCase):
         assert binding is not None
         self.assertEqual(binding.best_role.role_id, "profile:1")
         self.assertEqual(client.requests[0]["text"]["format"]["name"], "target_role_binding")
+
+    def test_evaluate_target_roles_for_job_skips_low_score_non_recommended_jobs(self) -> None:
+        client = _FakeClient([])
+        binding = JobAnalysisService.evaluate_target_roles_for_job(
+            client,
+            config=self.config,
+            candidate_profile=self.candidate_profile,
+            job=self.job,
+            analysis={"matchScore": 22, "fitLevelCn": "不匹配", "recommend": False},
+        )
+        self.assertIsNone(binding)
+        self.assertEqual(client.requests, [])
 
     def test_post_verify_recommended_job_normalizes_output(self) -> None:
         self.config["analysis"]["postVerifyUseWebSearch"] = True

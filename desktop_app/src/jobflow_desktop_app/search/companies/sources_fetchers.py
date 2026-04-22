@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import re
 import time
@@ -7,11 +8,9 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
 from .sources_helpers import (
-    _COMMON_CAREERS_PATHS,
     collect_careers_page_job_candidates,
     extract_all_json_ld_job_postings,
     strip_html_to_text,
@@ -147,33 +146,6 @@ def fetch_smartrecruiters_jobs(
     return jobs
 
 
-def discover_careers_from_website(
-    website: str,
-    *,
-    config: Mapping[str, Any] | None,
-    timeout_seconds: int | None,
-) -> str:
-    base_url = str(website or "").strip()
-    if not base_url:
-        return ""
-    for path_candidate in _COMMON_CAREERS_PATHS:
-        target_url = urljoin(base_url, path_candidate)
-        try:
-            html, final_url = fetch_text(
-                target_url,
-                config=config,
-                timeout_seconds=timeout_seconds,
-            )
-        except Exception:
-            continue
-        if extract_all_json_ld_job_postings(html):
-            return final_url or target_url
-        plain = strip_html_to_text(html)[:2500].lower()
-        if re.search(r"careers?|jobs?|openings?|vacancies?|join us|hiring|apply", plain):
-            return final_url or target_url
-    return ""
-
-
 def fetch_careers_page_jobs(
     url: str,
     *,
@@ -190,6 +162,20 @@ def fetch_text(
     config: Mapping[str, Any] | None,
     timeout_seconds: int | None,
 ) -> tuple[str, str]:
+    payload, _, final_url = fetch_response(
+        url,
+        config=config,
+        timeout_seconds=timeout_seconds,
+    )
+    return payload.decode("utf-8", errors="replace"), final_url
+
+
+def fetch_response(
+    url: str,
+    *,
+    config: Mapping[str, Any] | None,
+    timeout_seconds: int | None,
+) -> tuple[bytes, str, str]:
     request = Request(
         url,
         headers={
@@ -199,13 +185,18 @@ def fetch_text(
     )
     request_timeout = request_timeout_seconds(config, timeout_seconds)
     with urlopen(request, timeout=request_timeout) as response:
-        content = response.read().decode("utf-8", errors="replace")
+        content = response.read()
         final_url = ""
         try:
             final_url = str(response.geturl() or "").strip()
         except Exception:
             final_url = url
-        return content, final_url or url
+        content_type = ""
+        try:
+            content_type = str(response.headers.get_content_type() or "").strip()
+        except Exception:
+            content_type = str(response.headers.get("Content-Type") or "").strip()
+        return content, content_type, final_url or url
 
 
 def fetch_json(
@@ -231,6 +222,18 @@ def fetch_json(
         raise
     except URLError:
         raise
+
+
+def extract_pdf_text_from_bytes(payload: bytes) -> str:
+    try:
+        from pypdf import PdfReader  # type: ignore
+    except ModuleNotFoundError:
+        return ""
+    try:
+        reader = PdfReader(io.BytesIO(payload))
+        return "\n".join(page.extract_text() or "" for page in reader.pages).strip()
+    except Exception:
+        return ""
 
 
 def request_timeout_seconds(
@@ -310,8 +313,9 @@ def smartrecruiters_summary(job_ad: object) -> str:
 
 
 __all__ = [
-    "discover_careers_from_website",
+    "extract_pdf_text_from_bytes",
     "fetch_careers_page_jobs",
+    "fetch_response",
     "fetch_greenhouse_jobs",
     "fetch_json",
     "fetch_lever_jobs",

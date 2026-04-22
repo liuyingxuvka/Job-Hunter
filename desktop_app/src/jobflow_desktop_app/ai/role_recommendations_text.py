@@ -3,36 +3,6 @@ from __future__ import annotations
 import json
 import re
 
-
-STRONG_ADJACENT_SCOPE_KEYWORDS = (
-    "mbse",
-    "sysml",
-    "v&v",
-    "verification",
-    "validation",
-    "traceability",
-    "digital twin",
-    "condition monitoring",
-    "asset health",
-    "technical interface",
-    "owner engineer",
-    "qualification",
-    "failure analysis",
-)
-
-SOFT_ADJACENT_SCOPE_KEYWORDS = ()
-
-HYDROGEN_SCOPE_KEYWORDS = (
-    "hydrogen",
-    "electrolyzer",
-    "electrolysis",
-    "fuel cell",
-    "pem",
-    "alkaline",
-    "ammonia",
-    "electrochemical",
-)
-
 GENERIC_ROLE_WORDS = {
     "engineer",
     "manager",
@@ -265,13 +235,6 @@ def description_query_lines(raw_text: str) -> list[str]:
 
 
 def infer_scope_profile(name: str, description: str) -> str:
-    haystack = f"{name}\n{description}".lower()
-    if any(keyword in haystack for keyword in HYDROGEN_SCOPE_KEYWORDS):
-        return "hydrogen_mainline"
-    if any(keyword in haystack for keyword in STRONG_ADJACENT_SCOPE_KEYWORDS):
-        return "adjacent_mbse"
-    if any(keyword in haystack for keyword in SOFT_ADJACENT_SCOPE_KEYWORDS):
-        return "adjacent_mbse"
     return ""
 
 

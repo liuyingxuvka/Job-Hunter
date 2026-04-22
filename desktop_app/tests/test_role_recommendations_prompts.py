@@ -4,6 +4,7 @@ import unittest
 
 from jobflow_desktop_app.ai.role_recommendations_models import CandidateSemanticProfile, ResumeReadResult
 from jobflow_desktop_app.ai.role_recommendations_prompts import (
+    CANDIDATE_SEMANTIC_PROFILE_PROMPT,
     build_candidate_semantic_profile_prompt,
     build_role_recommendation_prompt,
     compact_role_recommendation_semantic_profile_lines,
@@ -35,13 +36,16 @@ class RoleRecommendationsPromptsTests(unittest.TestCase):
         self.assertIn("Professional background summary (manual):", prompt)
         self.assertIn("resume excerpt", prompt)
 
+    def test_candidate_semantic_profile_prompt_asset_rejects_naked_support_phrases(self) -> None:
+        self.assertIn("must stay domain-qualified", CANDIDATE_SEMANTIC_PROFILE_PROMPT)
+        self.assertIn("Do NOT output naked support/process phrases", CANDIDATE_SEMANTIC_PROFILE_PROMPT)
+
     def test_build_role_recommendation_prompt_includes_compact_semantic_profile_lines(self) -> None:
         profile = CandidateSemanticProfile(
             summary="Hydrogen systems focus",
-            target_direction_keywords=("hydrogen systems",),
-            background_keywords=("systems integration",),
-            core_business_areas=("fuel cell systems",),
-            strong_capabilities=("requirements traceability",),
+            company_discovery_primary_anchors=("hydrogen systems",),
+            job_fit_core_terms=("fuel cell systems",),
+            job_fit_support_terms=("systems integration", "requirements traceability"),
         )
         compact_lines = compact_role_recommendation_semantic_profile_lines(profile)
         prompt = build_role_recommendation_prompt(

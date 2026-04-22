@@ -32,7 +32,7 @@ class RoleRecommendationsTextTests(unittest.TestCase):
     def test_scope_profile_and_generic_name_detection(self) -> None:
         self.assertEqual(
             infer_scope_profile("Fuel Cell Test Engineer", "PEM hydrogen system validation"),
-            "hydrogen_mainline",
+            "",
         )
         self.assertTrue(is_generic_role_name("Engineer"))
         self.assertTrue(is_generic_role_name("高级工程师"))

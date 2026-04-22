@@ -113,7 +113,6 @@ def run_search(
     result_factory,
     time_ns_fn: Callable[[], int],
     time_monotonic_fn: Callable[[], float],
-    empty_rounds_before_end: int,
 ):
     if candidate.candidate_id is None:
         raise ValueError("Candidate ID is required.")
@@ -151,7 +150,7 @@ def run_search(
 
     def error_result_for_run(message: str, stdout_tail: str = "", stderr_tail: str = ""):
         detail = runner._tail(stderr_tail or stdout_tail or message, max_lines=8, max_chars=1200)
-        runner._refresh_resume_pending_jobs(run_dir)
+        runner._refresh_resume_pending_jobs(run_dir, current_run_id=search_run_id)
         write_progress(status="error", message=message, last_event=detail)
         return runner._error_result(
             candidate.candidate_id,
@@ -162,7 +161,7 @@ def run_search(
 
     def cancelled_result(message: str, stdout_tail: str = "", stderr_tail: str = ""):
         detail = runner._tail(stderr_tail or stdout_tail or message, max_lines=8, max_chars=1200)
-        runner._refresh_resume_pending_jobs(run_dir)
+        runner._refresh_resume_pending_jobs(run_dir, current_run_id=search_run_id)
         write_progress(status="cancelled", stage="done", message=message, last_event=detail)
         return result_factory(
             success=False,
@@ -203,12 +202,10 @@ def run_search(
             semantic_profile=semantic_profile,
         )
         candidate_search_signals = candidate_search_signals_module.collect_candidate_search_signals(
-            candidate=candidate,
             profiles=profiles,
             semantic_profile=semantic_profile,
         )
         candidate_runtime_context = runtime_config_builder.build_runtime_candidate_context(
-            getattr(runner, "runtime_mirror", None),
             candidate=candidate,
             profiles=profiles,
             run_dir=run_dir,
@@ -244,9 +241,6 @@ def run_search(
             runtime_config,
             "adaptiveSearch",
         )
-        session_pass_timeout_seconds = runtime_strategy.session_pass_timeout_seconds(
-            adaptive_runtime_config
-        )
 
         resume_config = runtime_config_builder.build_runtime_config(
             getattr(runner, "runtime_mirror", None),
@@ -264,7 +258,6 @@ def run_search(
         runner._sync_search_run_configs(
             search_run_id,
             runtime_config=runtime_config,
-            resume_config=resume_config,
         )
     except Exception as exc:
         return error_result_for_run(f"Failed to generate runtime config: {exc}")
@@ -297,11 +290,9 @@ def run_search(
             effective_max_companies=effective_max_companies,
             query_rotation_seed=query_rotation_seed,
             search_session_deadline=time_monotonic_fn() + max(1, int(timeout_seconds)),
-            session_pass_timeout_seconds=session_pass_timeout_seconds,
             candidate_search_signals=candidate_search_signals,
             candidate_context=candidate_runtime_context,
             search_run_id=search_run_id,
-            empty_rounds_before_end=empty_rounds_before_end,
         )
     )
     return result_factory(
@@ -312,6 +303,7 @@ def run_search(
         stderr_tail=session_outcome.stderr_tail,
         run_dir=run_dir,
         cancelled=session_outcome.cancelled,
+        details=getattr(session_outcome, "details", None),
     )
 
 

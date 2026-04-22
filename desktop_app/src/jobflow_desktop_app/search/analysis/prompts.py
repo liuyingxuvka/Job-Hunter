@@ -11,10 +11,10 @@ from .scoring_contract import normalize_score
 
 FIT_LEVEL_VALUES = ("强匹配", "匹配", "可能匹配", "不匹配")
 FIT_TRACK_VALUES = (
-    "hydrogen_core",
-    "energy_digitalization",
-    "battery_ess_powertrain",
-    "test_validation_reliability",
+    "direct_fit",
+    "adjacent_fit",
+    "transferable_fit",
+    "exploratory_fit",
 )
 
 
@@ -297,7 +297,7 @@ def build_lite_scoring_prompt(
         "候选人画像（JSON）：\n"
         f"{_json_block(candidate_profile or {})}\n\n"
         "候选人目标方向：\n"
-        f"{_candidate_field(config, 'targetRole')}\n\n"
+        f"{_candidate_target_role_summary(config, fallback='未提供')}\n\n"
         "候选人地点偏好：\n"
         f"{_candidate_field(config, 'locationPreference', fallback='未提供')}\n\n"
         f"{str(data_availability_note or '').strip()}\n\n"
@@ -390,7 +390,7 @@ def build_target_role_binding_prompt(
     else:
         candidate_context = (
             "候选人整体方向：\n"
-            f"{_candidate_field(config, 'targetRole', fallback='未提供')}\n\n"
+            f"{_candidate_target_role_summary(config, fallback='未提供')}\n\n"
             "候选人地点偏好：\n"
             f"{_candidate_field(config, 'locationPreference', fallback='未提供')}"
         )
@@ -458,7 +458,7 @@ def build_post_verify_prompt(
     return (
         "你是岗位复核器。请只做二次复核，输出 JSON。\n\n"
         "候选人目标：\n"
-        f"{_candidate_field(config, 'targetRole')}\n\n"
+        f"{_candidate_target_role_summary(config, fallback='未提供')}\n\n"
         "候选人地点偏好：\n"
         f"{_candidate_field(config, 'locationPreference', fallback='未提供')}\n\n"
         "岗位：\n"
@@ -841,6 +841,36 @@ def _candidate_field(config: Mapping[str, Any], key: str, fallback: str = "") ->
         return fallback
     value = str(candidate.get(key) or "").strip()
     return value or fallback
+
+
+def _candidate_target_roles(config: Mapping[str, Any]) -> list[TargetRoleDefinition]:
+    candidate = config.get("candidate")
+    if not isinstance(candidate, Mapping):
+        return []
+    target_roles = candidate.get("targetRoles")
+    if not isinstance(target_roles, list):
+        return []
+    return normalize_target_roles(target_roles)
+
+
+def _candidate_target_role_summary(config: Mapping[str, Any], fallback: str = "") -> str:
+    normalized_roles = _candidate_target_roles(config)
+    if normalized_roles:
+        chunks: list[str] = []
+        seen: set[str] = set()
+        for role in normalized_roles:
+            text = role.display_name or role.target_role_text or role.name_en or role.name_zh
+            text = str(text or "").strip()
+            if not text:
+                continue
+            key = text.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            chunks.append(text)
+        if chunks:
+            return " ; ".join(chunks[:8])
+    return fallback
 
 
 def _json_block(value: Any) -> str:

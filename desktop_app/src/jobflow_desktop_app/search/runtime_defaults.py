@@ -3,8 +3,7 @@ from __future__ import annotations
 DEFAULT_RUNTIME_CONFIG: dict[str, object] = {
     "candidate": {
         "resumePath": "./resume.md",
-        "scopeProfile": "hydrogen_mainline",
-        "targetRole": "Experienced systems, validation, reliability, or domain-specialist roles in advanced energy and industrial technology.",
+        "scopeProfiles": [],
         "locationPreference": "Primary and secondary target regions defined by the user. Remote or relocation depends on the candidate.",
     },
     "search": {
@@ -32,13 +31,11 @@ DEFAULT_RUNTIME_CONFIG: dict[str, object] = {
             "region:US": 50,
             "region:APAC": 40,
         },
-        "majorCompanyKeywords": [],
     },
     "companyDiscovery": {
         "model": "gpt-4o-mini",
     },
     "adaptiveSearch": {
-        "passWorkBudgetSeconds": 120,
         "companyBatchSize": 4,
         "discoveryBreadth": 4,
         "cooldownBaseDays": 7,
@@ -69,10 +66,10 @@ DEFAULT_RUNTIME_CONFIG: dict[str, object] = {
         "scoringUseWebSearch": False,
         "scoringJdMaxChars": 12000,
         "lowTokenJdMaxChars": 1800,
-        "postVerifyEnabled": True,
-        "postVerifyRequireChecked": True,
+        "postVerifyEnabled": False,
+        "postVerifyRequireChecked": False,
         "postVerifyModel": "gpt-4o-mini",
-        "postVerifyUseWebSearch": True,
+        "postVerifyUseWebSearch": False,
         "postVerifyJdMaxChars": 1000,
         "transferableFitEnabled": True,
         "recommendScoreThreshold": 60,

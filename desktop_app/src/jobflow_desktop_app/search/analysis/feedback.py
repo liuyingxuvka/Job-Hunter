@@ -7,13 +7,13 @@ from typing import Any
 
 
 TRACK_KEYS = (
-    "hydrogen_core",
-    "energy_digitalization",
-    "battery_ess_powertrain",
-    "test_validation_reliability",
+    "direct_fit",
+    "adjacent_fit",
+    "transferable_fit",
+    "exploratory_fit",
 )
 
-DEFAULT_TRACK = "hydrogen_core"
+DEFAULT_TRACK = "direct_fit"
 
 
 def job_review_key(job: Mapping[str, Any]) -> str:
@@ -177,10 +177,7 @@ def build_feedback_rows_from_review_state(
 def compute_track_feedback_stats(
     rows: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...],
 ) -> dict[str, dict[str, int]]:
-    stats = {
-        key: {"positive": 0, "negative": 0}
-        for key in TRACK_KEYS
-    }
+    stats = {key: {"positive": 0, "negative": 0} for key in TRACK_KEYS}
     for row in rows:
         normalized = normalize_feedback_row(row)
         key = normalized["fitTrack"]
@@ -190,4 +187,3 @@ def compute_track_feedback_stats(
         if result["negative"]:
             stats[key]["negative"] += 1
     return stats
-

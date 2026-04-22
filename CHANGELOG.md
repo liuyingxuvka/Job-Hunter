@@ -10,6 +10,22 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-04-22
+
+### Added
+
+- Added AI-assisted rescue for known job-detail pages when normal detail fetching falls into anti-bot or interstitial shells, so concrete roles can still be analyzed instead of being dropped immediately.
+
+### Changed
+
+- Refined the Python-native company-first search pipeline around company-first discovery, company fit retries, non-ATS source coverage, and work-unit state handling so multi-session search runs progress more predictably.
+- Simplified runtime state ownership by removing stale fields, dead projections, and duplicated lifecycle helpers that were no longer driving the active search pipeline.
+
+### Fixed
+
+- Fixed the Windows release packaging contract so packaged builds now include the newer `search_discovery` and `search_ranking` prompt assets used by the active search flow.
+- Fixed a results-page UI regression where stale blocker text could remain visible after AI prerequisite states were cleared.
+
 ## [0.6.0] - 2026-04-18
 
 ### Added

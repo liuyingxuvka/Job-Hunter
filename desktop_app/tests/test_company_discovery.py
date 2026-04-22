@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
-import random
 import sys
 import unittest
 from pathlib import Path
@@ -15,12 +14,15 @@ if str(SRC_ROOT) not in sys.path:
 from jobflow_desktop_app.search.companies.discovery import (  # noqa: E402
     auto_discover_companies_in_pool,
     build_company_identity_keys,
-    discover_companies_from_query,
-    sample_weighted_discovery_queries,
+    discover_companies_for_candidate,
 )
-from jobflow_desktop_app.ai.role_recommendations import CandidateSemanticProfile  # noqa: E402
+from jobflow_desktop_app.ai.client import OpenAIResponsesError  # noqa: E402
+from jobflow_desktop_app.ai.role_recommendations import (  # noqa: E402
+    CandidateSemanticProfile,
+    encode_bilingual_description,
+    encode_bilingual_role_name,
+)
 from jobflow_desktop_app.search.orchestration.candidate_search_signals import (  # noqa: E402
-    CandidateInputSignals,
     CandidateSearchSignals,
     ProfileSearchSignals,
     SemanticSearchSignals,
@@ -32,6 +34,7 @@ from jobflow_desktop_app.search.orchestration.company_discovery_queries import (
     build_discovery_anchor_plan,
     discovery_query_bucket_order,
 )
+from jobflow_desktop_app.db.repositories.profiles import SearchProfileRecord  # noqa: E402
 
 try:
     from ._helpers import create_candidate, create_profile, make_temp_context
@@ -51,8 +54,23 @@ class _FakeClient:
         return self.payloads.pop(0)
 
 
+class _FlakyClient:
+    def __init__(self, outcomes: list[object]) -> None:
+        self.outcomes = list(outcomes)
+        self.requests: list[dict] = []
+
+    def create(self, payload: dict) -> dict:
+        self.requests.append(payload)
+        if not self.outcomes:
+            raise AssertionError("No outcome left for client.create().")
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
 class CompanyDiscoveryTests(unittest.TestCase):
-    def test_discover_companies_from_query_uses_web_search_and_normalizes_results(self) -> None:
+    def test_discover_companies_for_candidate_uses_web_search_and_normalizes_results(self) -> None:
         client = _FakeClient(
             [
                 {
@@ -62,6 +80,7 @@ class CompanyDiscoveryTests(unittest.TestCase):
                                 {
                                     "name": "Acme Energy",
                                     "website": "https://acme.example/careers#jobs",
+                                    "businessSummary": "Hydrogen systems employer with fuel-cell platform operations.",
                                     "tags": ["hydrogen"],
                                     "region": "de",
                                 }
@@ -73,20 +92,141 @@ class CompanyDiscoveryTests(unittest.TestCase):
             ]
         )
 
-        companies = discover_companies_from_query(
+        companies = discover_companies_for_candidate(
             client,
             model="gpt-5-nano",
-            query="hydrogen durability companies",
-            excluded_companies=["Existing Co"],
-            adjacent_scope=False,
+            candidate_context={
+                "summary": "Hydrogen systems employer search.",
+                "targetRoles": ["Hydrogen Systems Engineer"],
+                "desiredWorkDirections": ["fuel cell platforms"],
+                "avoidBusinessAreas": ["staffing firms"],
+            },
+            company_count=6,
+            existing_companies=["Existing Co"],
         )
 
         self.assertEqual(len(companies), 1)
         self.assertEqual(companies[0]["name"], "Acme Energy")
+        self.assertEqual(
+            companies[0]["businessSummary"],
+            "Hydrogen systems employer with fuel-cell platform operations.",
+        )
         self.assertIn("source:web", companies[0]["tags"])
         self.assertIn("region:DE", companies[0]["tags"])
         self.assertIn("web_search", companies[0]["discoverySources"])
         self.assertEqual(client.requests[0]["tools"], [{"type": "web_search"}])
+        user_text = client.requests[0]["input"][1]["content"][0]["text"]
+        self.assertIn("desiredCompanyCount", user_text)
+        self.assertIn("Existing Co", user_text)
+        self.assertIn("Hydrogen Systems Engineer", user_text)
+        self.assertIn("Do not repeat any company listed in existingCompanies.", user_text)
+
+    def test_discover_companies_for_candidate_accepts_empty_required_fields(self) -> None:
+        client = _FakeClient(
+            [
+                {
+                    "output_text": json.dumps(
+                        {
+                            "companies": [
+                                {
+                                    "name": "Lokalise",
+                                    "website": "",
+                                    "businessSummary": "",
+                                    "tags": [],
+                                    "region": "",
+                                }
+                            ]
+                        },
+                        ensure_ascii=False,
+                    )
+                }
+            ]
+        )
+
+        companies = discover_companies_for_candidate(
+            client,
+            model="gpt-5-nano",
+            candidate_context={
+                "summary": "Localization operations candidate.",
+                "targetRoles": ["Localization Program Manager"],
+                "desiredWorkDirections": ["translation management"],
+                "avoidBusinessAreas": [],
+            },
+            company_count=6,
+        )
+
+        self.assertEqual(len(companies), 1)
+        self.assertEqual(companies[0]["name"], "Lokalise")
+        self.assertEqual(companies[0]["website"], "")
+        self.assertEqual(companies[0]["businessSummary"], "")
+        self.assertIn("source:web", companies[0]["tags"])
+
+    def test_discover_companies_for_candidate_includes_candidate_context(self) -> None:
+        client = _FakeClient(
+            [
+                {
+                    "output_text": json.dumps({"companies": []}, ensure_ascii=False)
+                }
+            ]
+        )
+
+        discover_companies_for_candidate(
+            client,
+            model="gpt-5-nano",
+            candidate_context={
+                "summary": "Localization leader seeking in-house platform employers.",
+                "targetRoles": ["Localization Program Manager"],
+                "desiredWorkDirections": ["localization operations", "translation management"],
+                "avoidBusinessAreas": ["agency-only roles"],
+            },
+            company_count=10,
+        )
+
+        user_text = client.requests[0]["input"][1]["content"][0]["text"]
+        self.assertIn("candidateContext", user_text)
+        self.assertIn("Localization Program Manager", user_text)
+        self.assertIn("desiredCompanyCount", user_text)
+
+    def test_discover_companies_for_candidate_retries_once_on_timeout(self) -> None:
+        client = _FlakyClient(
+            [
+                OpenAIResponsesError("OpenAI API request timed out."),
+                {
+                    "output_text": json.dumps(
+                        {
+                            "companies": [
+                                {
+                                    "name": "Smartling",
+                                    "website": "https://www.smartling.com",
+                                    "businessSummary": "Localization software platform for multilingual content teams.",
+                                    "tags": ["localization", "tms"],
+                                    "region": "US",
+                                }
+                            ]
+                        },
+                        ensure_ascii=False,
+                    )
+                },
+            ]
+        )
+
+        progress: list[str] = []
+        companies = discover_companies_for_candidate(
+            client,
+            model="gpt-5-nano",
+            candidate_context={
+                "summary": "Localization operations candidate.",
+                "targetRoles": ["Localization Program Manager"],
+                "desiredWorkDirections": ["translation management", "multilingual content"],
+                "avoidBusinessAreas": [],
+            },
+            company_count=10,
+            progress_callback=progress.append,
+        )
+
+        self.assertEqual([item["name"] for item in companies], ["Smartling"])
+        self.assertEqual(len(client.requests), 2)
+        self.assertIn("Python direct company discovery timed out; retrying once.", progress)
 
     def test_auto_discover_companies_in_pool_updates_companies_and_query_stats(self) -> None:
         config = {
@@ -94,8 +234,13 @@ class CompanyDiscoveryTests(unittest.TestCase):
             "companyDiscovery": {
                 "enableAutoDiscovery": True,
                 "model": "gpt-5-nano",
-                "queries": ["hydrogen companies", "battery companies"],
-                "maxNewCompaniesPerRun": 2,
+                "companyDiscoveryInput": {
+                    "summary": "Hydrogen systems candidate.",
+                    "targetRoles": ["Hydrogen Systems Engineer"],
+                    "desiredWorkDirections": ["hydrogen systems", "fuel-cell platforms"],
+                    "avoidBusinessAreas": [],
+                },
+                "maxCompaniesPerCall": 6,
             },
         }
         client = _FakeClient(
@@ -128,10 +273,6 @@ class CompanyDiscoveryTests(unittest.TestCase):
                     "repeatCount": 2,
                 }
             ],
-            query_stats={},
-            query_budget=1,
-            max_new_companies=1,
-            rng=random.Random(0),
             progress_callback=progress.append,
         )
 
@@ -140,21 +281,182 @@ class CompanyDiscoveryTests(unittest.TestCase):
         self.assertEqual(len(progress), 1)
         self.assertEqual(len(result["companies"]), 2)
         self.assertEqual(result["companies"][0]["repeatCount"], 1)
-        self.assertFalse(result["queryStats"])
         new_company = result["companies"][1]
         self.assertIn("domain:acme.example", build_company_identity_keys(new_company))
 
-    def test_sample_weighted_discovery_queries_dedupes_and_respects_limit(self) -> None:
-        queries = sample_weighted_discovery_queries(
-            ["A", "a", "B", "C"],
-            {"B": 3},
-            2,
-            rng=random.Random(1),
-            used_queries={"C"},
+    def test_auto_discover_companies_in_pool_returns_exhausted_when_query_set_missing(self) -> None:
+        config = {
+            "candidate": {},
+            "companyDiscovery": {
+                "enableAutoDiscovery": True,
+                "model": "gpt-5-nano",
+            },
+        }
+        client = _FakeClient([])
+
+        result = auto_discover_companies_in_pool(
+            client,
+            config=config,
+            companies=[],
         )
-        self.assertEqual(len(queries), 2)
-        self.assertEqual(len({item.casefold() for item in queries}), 2)
-        self.assertNotIn("C", queries)
+
+        self.assertEqual(result["added"], 0)
+        self.assertEqual(result["total"], 0)
+        self.assertEqual(result["newCompanies"], [])
+        self.assertEqual(client.requests, [])
+
+    def test_auto_discover_companies_in_pool_processes_a_single_query_per_call(self) -> None:
+        config = {
+            "candidate": {},
+            "companyDiscovery": {
+                "enableAutoDiscovery": True,
+                "model": "gpt-5-nano",
+                "companyDiscoveryInput": {
+                    "summary": "Risk candidate.",
+                    "targetRoles": ["Risk Manager"],
+                    "desiredWorkDirections": ["risk operations"],
+                    "avoidBusinessAreas": [],
+                },
+                "maxCompaniesPerCall": 2,
+            },
+        }
+        client = _FakeClient(
+            [
+                {
+                    "output_text": json.dumps(
+                        {
+                            "companies": [
+                                {
+                                    "name": "Acme Risk",
+                                    "website": "https://risk.example",
+                                    "tags": ["risk"],
+                                    "region": "DE",
+                                }
+                            ]
+                        },
+                        ensure_ascii=False,
+                    )
+                },
+            ],
+        )
+
+        result = auto_discover_companies_in_pool(
+            client,
+            config=config,
+            companies=[],
+        )
+
+        self.assertEqual(result["added"], 1)
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["newCompanies"][0]["name"], "Acme Risk")
+
+    def test_auto_discover_companies_in_pool_passes_existing_company_names_to_direct_discovery(self) -> None:
+        config = {
+            "candidate": {},
+            "companyDiscovery": {
+                "enableAutoDiscovery": True,
+                "model": "gpt-5-nano",
+                "companyDiscoveryInput": {
+                    "summary": "Localization candidate.",
+                    "targetRoles": ["Localization Program Manager"],
+                    "desiredWorkDirections": ["translation management"],
+                    "avoidBusinessAreas": [],
+                },
+                "maxCompaniesPerCall": 10,
+            },
+        }
+        client = _FakeClient(
+            [
+                {
+                    "output_text": json.dumps({"companies": []}, ensure_ascii=False)
+                }
+            ]
+        )
+
+        auto_discover_companies_in_pool(
+            client,
+            config=config,
+            companies=[
+                {"name": "Smartling", "website": "https://www.smartling.com"},
+                {"name": "Lokalise", "website": "https://lokalise.com"},
+            ],
+        )
+
+        user_text = client.requests[0]["input"][1]["content"][0]["text"]
+        self.assertIn("Smartling", user_text)
+        self.assertIn("Lokalise", user_text)
+
+    def test_auto_discover_companies_in_pool_processes_one_query_and_advances_cursor(self) -> None:
+        config = {
+            "candidate": {
+                "targetRoles": [{"displayName": "Localization Program Manager"}],
+                "semanticProfile": {
+                    "summary": "In-house localization leader for multilingual product teams.",
+                    "company_discovery_primary_anchors": ["localization operations"],
+                    "company_discovery_secondary_anchors": ["translation management"],
+                    "avoid_business_areas": ["agency-only roles"],
+                },
+            },
+            "companyDiscovery": {
+                "enableAutoDiscovery": True,
+                "model": "gpt-5-nano",
+                "companyDiscoveryInput": {
+                    "summary": "In-house localization leader for multilingual product teams.",
+                    "targetRoles": ["Localization Program Manager"],
+                    "desiredWorkDirections": [
+                        "localization operations",
+                        "translation management",
+                    ],
+                    "avoidBusinessAreas": ["agency-only roles"],
+                },
+                "maxCompaniesPerCall": 3,
+            },
+        }
+        client = _FakeClient(
+            [
+                {
+                    "output_text": json.dumps(
+                        {
+                            "companies": [
+                                {
+                                    "name": "Microsoft",
+                                    "website": "https://www.microsoft.com",
+                                    "businessSummary": "Global technology company.",
+                                    "tags": [],
+                                    "region": "GLOBAL",
+                                },
+                                {
+                                    "name": "Lokalise",
+                                    "website": "https://lokalise.com",
+                                    "businessSummary": "Localization platform.",
+                                    "tags": [],
+                                    "region": "GLOBAL",
+                                },
+                                {
+                                    "name": "Smartling",
+                                    "website": "https://www.smartling.com",
+                                    "businessSummary": "Localization platform.",
+                                    "tags": [],
+                                    "region": "GLOBAL",
+                                },
+                            ]
+                        },
+                        ensure_ascii=False,
+                    )
+                },
+            ]
+        )
+
+        result = auto_discover_companies_in_pool(
+            client,
+            config=config,
+            companies=[],
+        )
+
+        names = [company["name"] for company in result["newCompanies"]]
+        self.assertEqual(result["added"], 3)
+        self.assertEqual(len(client.requests), 1)
+        self.assertEqual(names, ["Microsoft", "Lokalise", "Smartling"])
 
     def test_build_discovery_anchor_plan_uses_injected_signals_for_semantic_path(self) -> None:
         with make_temp_context() as context:
@@ -172,48 +474,41 @@ class CompanyDiscoveryTests(unittest.TestCase):
             self.assertIsNotNone(candidate)
             semantic_profile = CandidateSemanticProfile(
                 summary="Hydrogen profile",
-                core_business_areas=("placeholder",),
+                job_fit_core_terms=("placeholder",),
             )
             signals = CandidateSearchSignals(
                 semantic=SemanticSearchSignals(
                     summary="Hydrogen profile",
-                    target_direction_keywords=["fuel cell diagnostics"],
-                    background_keywords=["hydrogen systems"],
-                    core_business_areas=["electrochemical durability"],
-                    strong_capabilities=["degradation analytics"],
-                    adjacent_business_areas=["reliability engineering"],
-                    exploration_business_areas=["industrial technology"],
+                    company_discovery_primary_anchors=["fuel cell diagnostics"],
+                    company_discovery_secondary_anchors=["reliability engineering", "industrial technology"],
+                    job_fit_core_terms=["hydrogen systems", "electrochemical durability"],
+                    job_fit_support_terms=["degradation analytics"],
                     avoid_business_areas=[],
                 ),
-                candidate=CandidateInputSignals(target_directions=[], notes=[]),
                 profile=ProfileSearchSignals(
                     role_names=[],
                     target_roles=[],
-                    keyword_focus=[],
-                    company_focus=[],
-                    company_keyword_focus=[],
-                    queries=[],
                 ),
             )
 
             plan = build_discovery_anchor_plan(
-                scope_profile="hydrogen_mainline",
+                scope_profiles=["hydrogen_mainline"],
                 signals=signals,
             )
 
-            self.assertEqual(plan.core[:4], [
+            self.assertEqual(plan.core[:3], [
                 "fuel cell diagnostics",
                 "hydrogen systems",
                 "electrochemical durability",
-                "degradation analytics",
             ])
+            self.assertNotIn("degradation analytics", plan.core)
             self.assertIn("reliability engineering", plan.adjacent)
-            self.assertIn("industrial technology", plan.explore)
+            self.assertIn("industrial technology", plan.adjacent)
 
     def test_discovery_query_bucket_order_favors_core_without_extra_weight_math(self) -> None:
         self.assertEqual(
             discovery_query_bucket_order(7),
-            ["core", "adjacent", "core", "explore", "core", "adjacent", "core"],
+            ["core", "adjacent", "core", "core", "adjacent", "core"],
         )
         self.assertEqual(
             discovery_query_bucket_order(3),
@@ -240,26 +535,23 @@ class CompanyDiscoveryTests(unittest.TestCase):
             self.assertIsNotNone(candidate)
             semantic_profile = CandidateSemanticProfile(
                 summary="Hydrogen profile",
-                target_direction_keywords=("fuel cell diagnostics",),
-                background_keywords=("hydrogen systems",),
-                core_business_areas=("electrochemical durability",),
-                adjacent_business_areas=(),
-                exploration_business_areas=(),
-                strong_capabilities=("degradation analytics",),
+                company_discovery_primary_anchors=("fuel cell diagnostics",),
+                company_discovery_secondary_anchors=("digital twin and PHM", "industrial gas platforms"),
+                job_fit_core_terms=("hydrogen systems", "electrochemical durability"),
+                job_fit_support_terms=("degradation analytics",),
             )
 
             signals = collect_candidate_search_signals(
-                candidate=candidate,
                 profiles=profiles,
                 semantic_profile=semantic_profile,
             )
             plan = build_discovery_anchor_plan(
-                scope_profile="hydrogen_mainline",
+                scope_profiles=["hydrogen_mainline"],
                 signals=signals,
             )
 
             self.assertIn("digital twin and PHM", plan.adjacent)
-            self.assertIn("industrial gas platforms", plan.explore)
+            self.assertIn("industrial gas platforms", plan.adjacent)
 
     def test_build_discovery_anchor_plan_classifies_unmatched_business_hints_as_adjacent(self) -> None:
         with make_temp_context() as context:
@@ -280,18 +572,17 @@ class CompanyDiscoveryTests(unittest.TestCase):
             self.assertIsNotNone(candidate)
             semantic_profile = CandidateSemanticProfile(
                 summary="Hydrogen profile",
-                target_direction_keywords=("fuel cell diagnostics",),
-                background_keywords=("hydrogen systems",),
-                core_business_areas=("electrochemical durability",),
+                company_discovery_primary_anchors=("fuel cell diagnostics",),
+                company_discovery_secondary_anchors=("advanced ceramics platforms",),
+                job_fit_core_terms=("hydrogen systems", "electrochemical durability"),
             )
 
             signals = collect_candidate_search_signals(
-                candidate=candidate,
                 profiles=profiles,
                 semantic_profile=semantic_profile,
             )
             plan = build_discovery_anchor_plan(
-                scope_profile="hydrogen_mainline",
+                scope_profiles=["hydrogen_mainline"],
                 signals=signals,
             )
 
@@ -302,7 +593,6 @@ class CompanyDiscoveryTests(unittest.TestCase):
             anchor_plan=DiscoveryAnchorPlan(
                 core=["hydrogen systems", "fuel cells"],
                 adjacent=["reliability engineering"],
-                explore=[],
             ),
             rotation_seed=0,
         )
@@ -311,6 +601,258 @@ class CompanyDiscoveryTests(unittest.TestCase):
         self.assertEqual(len({item.casefold() for item in queries}), 6)
         self.assertTrue(any("reliability engineering" in item for item in queries))
         self.assertFalse(any("energy infrastructure platforms" in item for item in queries))
+        self.assertFalse(any("industrial technology companies" in item for item in queries))
+
+    def test_build_company_discovery_queries_preserve_anchor_priority_under_rotation(self) -> None:
+        queries = build_company_discovery_queries_from_anchor_plan(
+            anchor_plan=DiscoveryAnchorPlan(
+                core=["localization platforms", "translation management systems"],
+                adjacent=["language services providers"],
+            ),
+            rotation_seed=987654,
+        )
+
+        self.assertTrue(queries)
+        self.assertTrue(any("localization platforms" in item for item in queries[:2]))
+        self.assertTrue(any("translation management systems" in item for item in queries[:3]))
+
+    def test_build_company_discovery_queries_prefer_ai_discovery_anchors_over_broad_manual_focus(self) -> None:
+        signals = CandidateSearchSignals(
+            semantic=SemanticSearchSignals(
+                summary="Sustainability and environmental compliance profile",
+                company_discovery_primary_anchors=[
+                    "environmental compliance",
+                    "sustainability reporting",
+                ],
+                company_discovery_secondary_anchors=[
+                    "product stewardship",
+                ],
+                job_fit_core_terms=["ESG governance"],
+            ),
+            profile=ProfileSearchSignals(
+                role_names=[],
+                target_roles=["Environmental Compliance Manager"],
+            ),
+        )
+
+        plan = build_discovery_anchor_plan(
+            scope_profiles=[],
+            signals=signals,
+        )
+        queries = build_company_discovery_queries_from_anchor_plan(
+            anchor_plan=plan,
+            rotation_seed=0,
+        )
+
+        self.assertEqual(plan.core[:2], ["environmental compliance", "sustainability reporting"])
+        self.assertTrue(any("environmental compliance" in item for item in queries[:2]))
+        self.assertTrue(any("sustainability reporting" in item for item in queries[:3]))
+        self.assertFalse(any(item == "regulated industry employers" for item in queries))
+        self.assertFalse(any(item == "life sciences employers" for item in queries))
+
+    def test_build_company_discovery_queries_contextualize_generic_adjacent_anchors(self) -> None:
+        queries = build_company_discovery_queries_from_anchor_plan(
+            anchor_plan=DiscoveryAnchorPlan(
+                core=["in-house localization"],
+                adjacent=["vendor performance management"],
+            ),
+            rotation_seed=0,
+        )
+
+        self.assertTrue(
+            any("in-house localization vendor performance management" in item for item in queries)
+        )
+        self.assertFalse(any(item == "vendor performance management employers" for item in queries))
+
+    def test_build_company_discovery_queries_contextualize_overlap_with_only_generic_support_tokens(self) -> None:
+        queries = build_company_discovery_queries_from_anchor_plan(
+            anchor_plan=DiscoveryAnchorPlan(
+                core=["localization vendor management"],
+                adjacent=["vendor performance management"],
+            ),
+            rotation_seed=0,
+        )
+
+        self.assertTrue(
+            any("localization vendor performance management" in item for item in queries)
+        )
+        self.assertFalse(any(item == "vendor performance management employers" for item in queries))
+
+    def test_build_discovery_anchor_plan_without_scope_profiles_keeps_buckets_empty(self) -> None:
+        signals = CandidateSearchSignals(
+            semantic=SemanticSearchSignals(
+                summary="",
+                company_discovery_primary_anchors=[],
+                company_discovery_secondary_anchors=[],
+                job_fit_core_terms=[],
+                job_fit_support_terms=[],
+                avoid_business_areas=[],
+            ),
+            profile=ProfileSearchSignals(
+                role_names=[],
+                target_roles=[],
+            ),
+        )
+
+        plan = build_discovery_anchor_plan(
+            scope_profiles=[],
+            signals=signals,
+        )
+
+        self.assertEqual(plan.core, [])
+        self.assertEqual(plan.adjacent, [])
+
+    def test_build_discovery_anchor_plan_ignores_partial_scope_defaults(self) -> None:
+        signals = CandidateSearchSignals(
+            semantic=SemanticSearchSignals(
+                summary="",
+                company_discovery_primary_anchors=[],
+                company_discovery_secondary_anchors=[],
+                job_fit_core_terms=["banking risk analytics"],
+                job_fit_support_terms=[],
+                avoid_business_areas=[],
+            ),
+            profile=ProfileSearchSignals(
+                role_names=[],
+                target_roles=[],
+            ),
+        )
+
+        plan = build_discovery_anchor_plan(
+            scope_profiles=["adjacent_mbse", ""],
+            signals=signals,
+        )
+
+        self.assertEqual(plan.core, ["banking risk analytics"])
+        self.assertFalse(any("systems engineering" in item.casefold() for item in plan.core))
+
+    def test_collect_candidate_search_signals_decodes_bilingual_keyword_focus(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(
+                context,
+                name="Finance Candidate",
+                notes="Risk analytics and regulatory reporting",
+            )
+            context.profiles.save(
+                SearchProfileRecord(
+                    profile_id=None,
+                    candidate_id=candidate_id,
+                    name="Regulatory Reporting Automation Engineer",
+                    scope_profile="",
+                    target_role="Regulatory Reporting Automation Engineer",
+                    location_preference="Frankfurt\nBerlin\nRemote Germany",
+                    role_name_i18n=encode_bilingual_role_name(
+                        "监管报送自动化工程师",
+                        "Regulatory Reporting Automation Engineer",
+                    ),
+                    keyword_focus=encode_bilingual_description(
+                        "监管报送自动化",
+                        "Regulatory reporting automation",
+                    ),
+                    is_active=True,
+                )
+            )
+            candidate = context.candidates.get(candidate_id)
+            profiles = context.profiles.list_for_candidate(candidate_id)
+            self.assertIsNotNone(candidate)
+            signals = collect_candidate_search_signals(
+                profiles=profiles,
+                semantic_profile=None,
+            )
+
+            self.assertIn("Regulatory Reporting Automation Engineer", signals.profile.role_names)
+            self.assertIn("Regulatory Reporting Automation Engineer", signals.profile.target_roles)
+            self.assertIn("Regulatory reporting automation", signals.profile.keyword_focus_terms)
+
+    def test_build_discovery_anchor_plan_uses_profile_keyword_focus_when_semantic_profile_missing(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(
+                context,
+                name="Localization Candidate",
+                notes="Prefer in-house localization roles.",
+            )
+            create_profile(
+                context,
+                candidate_id,
+                name="Localization Program Manager",
+                keyword_focus=(
+                    "localization operations\n"
+                    "translation management\n"
+                    "multilingual content\n"
+                    "vendor management"
+                ),
+                is_active=True,
+            )
+            candidate = context.candidates.get(candidate_id)
+            profiles = context.profiles.list_for_candidate(candidate_id)
+            self.assertIsNotNone(candidate)
+
+            signals = collect_candidate_search_signals(
+                profiles=profiles,
+                semantic_profile=None,
+            )
+            plan = build_discovery_anchor_plan(
+                scope_profiles=[],
+                signals=signals,
+            )
+
+            self.assertIn("localization operations", signals.profile.keyword_focus_terms)
+            self.assertIn("translation management", plan.core)
+            self.assertIn("localization operations", plan.core)
+
+    def test_build_discovery_anchor_plan_filters_tool_only_company_hints(self) -> None:
+        signals = CandidateSearchSignals(
+            semantic=SemanticSearchSignals(
+                summary="",
+                company_discovery_primary_anchors=[],
+                company_discovery_secondary_anchors=[],
+                job_fit_core_terms=[],
+                job_fit_support_terms=["Python", "SQL", "Basel reporting"],
+                avoid_business_areas=[],
+            ),
+            profile=ProfileSearchSignals(
+                role_names=[],
+                target_roles=[],
+            ),
+        )
+
+        plan = build_discovery_anchor_plan(
+            scope_profiles=[],
+            signals=signals,
+        )
+
+        self.assertIn("Basel reporting", plan.adjacent)
+        self.assertNotIn("Python", plan.adjacent)
+        self.assertNotIn("SQL", plan.adjacent)
+
+    def test_build_discovery_anchor_plan_normalizes_profile_queries_into_business_phrases(self) -> None:
+        signals = CandidateSearchSignals(
+            semantic=SemanticSearchSignals(
+                summary="",
+                company_discovery_primary_anchors=[],
+                company_discovery_secondary_anchors=[],
+                job_fit_core_terms=["software localization"],
+                job_fit_support_terms=[],
+                avoid_business_areas=[],
+            ),
+            profile=ProfileSearchSignals(
+                role_names=["Translation Management Specialist"],
+                target_roles=[],
+            ),
+        )
+
+        plan = build_discovery_anchor_plan(
+            scope_profiles=[],
+            signals=signals,
+        )
+        queries = build_company_discovery_queries_from_anchor_plan(
+            anchor_plan=plan,
+            rotation_seed=0,
+        )
+
+        self.assertIn("software localization", plan.core)
+        self.assertFalse(any("employers employers" in item for item in queries))
+        self.assertFalse(any("careers employers" in item for item in queries))
 
     def test_build_discovery_anchor_plan_filters_avoided_defaults(self) -> None:
         with make_temp_context() as context:
@@ -327,82 +869,40 @@ class CompanyDiscoveryTests(unittest.TestCase):
             self.assertIsNotNone(candidate)
             semantic_profile = CandidateSemanticProfile(
                 summary="Hydrogen profile",
-                target_direction_keywords=("fuel cell diagnostics",),
-                background_keywords=("hydrogen systems",),
-                core_business_areas=("electrochemical durability",),
+                company_discovery_primary_anchors=("fuel cell diagnostics",),
+                job_fit_core_terms=("hydrogen systems", "electrochemical durability"),
                 avoid_business_areas=("battery", "automotive"),
             )
 
             signals = collect_candidate_search_signals(
-                candidate=candidate,
                 profiles=profiles,
                 semantic_profile=semantic_profile,
             )
             plan = build_discovery_anchor_plan(
-                scope_profile="hydrogen_mainline",
+                scope_profiles=["hydrogen_mainline"],
                 signals=signals,
             )
 
-            self.assertFalse(any("battery" in item.casefold() for item in plan.explore))
-            self.assertFalse(any("automotive" in item.casefold() for item in plan.explore))
-
-    def test_build_discovery_anchor_plan_uses_feedback_keywords_even_with_semantic_profile(self) -> None:
-        with make_temp_context() as context:
-            candidate_id = create_candidate(context, name="Feedback Candidate")
-            create_profile(
-                context,
-                candidate_id,
-                name="Hydrogen Systems Engineer",
-                scope_profile="hydrogen_mainline",
-                is_active=True,
-            )
-            candidate = context.candidates.get(candidate_id)
-            profiles = context.profiles.list_for_candidate(candidate_id)
-            self.assertIsNotNone(candidate)
-            semantic_profile = CandidateSemanticProfile(
-                summary="Hydrogen profile",
-                target_direction_keywords=("fuel cell diagnostics",),
-                background_keywords=("hydrogen systems",),
-                core_business_areas=("electrochemical durability",),
-            )
-
-            signals = collect_candidate_search_signals(
-                candidate=candidate,
-                profiles=profiles,
-                semantic_profile=semantic_profile,
-            )
-            plan = build_discovery_anchor_plan(
-                scope_profile="hydrogen_mainline",
-                signals=signals,
-                feedback_keywords=["digital twin asset health"],
-            )
-
-            self.assertIn("energy digitalization and PHM", plan.adjacent)
+            self.assertFalse(any("battery" in item.casefold() for item in plan.adjacent))
+            self.assertFalse(any("automotive" in item.casefold() for item in plan.adjacent))
 
     def test_phrase_limit_independently_caps_semantic_anchor_pool(self) -> None:
         signals = CandidateSearchSignals(
             semantic=SemanticSearchSignals(
                 summary="Hydrogen diagnostics and reliability profile",
-                target_direction_keywords=["fuel cell diagnostics", "electrolyzer durability"],
-                background_keywords=["hydrogen systems", "lifetime prediction"],
-                core_business_areas=[
+                company_discovery_primary_anchors=["fuel cell diagnostics", "electrolyzer durability"],
+                company_discovery_secondary_anchors=["digital twin asset health"],
+                job_fit_core_terms=[
                     "electrochemical durability",
                     "stack balance of plant",
                     "MEA membrane materials",
                 ],
-                strong_capabilities=["degradation analytics", "reliability engineering"],
-                adjacent_business_areas=["digital twin asset health"],
-                exploration_business_areas=["industrial gas platforms"],
+                job_fit_support_terms=["hydrogen systems", "lifetime prediction", "degradation analytics", "reliability engineering", "industrial gas platforms"],
                 avoid_business_areas=[],
             ),
-            candidate=CandidateInputSignals(target_directions=[], notes=[]),
             profile=ProfileSearchSignals(
                 role_names=[],
                 target_roles=[],
-                keyword_focus=[],
-                company_focus=[],
-                company_keyword_focus=[],
-                queries=[],
             ),
         )
 
@@ -415,7 +915,7 @@ class CompanyDiscoveryTests(unittest.TestCase):
         try:
             discovery_module.DISCOVERY_BUCKET_RULES["core"]["phrase_limit"] = 2
             plan = build_discovery_anchor_plan(
-                scope_profile="hydrogen_mainline",
+                scope_profiles=["hydrogen_mainline"],
                 signals=signals,
             )
         finally:
@@ -424,26 +924,19 @@ class CompanyDiscoveryTests(unittest.TestCase):
 
         self.assertEqual(plan.core, ["fuel cell diagnostics", "electrolyzer durability"])
 
-    def test_minimum_anchor_count_backfills_sparse_buckets_independently(self) -> None:
+    def test_minimum_anchor_count_no_longer_backfills_implicit_scope_defaults(self) -> None:
         signals = CandidateSearchSignals(
             semantic=SemanticSearchSignals(
                 summary="",
-                target_direction_keywords=[],
-                background_keywords=[],
-                core_business_areas=[],
-                strong_capabilities=[],
-                adjacent_business_areas=[],
-                exploration_business_areas=[],
+                company_discovery_primary_anchors=[],
+                company_discovery_secondary_anchors=[],
+                job_fit_core_terms=[],
+                job_fit_support_terms=[],
                 avoid_business_areas=[],
             ),
-            candidate=CandidateInputSignals(target_directions=[], notes=[]),
             profile=ProfileSearchSignals(
                 role_names=[],
                 target_roles=[],
-                keyword_focus=[],
-                company_focus=[],
-                company_keyword_focus=[],
-                queries=[],
             ),
         )
 
@@ -451,29 +944,28 @@ class CompanyDiscoveryTests(unittest.TestCase):
         original_rules = deepcopy(discovery_module.DISCOVERY_BUCKET_RULES)
         try:
             baseline = build_discovery_anchor_plan(
-                scope_profile="hydrogen_mainline",
+                scope_profiles=["hydrogen_mainline"],
                 signals=signals,
             )
             discovery_module.DISCOVERY_BUCKET_RULES["core"]["minimum_anchor_count"] = 3
             discovery_module.DISCOVERY_BUCKET_RULES["adjacent"]["minimum_anchor_count"] = 2
             expanded = build_discovery_anchor_plan(
-                scope_profile="hydrogen_mainline",
+                scope_profiles=["hydrogen_mainline"],
                 signals=signals,
             )
         finally:
             discovery_module.DISCOVERY_BUCKET_RULES.clear()
             discovery_module.DISCOVERY_BUCKET_RULES.update(original_rules)
 
-        self.assertEqual(baseline.core, ["hydrogen systems", "fuel cells"])
-        self.assertEqual(expanded.core, ["hydrogen systems", "fuel cells", "electrolyzers"])
-        self.assertEqual(baseline.adjacent, ["system validation and testing"])
-        self.assertEqual(expanded.adjacent, ["system validation and testing", "energy digitalization and PHM"])
+        self.assertEqual(baseline.core, [])
+        self.assertEqual(expanded.core, [])
+        self.assertEqual(baseline.adjacent, [])
+        self.assertEqual(expanded.adjacent, [])
 
     def test_query_limit_independently_changes_query_budget_and_bucket_mix(self) -> None:
         anchor_plan = DiscoveryAnchorPlan(
             core=["hydrogen systems", "fuel cells", "electrochemical diagnostics"],
             adjacent=["reliability engineering", "digital twin asset health"],
-            explore=["industrial gas platforms", "battery aging diagnostics"],
         )
 
         import jobflow_desktop_app.search.orchestration.company_discovery_queries as discovery_module
@@ -494,11 +986,11 @@ class CompanyDiscoveryTests(unittest.TestCase):
             discovery_module.DISCOVERY_BUCKET_RULES.clear()
             discovery_module.DISCOVERY_BUCKET_RULES.update(original_rules)
 
-        self.assertEqual(len(baseline_queries), 7)
+        self.assertEqual(len(baseline_queries), 6)
         self.assertEqual(baseline_order.count("core"), 4)
-        self.assertEqual(len(reduced_queries), 5)
+        self.assertEqual(len(reduced_queries), 4)
         self.assertEqual(reduced_order.count("core"), 2)
-        self.assertIn("explore", reduced_order)
+        self.assertNotIn("explore", reduced_order)
 
 
 if __name__ == "__main__":

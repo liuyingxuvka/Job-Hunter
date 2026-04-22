@@ -125,6 +125,68 @@ def search_runtime_messages(
     return "", "", ""
 
 
+def search_completion_detail(
+    ui_language: str,
+    *,
+    discovered_job_count: int,
+    scored_job_count: int,
+    recommended_job_count: int,
+    pending_job_count: int,
+    candidate_company_pool_count: int = 0,
+    no_qualified_company_stop: bool = False,
+) -> str:
+    discovered = max(0, int(discovered_job_count or 0))
+    scored = max(0, int(scored_job_count or 0))
+    recommended = max(0, int(recommended_job_count or 0))
+    pending = max(0, int(pending_job_count or 0))
+    pool = max(0, int(candidate_company_pool_count or 0))
+
+    if ui_language == "en":
+        parts = [
+            f"This round found {discovered} job(s)",
+            f"analyzed {scored}",
+            f"recommended {recommended}",
+        ]
+        if pool > 0:
+            parts.append(f"current company pool {pool}")
+        summary = ", ".join(parts) + "."
+        if no_qualified_company_stop:
+            return summary + " No new qualified companies were found; try again in a few days."
+        if pending > 0:
+            return summary + f" {pending} job(s) still need analysis; starting search again will resume them first."
+        return summary + " No pending jobs remain."
+
+    parts = [
+        f"本轮找到 {discovered} 条",
+        f"已分析 {scored} 条",
+        f"推荐 {recommended} 条",
+    ]
+    if pool > 0:
+        parts.append(f"当前公司池 {pool} 家")
+    summary = "，".join(parts) + "。"
+    if no_qualified_company_stop:
+        return summary + "当前没有发现新的合格公司，建议过几天再试。"
+    if pending > 0:
+        return summary + f"当前还有 {pending} 条待补完岗位，建议现在继续搜索。"
+    return summary + "当前没有待补完岗位。"
+
+
+def search_completion_popup_message(
+    ui_language: str,
+    *,
+    detail_text: str,
+) -> str:
+    header = _t(
+        ui_language,
+        "本轮搜索已结束。",
+        "This search round finished.",
+    )
+    detail = str(detail_text or "").strip()
+    if not detail:
+        return header
+    return f"{header}\n\n{detail}"
+
+
 def format_elapsed_text(ui_language: str, seconds: int) -> str:
     total = max(0, int(seconds or 0))
     minutes, remaining_seconds = divmod(total, 60)
@@ -176,32 +238,40 @@ def search_progress_text(
 
     stage = str(getattr(progress, "stage", "") or "").strip().lower()
     stage_label = progress_stage_label(ui_language, stage)
-    elapsed_text = format_elapsed_text(
-        ui_language,
-        int(getattr(progress, "elapsed_seconds", 0) or 0),
-    )
     if stop_requested:
         if queued_restart:
-            _main_message, detail_text, dialog_text = search_runtime_messages(
+            duration_label = queued_duration_label or selected_duration_label
+            if ui_language == "en":
+                detail_text = f"Finishing: {stage_label} | next round queued: {duration_label}"
+            else:
+                detail_text = f"后台收尾：{stage_label} · 下一轮已排队：{duration_label}"
+            dialog_text = _t(
                 ui_language,
-                "queued",
-                duration_label=queued_duration_label or selected_duration_label,
-                stage_label=stage_label,
-                elapsed_text=elapsed_text,
+                f"系统正在等待当前阶段安全结束，当前阶段：{stage_label}。下一轮搜索已经排队，时长为 {duration_label}。",
+                f"Waiting for the current stage to end safely. Current stage: {stage_label}. The next search round is already queued for {duration_label}.",
             )
             return detail_text, dialog_text
-        _main_message, detail_text, dialog_text = search_runtime_messages(
+        detail_text = _t(
             ui_language,
-            "stop_requested",
-            stage_label=stage_label,
-            elapsed_text=elapsed_text,
+            f"后台收尾：{stage_label}",
+            f"Finishing: {stage_label}",
+        )
+        dialog_text = _t(
+            ui_language,
+            f"系统正在等待当前阶段安全结束，当前阶段：{stage_label}。你可以先调整下一次搜索时长。",
+            f"Waiting for the current stage to end safely. Current stage: {stage_label}. You can already adjust the next search duration.",
         )
         return detail_text, dialog_text
-    _main_message, detail_text, dialog_text = search_runtime_messages(
+
+    detail_text = _t(
         ui_language,
-        "running",
-        stage_label=stage_label,
-        elapsed_text=elapsed_text,
+        f"后台进度：{stage_label}",
+        f"Background progress: {stage_label}",
+    )
+    dialog_text = _t(
+        ui_language,
+        f"系统正在后台搜索岗位，当前阶段：{stage_label}。你可以继续操作，搜索会在后台持续运行。",
+        f"Searching jobs in the background. Current stage: {stage_label}. You can keep working while search continues.",
     )
     return detail_text, dialog_text
 
@@ -223,6 +293,8 @@ __all__ = [
     "format_countdown_text",
     "format_elapsed_text",
     "progress_stage_label",
+    "search_completion_detail",
+    "search_completion_popup_message",
     "search_progress_text",
     "search_runtime_messages",
     "status_display",

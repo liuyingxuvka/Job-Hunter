@@ -14,10 +14,13 @@ def _load_candidate_profile_payload(config: dict[str, Any], run_dir: Path) -> di
         semantic_profile = candidate.get("semanticProfile")
         if isinstance(semantic_profile, dict):
             payload.update(dict(semantic_profile))
-        for key in ("targetRole", "locationPreference", "scopeProfile"):
+        for key in ("locationPreference", "scopeProfile"):
             value = str(candidate.get(key) or "").strip()
             if value:
                 payload[key] = value
+        scope_profiles = candidate.get("scopeProfiles")
+        if isinstance(scope_profiles, list):
+            payload["scopeProfiles"] = [str(item or "").strip() for item in scope_profiles if str(item or "").strip()]
         target_roles = candidate.get("targetRoles")
         if isinstance(target_roles, list):
             payload["targetRoles"] = [dict(item) for item in target_roles if isinstance(item, dict)]

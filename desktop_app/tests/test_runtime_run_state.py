@@ -38,7 +38,6 @@ class RuntimeRunStateTests(unittest.TestCase):
             run_state.update_configs(
                 search_run_id,
                 runtime_config={"output": {"recommendedXlsxPath": "./jobs_recommended.xlsx"}},
-                resume_config={"analysis": {"postVerifyEnabled": True}},
             )
 
             latest_run = run_state.latest_run(candidate_id)
@@ -55,14 +54,12 @@ class RuntimeRunStateTests(unittest.TestCase):
             self.assertEqual(progress_payload["stage"], "company_sources")
             self.assertEqual(progress_payload["lastEvent"], "Processed 2 companies.")
 
-            runtime_config = run_state.load_run_config(candidate_id=candidate_id, resume=False)
-            resume_config = run_state.load_run_config(candidate_id=candidate_id, resume=True)
+            runtime_config = run_state.load_run_config(candidate_id=candidate_id)
             self.assertIn("output", runtime_config)
             self.assertEqual(
                 runtime_config["output"]["recommendedXlsxPath"],
                 "./jobs_recommended.xlsx",
             )
-            self.assertTrue(resume_config["analysis"]["postVerifyEnabled"])
 
 
 if __name__ == "__main__":  # pragma: no cover

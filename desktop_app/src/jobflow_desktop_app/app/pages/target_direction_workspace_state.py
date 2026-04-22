@@ -113,12 +113,9 @@ def on_item_checked_changed(page: Any, item: QListWidgetItem) -> None:
             scope_profile=profile.scope_profile,
             target_role=profile.target_role,
             location_preference=profile.location_preference,
-            company_focus=profile.company_focus,
-            company_keyword_focus=profile.company_keyword_focus,
             role_name_i18n=profile.role_name_i18n,
             keyword_focus=profile.keyword_focus,
             is_active=item.checkState() == Qt.Checked,
-            queries=profile.queries,
         )
     )
     candidate_id = getattr(page._current_candidate, "candidate_id", None)

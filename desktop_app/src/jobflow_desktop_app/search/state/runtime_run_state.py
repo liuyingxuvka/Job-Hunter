@@ -57,7 +57,6 @@ class SearchRunStateStore:
         search_run_id: int | None,
         *,
         runtime_config: dict[str, Any] | None = None,
-        resume_config: dict[str, Any] | None = None,
     ) -> None:
         if search_run_id is None:
             return
@@ -68,15 +67,13 @@ class SearchRunStateStore:
                 if runtime_config is not None
                 else None
             ),
-            resume_config_json=(
-                json.dumps(resume_config, ensure_ascii=False, indent=2)
-                if resume_config is not None
-                else None
-            ),
         )
 
     def latest_run(self, candidate_id: int):
         return self.search_runs.latest_for_candidate(candidate_id)
+
+    def recent_runs(self, candidate_id: int, *, limit: int = 5):
+        return self.search_runs.recent_for_candidate(candidate_id, limit=limit)
 
     def load_latest_progress_payload(self, candidate_id: int) -> dict[str, Any] | None:
         latest_run = self.latest_run(candidate_id)
@@ -95,15 +92,11 @@ class SearchRunStateStore:
         self,
         *,
         candidate_id: int,
-        resume: bool = False,
     ) -> dict[str, Any]:
         latest_run = self.latest_run(candidate_id)
         if latest_run is None:
             return {}
-        return self.search_runs.load_config_payload(
-            latest_run.search_run_id,
-            resume=resume,
-        )
+        return self.search_runs.load_config_payload(latest_run.search_run_id)
 
 
 __all__ = ["SearchRunStateStore"]

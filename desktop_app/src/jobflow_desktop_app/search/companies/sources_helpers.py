@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urljoin, urlsplit
 
 from .discovery import merge_unique_strings
+from .ranking_thresholds import JOB_PRERANK_MIN_SCORE
 from ..output.final_output import (
     canonical_job_url,
     infer_region_tag,
@@ -20,6 +21,7 @@ from ..output.final_output import (
 )
 
 JOB_LINK_HARD_CAP_PER_COMPANY = 40
+NON_ATS_LISTING_PAGES_PER_RUN = 3
 SUPPORTED_DIRECT_ATS_TYPES = frozenset({"greenhouse", "lever", "smartrecruiters"})
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -59,6 +61,36 @@ _APPLY_TEXT_RE = re.compile(
 _LOCATION_LABEL_RE = re.compile(
     r"(?:location|job location|地点|工作地点)\s*[:：]\s*([^\n|]{2,120})",
     flags=re.IGNORECASE,
+)
+_EXPLICIT_NON_JOB_PATHS = frozenset(
+    {
+        "/dashboard",
+        "/jobs/alerts",
+        "/jobs/recommendations",
+        "/jobs/results",
+        "/how-we-hire",
+        "/how-we-work",
+        "/privacy-policy",
+        "/profile",
+        "/saved-jobs",
+        "/search-results",
+        "/teams",
+    }
+)
+_EXPLICIT_NON_JOB_PATH_SEGMENTS = frozenset(
+    {
+        "alerts",
+        "dashboard",
+        "how-we-hire",
+        "how-we-work",
+        "privacy-policy",
+        "profile",
+        "recommendations",
+        "results",
+        "saved-jobs",
+        "search-results",
+        "teams",
+    }
 )
 
 
@@ -154,6 +186,249 @@ def normalize_company_job_coverage_state(raw: object) -> dict[str, Any]:
     return normalized
 
 
+def normalize_job_page_coverage_state(raw: object) -> dict[str, Any]:
+    source = dict(raw) if isinstance(raw, Mapping) else {}
+    pending_listing_urls = merge_unique_strings(
+        [
+            normalize_job_url(item)
+            for item in (source.get("pendingListingUrls") if isinstance(source.get("pendingListingUrls"), list) else [])
+            if normalize_job_url(item)
+        ]
+    )
+    visited_listing_urls = merge_unique_strings(
+        [
+            normalize_job_url(item)
+            for item in (source.get("visitedListingUrls") if isinstance(source.get("visitedListingUrls"), list) else [])
+            if normalize_job_url(item)
+        ]
+    )
+    raw_listing_page_cache = (
+        dict(source.get("listingPageCache") or {})
+        if isinstance(source.get("listingPageCache"), Mapping)
+        else {}
+    )
+    listing_page_cache: dict[str, dict[str, Any]] = {}
+    for raw_url, raw_entry in raw_listing_page_cache.items():
+        normalized_url = normalize_job_url(raw_url)
+        if not normalized_url or not isinstance(raw_entry, Mapping):
+            continue
+        page_fingerprint = str(raw_entry.get("pageFingerprint") or "").strip()
+        jobs = dedupe_jobs_by_normalized_url(
+            [dict(item) for item in raw_entry.get("jobs", []) if isinstance(item, Mapping)]
+        )
+        next_listing_urls = merge_unique_strings(
+            [
+                normalize_job_url(item)
+                for item in (
+                    raw_entry.get("nextListingUrls")
+                    if isinstance(raw_entry.get("nextListingUrls"), list)
+                    else []
+                )
+                if normalize_job_url(item)
+            ]
+        )
+        if not page_fingerprint and not jobs and not next_listing_urls:
+            continue
+        listing_page_cache[normalized_url] = {
+            "pageFingerprint": page_fingerprint,
+            "jobs": jobs,
+            "nextListingUrls": next_listing_urls,
+        }
+    raw_company_search_cache = (
+        dict(source.get("companySearchCache") or {})
+        if isinstance(source.get("companySearchCache"), Mapping)
+        else {}
+    )
+    company_search_cache: dict[str, dict[str, Any]] = {}
+    for raw_key, raw_entry in raw_company_search_cache.items():
+        cache_key = str(raw_key or "").strip()
+        if not cache_key or not isinstance(raw_entry, Mapping):
+            continue
+        jobs = dedupe_jobs_by_normalized_url(
+            [dict(item) for item in raw_entry.get("jobs", []) if isinstance(item, Mapping)]
+        )
+        query = str(raw_entry.get("query") or "").strip()
+        company_website = normalize_job_url(raw_entry.get("companyWebsite"))
+        jobs_page_url = normalize_job_url(raw_entry.get("jobsPageUrl"))
+        page_type = str(raw_entry.get("pageType") or "").strip().lower()
+        sample_job_urls = merge_unique_strings(
+            [
+                normalize_job_url(item)
+                for item in (
+                    raw_entry.get("sampleJobUrls")
+                    if isinstance(raw_entry.get("sampleJobUrls"), list)
+                    else []
+                )
+                if normalize_job_url(item)
+            ]
+        )
+        if not query and not jobs and not company_website and not jobs_page_url and not sample_job_urls:
+            continue
+        company_search_cache[cache_key] = {
+            "query": query,
+            "companyWebsite": company_website,
+            "jobsPageUrl": jobs_page_url,
+            "pageType": page_type,
+            "sampleJobUrls": sample_job_urls,
+            "jobs": jobs,
+        }
+    coverage_complete = bool(source.get("coverageComplete"))
+    if (
+        not pending_listing_urls
+        and not visited_listing_urls
+        and not coverage_complete
+        and not listing_page_cache
+        and not company_search_cache
+    ):
+        return {}
+    normalized = {
+        "pendingListingUrls": pending_listing_urls,
+        "visitedListingUrls": visited_listing_urls,
+        "coverageComplete": coverage_complete,
+    }
+    if listing_page_cache:
+        normalized["listingPageCache"] = listing_page_cache
+    if company_search_cache:
+        normalized["companySearchCache"] = company_search_cache
+    return normalized
+
+
+def select_listing_urls_for_processing(
+    *,
+    entry_url: object,
+    coverage_state: Mapping[str, Any] | None,
+    limit: object,
+    allow_entry_retry_when_coverage_complete: bool = False,
+) -> list[str]:
+    normalized_limit = max(1, int(_to_number(limit, 1)))
+    normalized_entry_url = normalize_job_url(entry_url)
+    normalized_state = normalize_job_page_coverage_state(coverage_state)
+    if normalized_state.get("coverageComplete"):
+        if normalized_entry_url and allow_entry_retry_when_coverage_complete:
+            return [normalized_entry_url]
+        return []
+    pending_listing_urls = [
+        normalize_job_url(item)
+        for item in normalized_state.get("pendingListingUrls", [])
+        if normalize_job_url(item)
+    ]
+    if pending_listing_urls:
+        return pending_listing_urls[:normalized_limit]
+    if normalized_entry_url:
+        return [normalized_entry_url]
+    return []
+
+
+def update_job_page_coverage_state(
+    *,
+    entry_url: object,
+    coverage_state: Mapping[str, Any] | None,
+    processed_listing_urls: list[str] | None,
+    discovered_listing_urls: list[str] | None,
+    listing_page_cache_updates: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    normalized_entry_url = normalize_job_url(entry_url)
+    current = normalize_job_page_coverage_state(coverage_state)
+    pending_listing_urls = [
+        normalize_job_url(item)
+        for item in current.get("pendingListingUrls", [])
+        if normalize_job_url(item)
+    ]
+    visited_listing_urls = [
+        normalize_job_url(item)
+        for item in current.get("visitedListingUrls", [])
+        if normalize_job_url(item)
+    ]
+    processed = [
+        normalize_job_url(item)
+        for item in (processed_listing_urls or [])
+        if normalize_job_url(item)
+    ]
+    discovered = [
+        normalize_job_url(item)
+        for item in (discovered_listing_urls or [])
+        if normalize_job_url(item)
+    ]
+    listing_page_cache = dict(current.get("listingPageCache") or {})
+    raw_cache_updates = (
+        dict(listing_page_cache_updates or {})
+        if isinstance(listing_page_cache_updates, Mapping)
+        else {}
+    )
+
+    pending_set = set(pending_listing_urls)
+    visited_set = set(visited_listing_urls)
+    processed_set = set(processed)
+    for url in processed:
+        visited_set.add(url)
+        pending_set.discard(url)
+
+    newly_discovered_listing_urls: list[str] = []
+    for url in merge_unique_strings(discovered):
+        if url == normalized_entry_url:
+            continue
+        if url in visited_set or url in pending_set:
+            continue
+        pending_listing_urls.append(url)
+        pending_set.add(url)
+        newly_discovered_listing_urls.append(url)
+
+    pending_listing_urls = [
+        url for url in merge_unique_strings(pending_listing_urls)
+        if url not in processed_set
+    ]
+    visited_listing_urls = merge_unique_strings(visited_listing_urls, processed)
+    for raw_url, raw_entry in raw_cache_updates.items():
+        normalized_url = normalize_job_url(raw_url)
+        if not normalized_url or not isinstance(raw_entry, Mapping):
+            continue
+        page_fingerprint = str(raw_entry.get("pageFingerprint") or "").strip()
+        jobs = dedupe_jobs_by_normalized_url(
+            [dict(item) for item in raw_entry.get("jobs", []) if isinstance(item, Mapping)]
+        )
+        next_listing_urls = merge_unique_strings(
+            [
+                normalize_job_url(item)
+                for item in (
+                    raw_entry.get("nextListingUrls")
+                    if isinstance(raw_entry.get("nextListingUrls"), list)
+                    else []
+                )
+                if normalize_job_url(item)
+            ]
+        )
+        if not page_fingerprint and not jobs and not next_listing_urls:
+            continue
+        listing_page_cache[normalized_url] = {
+            "pageFingerprint": page_fingerprint,
+            "jobs": jobs,
+            "nextListingUrls": next_listing_urls,
+        }
+
+    coverage_complete = not pending_listing_urls
+
+    company_search_cache = dict(current.get("companySearchCache") or {})
+
+    if (
+        not pending_listing_urls
+        and not visited_listing_urls
+        and not coverage_complete
+        and not listing_page_cache
+        and not company_search_cache
+    ):
+        return {}
+    normalized = {
+        "pendingListingUrls": pending_listing_urls,
+        "visitedListingUrls": visited_listing_urls,
+        "coverageComplete": coverage_complete,
+    }
+    if listing_page_cache:
+        normalized["listingPageCache"] = listing_page_cache
+    if company_search_cache:
+        normalized["companySearchCache"] = company_search_cache
+    return normalized
+
+
 def get_normalized_company_job_url_list(company: Mapping[str, Any], field_name: str) -> list[str]:
     values = company.get(field_name)
     if not isinstance(values, list):
@@ -181,10 +456,25 @@ def select_company_jobs_for_coverage(
     company: Mapping[str, Any],
     jobs: list[Mapping[str, Any]],
     limit: object,
+    completed_job_urls: set[str] | None = None,
 ) -> dict[str, Any]:
     existing_coverage = normalize_company_job_coverage_state(company.get("jobLinkCoverage"))
     unique_jobs = dedupe_jobs_by_normalized_url(jobs)
     normalized_limit = max(1, int(_to_number(limit, JOB_LINK_HARD_CAP_PER_COMPANY)))
+    normalized_completed_job_urls = {
+        normalize_job_url(item)
+        for item in (completed_job_urls or set())
+        if normalize_job_url(item)
+    }
+    not_completed_jobs = [
+        job for job in unique_jobs if job["url"] not in normalized_completed_job_urls
+    ]
+    eligible_jobs = [job for job in not_completed_jobs if not _job_ai_prerank_excluded(job)]
+    completed_jobs_excluded = len(unique_jobs) - len(not_completed_jobs)
+    pending_prerank_jobs_excluded = sum(
+        1 for job in not_completed_jobs if bool(job.get("aiPreRankPending"))
+    )
+    low_prerank_jobs_excluded = len(not_completed_jobs) - len(eligible_jobs) - pending_prerank_jobs_excluded
     if not unique_jobs:
         next_coverage: dict[str, Any] = {}
         return {
@@ -192,36 +482,41 @@ def select_company_jobs_for_coverage(
             "jobLinkCoverage": next_coverage,
             "changed": existing_coverage != next_coverage,
             "poolSize": 0,
+            "excludedCompletedCount": 0,
+            "excludedLowPrerankCount": 0,
+            "excludedPendingPrerankCount": 0,
+            "pendingPoolSize": 0,
         }
-    cursor = max(0, int(_to_number(existing_coverage.get("cursor"), 0))) % len(unique_jobs)
-    rotated_jobs = unique_jobs[cursor:] + unique_jobs[:cursor]
-    recent_seen = set(
-        item
-        for item in existing_coverage.get("recentSeenJobUrls", [])
-        if isinstance(item, str) and item.strip()
-    )
-    unseen_jobs: list[dict[str, Any]] = []
-    seen_jobs: list[dict[str, Any]] = []
-    for job in rotated_jobs:
-        if job["url"] in recent_seen:
-            seen_jobs.append(job)
-        else:
-            unseen_jobs.append(job)
-    selected_jobs = (unseen_jobs + seen_jobs)[: min(normalized_limit, len(unique_jobs))]
-    recent_window_size = min(len(unique_jobs), JOB_LINK_HARD_CAP_PER_COMPANY)
-    next_coverage = {
-        "recentSeenJobUrls": merge_unique_strings(
-            [job["url"] for job in selected_jobs],
-            existing_coverage.get("recentSeenJobUrls"),
-        )[:recent_window_size],
-        "cursor": (cursor + len(selected_jobs)) % len(unique_jobs),
-        "lastPoolSize": len(unique_jobs),
-    }
+    if not eligible_jobs:
+        next_coverage = {}
+        return {
+            "jobs": [],
+            "jobLinkCoverage": next_coverage,
+            "changed": existing_coverage != next_coverage,
+            "poolSize": 0,
+            "excludedCompletedCount": completed_jobs_excluded,
+            "excludedLowPrerankCount": low_prerank_jobs_excluded,
+            "excludedPendingPrerankCount": pending_prerank_jobs_excluded,
+            "pendingPoolSize": 0,
+        }
+    ranked_jobs: list[tuple[tuple[int, float, int], int, dict[str, Any]]] = []
+    for index, job in enumerate(eligible_jobs):
+        ranked_jobs.append((_job_schedule_sort_key(job), index, job))
+
+    ranked_jobs.sort(key=lambda item: (-item[0][0], -item[0][1], -item[0][2], item[1]))
+    selected_jobs = [
+        item[2]
+        for item in ranked_jobs[: min(normalized_limit, len(eligible_jobs))]
+    ]
+    next_coverage: dict[str, Any] = {}
     return {
         "jobs": selected_jobs,
         "jobLinkCoverage": next_coverage,
         "changed": existing_coverage != next_coverage,
-        "poolSize": len(unique_jobs),
+        "poolSize": len(eligible_jobs),
+        "excludedCompletedCount": completed_jobs_excluded,
+        "excludedLowPrerankCount": low_prerank_jobs_excluded,
+        "excludedPendingPrerankCount": pending_prerank_jobs_excluded,
     }
 
 
@@ -301,7 +596,43 @@ def is_likely_noise_title(text: object) -> bool:
     if re.search(r"</?[a-z][^>]*>", title, flags=re.IGNORECASE):
         return True
     if re.search(
+        r"^saved\s+jobs?$",
+        title,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(
+        r"^(?:dashboard|job search|teams?|profiles?|your career|privacy policy|applicant (?:&|and) candidate privacy|candidate privacy|search results|recommended jobs|job alerts|how we hire|how we work|know your rights(?::.*)?)$",
+        title,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(
+        r"^(?:interns?|students?|graduates?)$",
+        title,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(
         r"^(apply|apply now|view job|open job|job details?|learn more|details?|read more|continue|search|menu|navigation|careers?|join us)$",
+        title,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(
+        r"^(?:see|view|browse|explore)\s+(?:our\s+|all\s+|internal\s+|open\s+|current\s+|available\s+)*(?:engineering|product|sales|marketing|design|operations|team|teams|job|jobs|position|positions)\b",
+        title,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(
+        r"\b(?:open|available|internal)\s+(?:job|jobs|position|positions)\b",
+        title,
+        flags=re.IGNORECASE,
+    ) and not _JOB_WORD_RE.search(title):
+        return True
+    if re.search(
+        r"^(?:internal|open|available|current)\s+(?:open\s+)?positions?$",
         title,
         flags=re.IGNORECASE,
     ):
@@ -334,11 +665,36 @@ def is_likely_job_url(raw_url: object) -> bool:
     normalized = normalize_job_url(raw_url)
     if not normalized or is_likely_parking_host(normalized) or is_generic_careers_url(normalized):
         return False
-    if re.search(r"/jobs?/[^/]+|/job/[^/]+|/positions?/[^/]+|/vacancies/[^/]+|/openings/[^/]+|/opportunities/[^/]+|/posting/[^/]+|/role/[^/]+", normalized, flags=re.IGNORECASE):
+    path = str(urlsplit(normalized).path or "")
+    normalized_path = path.rstrip("/") or "/"
+    if normalized_path.casefold() in _EXPLICIT_NON_JOB_PATHS:
+        return False
+    path_segments = [segment for segment in path.split("/") if segment]
+    if path_segments and path_segments[-1].casefold() in _EXPLICIT_NON_JOB_PATH_SEGMENTS:
+        return False
+    if len(path_segments) >= 3 and [segment.casefold() for segment in path_segments[-2:]] == ["jobs", "results"]:
+        return False
+    if len(path_segments) >= 2 and [segment.casefold() for segment in path_segments[-2:]] == ["jobs", "alerts"]:
+        return False
+    if len(path_segments) >= 2 and [segment.casefold() for segment in path_segments[-2:]] == ["jobs", "recommendations"]:
+        return False
+    if len(path_segments) >= 3 and [segment.casefold() for segment in path_segments[-3:-1]] == ["jobs", "results"]:
+        tail = path_segments[-1]
+        normalized_tail = tail.replace("-", " ").replace("_", " ")
+        if not any(char.isdigit() for char in tail) and not _JOB_WORD_RE.search(normalized_tail):
+            return False
+    pdf_name = path_segments[-1] if path_segments else normalized
+    if normalized.casefold().endswith(".pdf") and re.search(
+        r"(job[-_ ]?spec|job[-_ ]?description|vacanc|position|opening|role|apply|recruit)",
+        pdf_name,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(r"/jobs?/[^/]+|/job/[^/]+|/positions?/[^/]+|/vacancies/[^/]+|/openings/[^/]+|/opportunities/[^/]+|/posting/[^/]+|/role/[^/]+", path, flags=re.IGNORECASE):
         return True
     if re.search(r"[?&](gh_jid|jobid|job_id|jid|req|reqid|rid|lever-source)=", normalized, flags=re.IGNORECASE):
         return True
-    if is_ats_host(normalized) and re.search(r"/(job|jobs|position|posting|vacanc|careers?)", normalized, flags=re.IGNORECASE):
+    if is_ats_host(normalized) and re.search(r"/(job|jobs|position|posting|vacanc|apply|role)s?(?:/|$)", path, flags=re.IGNORECASE):
         return True
     return False
 
@@ -350,6 +706,8 @@ def has_job_signal(*, title: object, url: object, summary: object) -> bool:
     if not normalized_url or is_aggregator_host(normalized_url) or is_likely_parking_host(normalized_url):
         return False
     if is_generic_careers_url(normalized_url):
+        return False
+    if not clean_title and not _JOB_WORD_RE.search(clean_summary):
         return False
     if is_likely_job_url(normalized_url):
         return True
@@ -436,7 +794,13 @@ def job_posting_to_fields(job_posting: Mapping[str, Any]) -> dict[str, str]:
     return fields
 
 
-def collect_careers_page_job_candidates(html: str, page_url: str) -> list[dict[str, Any]]:
+def collect_careers_page_job_candidates(
+    html: str,
+    page_url: str,
+    *,
+    sample_job_urls: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    del sample_job_urls
     postings = extract_all_json_ld_job_postings(html)
     results: list[dict[str, Any]] = []
     for posting in postings:
@@ -477,7 +841,60 @@ def collect_careers_page_job_candidates(html: str, page_url: str) -> list[dict[s
                 "summary": "",
             }
         )
-    return link_jobs
+    return dedupe_jobs_by_normalized_url(link_jobs)
+
+
+def collect_careers_page_link_snapshots(
+    html: str,
+    page_url: str,
+    *,
+    max_links: int = 120,
+) -> list[dict[str, str]]:
+    normalized_page_url = normalize_job_url(page_url)
+    if not normalized_page_url or max_links <= 0:
+        return []
+    parser = _CareersPageParser()
+    parser.feed(str(html or ""))
+    snapshots: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for link in parser.links:
+        absolute_url = normalize_job_url(urljoin(normalized_page_url, link.get("href") or ""))
+        if not absolute_url or absolute_url == normalized_page_url or absolute_url in seen_urls:
+            continue
+        if is_aggregator_host(absolute_url) or is_likely_parking_host(absolute_url):
+            continue
+        if not has_job_signal(
+            title=link.get("text") or "",
+            url=absolute_url,
+            summary="",
+        ):
+            continue
+        seen_urls.add(absolute_url)
+        snapshots.append(
+            {
+                "text": _WHITESPACE_RE.sub(" ", str(link.get("text") or "")).strip(),
+                "url": absolute_url,
+            }
+        )
+        if len(snapshots) >= max_links:
+            break
+    return snapshots
+
+
+def filter_jobs_by_sample_job_urls(
+    jobs: list[Mapping[str, Any]],
+    sample_job_urls: list[str] | None,
+) -> list[dict[str, Any]]:
+    hints = _build_sample_job_url_hints(sample_job_urls)
+    normalized_jobs = [dict(job) for job in jobs if isinstance(job, Mapping)]
+    if not hints or not normalized_jobs:
+        return dedupe_jobs_by_normalized_url(normalized_jobs)
+    matched_jobs = [
+        job for job in normalized_jobs if _matches_sample_job_url_hints(job.get("url") or "", hints)
+    ]
+    if matched_jobs:
+        return dedupe_jobs_by_normalized_url(matched_jobs)
+    return dedupe_jobs_by_normalized_url(normalized_jobs)
 
 
 def normalize_company_job(
@@ -500,6 +917,7 @@ def normalize_company_job(
         "datePosted": str(job.get("datePosted") or "").strip(),
         "dateFound": str(job.get("dateFound") or "").strip() or discovered_at,
         "summary": str(job.get("summary") or "").strip(),
+        "availabilityHint": str(job.get("availabilityHint") or "").strip(),
         "source": str(job.get("source") or "").strip() or f"company:{company_name}:{ats_type}",
         "sourceType": str(job.get("sourceType") or "").strip() or "company",
         "companyTags": list(company_tags),
@@ -507,6 +925,178 @@ def normalize_company_job(
     normalized["sourceQuality"] = infer_source_quality(normalized, config)
     normalized["regionTag"] = infer_region_tag(normalized)
     return normalized
+
+
+def _build_sample_job_url_hints(sample_job_urls: list[str] | None) -> list[dict[str, Any]]:
+    hints: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, int, bool]] = set()
+    for raw_url in sample_job_urls or []:
+        normalized_url = normalize_job_url(raw_url)
+        if not normalized_url:
+            continue
+        host = _normalized_host(normalized_url)
+        if not host:
+            continue
+        path_segments = [segment for segment in (urlsplit(normalized_url).path or "").split("/") if segment]
+        if not path_segments:
+            continue
+        prefix_segments = _sample_prefix_segments(path_segments)
+        prefix = "/" + "/".join(prefix_segments) + "/"
+        requires_digit = any(any(char.isdigit() for char in segment) for segment in path_segments[len(prefix_segments) :])
+        key = (host, prefix, len(path_segments), requires_digit)
+        if key in seen:
+            continue
+        seen.add(key)
+        hints.append(
+            {
+                "host": host,
+                "prefix": prefix,
+                "minSegments": len(path_segments),
+                "requiresDigit": requires_digit,
+            }
+        )
+    return hints
+
+
+def _sample_prefix_segments(path_segments: list[str]) -> list[str]:
+    prefix_segments: list[str] = []
+    for segment in path_segments[:4]:
+        if prefix_segments and _looks_dynamic_job_segment(segment):
+            break
+        prefix_segments.append(segment)
+    return prefix_segments or path_segments[:1]
+
+
+def _looks_dynamic_job_segment(segment: str) -> bool:
+    text = str(segment or "").strip()
+    if not text:
+        return False
+    if any(char.isdigit() for char in text):
+        return True
+    return len(text) >= 24 and text.count("-") >= 3
+
+
+def _matches_sample_job_url_hints(raw_url: object, hints: list[dict[str, Any]]) -> bool:
+    normalized_url = normalize_job_url(raw_url)
+    if not normalized_url:
+        return False
+    host = _normalized_host(normalized_url)
+    path_segments = [segment for segment in (urlsplit(normalized_url).path or "").split("/") if segment]
+    path = "/" + "/".join(path_segments) + "/" if path_segments else "/"
+    has_digit = any(any(char.isdigit() for char in segment) for segment in path_segments)
+    for hint in hints:
+        if host != hint.get("host"):
+            continue
+        prefix = str(hint.get("prefix") or "")
+        if prefix and not path.startswith(prefix):
+            continue
+        if len(path_segments) < int(hint.get("minSegments") or 0):
+            continue
+        if bool(hint.get("requiresDigit")) and not has_digit:
+            continue
+        return True
+    return False
+
+
+def _normalized_host(raw_url: object) -> str:
+    try:
+        host = str(urlsplit(str(raw_url or "").strip()).hostname or "").strip().casefold()
+    except Exception:
+        return ""
+    return host[4:] if host.startswith("www.") else host
+
+
+def _job_schedule_sort_key(
+    job: Mapping[str, Any],
+) -> tuple[int, float, int]:
+    ai_score = _job_ai_prerank_score(job)
+    return (
+        1 if ai_score is not None else 0,
+        ai_score if ai_score is not None else 0.0,
+        _job_freshness_bonus(job),
+    )
+
+
+def _job_ai_prerank_score(job: Mapping[str, Any]) -> float | None:
+    value = job.get("aiPreRankScore")
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    if score != score:
+        return None
+    return max(0.0, min(100.0, score))
+
+
+def overlay_cached_job_prerank_scores(
+    jobs: list[dict[str, Any]],
+    existing_jobs: list[Mapping[str, Any]] | None,
+) -> tuple[list[dict[str, Any]], int]:
+    if not jobs or not isinstance(existing_jobs, list):
+        return jobs, 0
+    cached_by_url: dict[str, dict[str, Any]] = {}
+    for raw_job in existing_jobs:
+        if not isinstance(raw_job, Mapping):
+            continue
+        cached_score = _job_ai_prerank_score(raw_job)
+        cached_reason = str(raw_job.get("aiPreRankReason") or "").strip()
+        if cached_score is None and not cached_reason:
+            continue
+        for raw_url in (raw_job.get("url"), raw_job.get("canonicalUrl")):
+            normalized_url = normalize_job_url(raw_url)
+            if not normalized_url:
+                continue
+            cached_by_url[normalized_url] = {
+                "aiPreRankScore": int(cached_score) if cached_score is not None else raw_job.get("aiPreRankScore"),
+                "aiPreRankReason": cached_reason,
+            }
+    if not cached_by_url:
+        return jobs, 0
+
+    reused = 0
+    for job in jobs:
+        if _job_ai_prerank_score(job) is not None:
+            continue
+        cached = None
+        for raw_url in (job.get("url"), job.get("canonicalUrl")):
+            normalized_url = normalize_job_url(raw_url)
+            if normalized_url and normalized_url in cached_by_url:
+                cached = cached_by_url[normalized_url]
+                break
+        if cached is None:
+            continue
+        if cached.get("aiPreRankScore") is not None:
+            job["aiPreRankScore"] = cached.get("aiPreRankScore")
+        if str(cached.get("aiPreRankReason") or "").strip():
+            job["aiPreRankReason"] = str(cached.get("aiPreRankReason") or "").strip()
+        reused += 1
+    return jobs, reused
+
+
+def _job_ai_prerank_excluded(job: Mapping[str, Any]) -> bool:
+    if bool(job.get("aiPreRankPending")):
+        return True
+    ai_score = _job_ai_prerank_score(job)
+    if ai_score is None:
+        return False
+    return ai_score < float(JOB_PRERANK_MIN_SCORE)
+
+
+def _job_freshness_bonus(job: Mapping[str, Any]) -> int:
+    posted_at = _parse_datetime(job.get("datePosted") or "")
+    if posted_at is None:
+        return 0
+    age_days = max(
+        0.0,
+        (datetime.now(timezone.utc) - posted_at.astimezone(timezone.utc)).total_seconds() / (24 * 60 * 60),
+    )
+    if age_days <= 7:
+        return 40
+    if age_days <= 30:
+        return 20
+    if age_days <= 90:
+        return 5
+    return 0
 
 
 def _to_iso_datetime(value: object) -> str:
@@ -544,6 +1134,7 @@ __all__ = [
     "_COMMON_CAREERS_PATHS",
     "SUPPORTED_DIRECT_ATS_TYPES",
     "collect_careers_page_job_candidates",
+    "collect_careers_page_link_snapshots",
     "dedupe_jobs_by_normalized_url",
     "detect_ats_from_url",
     "extract_all_json_ld_job_postings",
@@ -560,6 +1151,7 @@ __all__ = [
     "job_posting_to_fields",
     "normalize_company_job",
     "normalize_company_job_coverage_state",
+    "overlay_cached_job_prerank_scores",
     "sanitize_job_title_candidate",
     "select_company_jobs_for_coverage",
     "strip_html_to_text",

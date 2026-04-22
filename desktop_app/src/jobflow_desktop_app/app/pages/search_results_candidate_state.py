@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from ...ai.role_recommendations import role_name_query_lines
 from ...db.repositories.profiles import SearchProfileRecord
+from ...search.companies.source_diagnostics import (
+    select_recent_company_source_diagnostic_summary,
+)
+from . import search_results_status
 from ..widgets.common import _t
 
 
@@ -31,7 +35,7 @@ def set_ready_status(page, candidate_name: str | None = None) -> None:
     page._set_results_progress_detail("")
 
 
-def set_loaded_results_status(page, visible_count: int, pending_count: int) -> None:
+def set_loaded_results_status(page, visible_count: int, pending_count: int, stats=None) -> None:
     if visible_count > 0 and pending_count > 0:
         message = page._candidate_status_text(
             f"已加载最近一次运行结果；另有 {pending_count} 条上次未补完的岗位，下次开始搜索时会优先继续处理。",
@@ -51,7 +55,19 @@ def set_loaded_results_status(page, visible_count: int, pending_count: int) -> N
         set_ready_status(page)
         return
     page._set_results_main_status(message)
-    page._set_results_progress_detail("")
+    if stats is None:
+        page._set_results_progress_detail("")
+        return
+    page._set_results_progress_detail(
+        search_results_status.search_completion_detail(
+            page.ui_language,
+            discovered_job_count=getattr(stats, "main_discovered_job_count", 0),
+            scored_job_count=getattr(stats, "main_scored_job_count", 0),
+            recommended_job_count=getattr(stats, "recommended_job_count", 0),
+            pending_job_count=getattr(stats, "main_pending_analysis_count", 0),
+            candidate_company_pool_count=getattr(stats, "candidate_company_pool_count", 0),
+        )
+    )
 
 
 def refresh_results_stats_label(page) -> None:
@@ -96,6 +112,25 @@ def refresh_results_stats_label(page) -> None:
                     " 当前运行目录里还没有已落盘的岗位结果。",
                     " No persisted job results in the current run directory yet.",
                 )
+            diagnosis_summary = ""
+            runtime_mirror = getattr(page.runner, "runtime_mirror", None)
+            if runtime_mirror is not None:
+                try:
+                    companies = runtime_mirror.load_candidate_company_pool(
+                        candidate_id=int(candidate_id),
+                    )
+                except Exception:
+                    companies = []
+                diagnosis_summary = select_recent_company_source_diagnostic_summary(
+                    companies,
+                    ui_language=page.ui_language,
+                )
+            if diagnosis_summary:
+                summary = summary + "\n" + _t(
+                    page.ui_language,
+                    f"最近公司诊断：{diagnosis_summary}",
+                    f"Latest company diagnosis: {diagnosis_summary}",
+                )
             text = summary
     if page.results_stats_label.text() != text:
         page.results_stats_label.setText(text)
@@ -131,8 +166,12 @@ def build_target_role_candidates(profiles: list[SearchProfileRecord]) -> list[st
 def reload_existing_results(page, candidate_id: int) -> None:
     jobs = page.runner.load_recommended_jobs(candidate_id)
     visible_count = page._render_jobs(jobs)
-    pending_count = page._main_pending_analysis_count(candidate_id)
-    set_loaded_results_status(page, visible_count, pending_count)
+    try:
+        stats = page.runner.load_search_stats(candidate_id)
+    except Exception:
+        stats = None
+    pending_count = max(0, int(getattr(stats, "main_pending_analysis_count", 0) or 0))
+    set_loaded_results_status(page, visible_count, pending_count, stats)
     refresh_results_stats_label(page)
     page._live_results_last_count = visible_count
 

@@ -9,6 +9,11 @@ try:
 except ImportError:  # pragma: no cover - unittest discover from tests dir
     from _helpers import create_candidate, create_profile, make_temp_context  # type: ignore
 
+from jobflow_desktop_app.ai.role_recommendations import (  # noqa: E402
+    encode_bilingual_description,
+    encode_bilingual_role_name,
+)
+from jobflow_desktop_app.db.repositories.profiles import SearchProfileRecord  # noqa: E402
 from jobflow_desktop_app.search.orchestration.job_search_runner import JobSearchRunner
 from jobflow_desktop_app.search.runtime_strategy import derive_adaptive_runtime_strategy
 
@@ -62,14 +67,12 @@ class JobSearchRunnerUnitTests(unittest.TestCase):
     def test_derive_adaptive_runtime_strategy_matches_main_stage_defaults(self) -> None:
         strategy = derive_adaptive_runtime_strategy(
             {
-                "passWorkBudgetSeconds": 120,
                 "companyBatchSize": 4,
                 "discoveryBreadth": 4,
                 "cooldownBaseDays": 7,
             }
         )
         self.assertEqual(strategy["max_companies_per_run"], 4)
-        self.assertEqual(strategy["max_new_companies_per_run"], 4)
         self.assertEqual(strategy["max_jobs_per_company"], 6)
         self.assertEqual(strategy["analysis_work_cap"], 24)
         self.assertEqual(strategy["company_rotation_interval_days"], 2)
@@ -327,6 +330,211 @@ class JobSearchRunnerUnitTests(unittest.TestCase):
             self.assertEqual(len(recommended_jobs), 1)
             self.assertEqual(recommended_jobs[0]["company"], "Acme Hydrogen")
             self.assertTrue((run_dir / "jobs_recommended.xlsx").exists())
+
+    def test_refresh_python_recommended_output_keeps_localization_target_role_binding(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(
+                context,
+                name="Localization Candidate",
+                notes="Localization operations, glossary management, vendor coordination",
+            )
+            profile_id = context.profiles.save(
+                SearchProfileRecord(
+                    profile_id=None,
+                    candidate_id=candidate_id,
+                    name="Localization Project Manager",
+                    scope_profile="",
+                    target_role="Localization Project Manager",
+                    location_preference="Berlin\nRemote Germany",
+                    role_name_i18n=encode_bilingual_role_name(
+                        "本地化项目经理",
+                        "Localization Project Manager",
+                    ),
+                    keyword_focus=encode_bilingual_description(
+                        "本地化运营与术语管理",
+                        "Localization operations and terminology management",
+                    ),
+                    is_active=True,
+                )
+            )
+            runner, run_dir, search_run_id = self._seed_run(context, candidate_id)
+
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=search_run_id,
+                candidate_id=candidate_id,
+                job_bucket="all",
+                jobs=[
+                    {
+                        "title": "Localization Project Manager",
+                        "company": "Lionbridge",
+                        "location": "Berlin, Germany",
+                        "url": "https://lionbridge.example/jobs/loc-pm",
+                        "dateFound": "2026-04-17T12:00:00Z",
+                        "summary": "Lead localization delivery, vendor operations, and TMS workflows.",
+                        "sourceType": "company",
+                        "jd": {
+                            "applyUrl": "https://lionbridge.example/jobs/loc-pm/apply",
+                            "finalUrl": "https://lionbridge.example/jobs/loc-pm",
+                            "status": 200,
+                            "ok": True,
+                            "rawText": "Localization PM JD",
+                        },
+                        "analysis": {
+                            "recommend": True,
+                            "overallScore": 81,
+                            "matchScore": 81,
+                            "targetRoleScore": 84,
+                            "boundTargetRole": {
+                                "profileId": profile_id,
+                                "nameZh": "本地化项目经理",
+                                "nameEn": "Localization Project Manager",
+                                "displayName": "Localization Project Manager",
+                                "targetRoleText": "Localization Project Manager",
+                            },
+                        },
+                    },
+                    {
+                        "title": "Senior Mechanical Engineer",
+                        "company": "Lionbridge",
+                        "location": "Munich, Germany",
+                        "url": "https://lionbridge.example/jobs/mech-eng",
+                        "dateFound": "2026-04-17T12:01:00Z",
+                        "summary": "Mechanical design role.",
+                        "analysis": {
+                            "recommend": False,
+                            "overallScore": 30,
+                            "matchScore": 30,
+                        },
+                    },
+                ],
+            )
+
+            count = runner._refresh_python_recommended_output_json(
+                run_dir,
+                {
+                    "candidate": {"scopeProfile": ""},
+                    "search": {
+                        "allowPlatformListings": False,
+                        "platformListingDomains": ["linkedin.com"],
+                    },
+                    "filters": {
+                        "excludeUnavailableLinks": True,
+                        "excludeAggregatorLinks": True,
+                        "preferDirectEmployerSite": True,
+                    },
+                    "analysis": {
+                        "postVerifyEnabled": False,
+                        "postVerifyRequireChecked": True,
+                        "recommendScoreThreshold": 50,
+                    },
+                    "output": {"recommendedMode": "replace"},
+                },
+            )
+
+            self.assertEqual(count, 1)
+            recommended = runner.load_recommended_jobs(candidate_id)
+            self.assertEqual([job.title for job in recommended], ["Localization Project Manager"])
+            self.assertEqual(recommended[0].bound_target_role_profile_id, profile_id)
+            self.assertEqual(recommended[0].bound_target_role_name_zh, "本地化项目经理")
+            self.assertEqual(recommended[0].bound_target_role_name_en, "Localization Project Manager")
+            stats = runner.load_search_stats(candidate_id)
+            self.assertEqual(stats.recommended_job_count, 1)
+            self.assertEqual(stats.displayable_result_count, 1)
+            self.assertTrue((run_dir / "jobs_recommended.xlsx").exists())
+
+    def test_write_resume_pending_jobs_seeds_current_run_from_previous_run_when_current_is_empty(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context, name="Resume Pending Candidate")
+            create_profile(context, candidate_id, name="Systems Engineer", is_active=True)
+            runner, run_dir, previous_run_id = self._seed_run(context, candidate_id)
+
+            pending_job = {
+                "title": "Localization Operations Manager",
+                "company": "Acme",
+                "url": "https://acme.example/jobs/loc-ops",
+                "dateFound": "2026-04-21T10:00:00Z",
+                "analysis": {},
+            }
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=previous_run_id,
+                candidate_id=candidate_id,
+                job_bucket="resume_pending",
+                jobs=[pending_job],
+            )
+            current_run_id = runner.runtime_mirror.create_run(
+                candidate_id=candidate_id,
+                run_dir=run_dir,
+                status="running",
+                current_stage="preparing",
+                started_at="2026-04-21T10:05:00+00:00",
+            )
+
+            count = runner._write_resume_pending_jobs(
+                run_dir,
+                include_found_fallback=True,
+                current_run_id=current_run_id,
+            )
+
+            self.assertEqual(count, 1)
+            current_pending = runner.runtime_mirror.load_run_bucket_jobs(
+                search_run_id=current_run_id,
+                job_bucket="resume_pending",
+            )
+            self.assertEqual(len(current_pending), 1)
+            self.assertEqual(current_pending[0]["title"], "Localization Operations Manager")
+
+    def test_write_resume_pending_jobs_reconciles_current_bucket_against_completed_all_jobs(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context, name="Resume Pending Reconcile Candidate")
+            create_profile(context, candidate_id, name="Systems Engineer", is_active=True)
+            runner, run_dir, _previous_run_id = self._seed_run(context, candidate_id)
+
+            current_run_id = runner.runtime_mirror.create_run(
+                candidate_id=candidate_id,
+                run_dir=run_dir,
+                status="running",
+                current_stage="resume_pending",
+                started_at="2026-04-21T10:05:00+00:00",
+            )
+            pending_job = {
+                "title": "Localization Operations Manager",
+                "company": "Acme",
+                "url": "https://acme.example/jobs/loc-ops",
+                "dateFound": "2026-04-21T10:00:00Z",
+                "analysis": {},
+            }
+            completed_job = {
+                **pending_job,
+                "analysis": {
+                    "overallScore": 82,
+                    "recommend": True,
+                },
+            }
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=current_run_id,
+                candidate_id=candidate_id,
+                job_bucket="resume_pending",
+                jobs=[pending_job],
+            )
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=current_run_id,
+                candidate_id=candidate_id,
+                job_bucket="all",
+                jobs=[completed_job],
+            )
+
+            count = runner._write_resume_pending_jobs(
+                run_dir,
+                include_found_fallback=True,
+                current_run_id=current_run_id,
+            )
+
+            self.assertEqual(count, 0)
+            current_pending = runner.runtime_mirror.load_run_bucket_jobs(
+                search_run_id=current_run_id,
+                job_bucket="resume_pending",
+            )
+            self.assertEqual(current_pending, [])
 
 
 if __name__ == "__main__":  # pragma: no cover

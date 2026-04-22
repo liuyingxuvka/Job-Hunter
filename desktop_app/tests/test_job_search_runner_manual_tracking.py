@@ -111,10 +111,7 @@ class JobSearchRunnerManualTrackingTests(unittest.TestCase):
 
     def test_build_company_sources_only_runtime_config_disables_auto_discovery(self) -> None:
         runtime_config = {
-            "sources": {
-                "enableCompanySources": True,
-                "requireCompanyDiscovery": True,
-            },
+            "sources": {},
             "companyDiscovery": {
                 "enableAutoDiscovery": True,
                 "queries": ["hydrogen companies"],
@@ -123,11 +120,9 @@ class JobSearchRunnerManualTrackingTests(unittest.TestCase):
 
         db_runtime_config = build_company_sources_only_runtime_config(runtime_config)
 
-        self.assertTrue(runtime_config["sources"]["requireCompanyDiscovery"])
         self.assertTrue(runtime_config["companyDiscovery"]["enableAutoDiscovery"])
-        self.assertFalse(db_runtime_config["sources"]["requireCompanyDiscovery"])
         self.assertFalse(db_runtime_config["companyDiscovery"]["enableAutoDiscovery"])
-        self.assertTrue(db_runtime_config["sources"]["enableCompanySources"])
+        self.assertEqual(db_runtime_config["sources"], {})
 
 
 if __name__ == "__main__":

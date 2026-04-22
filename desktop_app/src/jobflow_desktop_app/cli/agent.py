@@ -265,8 +265,6 @@ def profile_to_payload(profile: SearchProfileRecord) -> dict[str, Any]:
         "scope_profile": profile.scope_profile,
         "target_role": profile.target_role,
         "location_preference": profile.location_preference,
-        "company_focus": profile.company_focus,
-        "company_keyword_focus": profile.company_keyword_focus,
         "role_name_i18n": profile.role_name_i18n,
         "keyword_focus": profile.keyword_focus,
         "role_name_zh": role_name_zh,
@@ -274,7 +272,6 @@ def profile_to_payload(profile: SearchProfileRecord) -> dict[str, Any]:
         "description_zh": description_zh,
         "description_en": description_en,
         "is_active": profile.is_active,
-        "queries": profile.queries,
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
     }

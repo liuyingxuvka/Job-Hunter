@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from ..connection import Database
 
@@ -13,12 +13,9 @@ class SearchProfileRecord:
     scope_profile: str
     target_role: str
     location_preference: str
-    company_focus: str = ""
-    company_keyword_focus: str = ""
     role_name_i18n: str = ""
     keyword_focus: str = ""
     is_active: bool = True
-    queries: list[str] = field(default_factory=list)
     created_at: str = ""
     updated_at: str = ""
 
@@ -40,8 +37,6 @@ class SearchProfileRepository:
           sp.scope_profile AS scope_profile,
           sp.target_role AS target_role,
           sp.location_preference AS location_preference,
-          sp.company_focus AS company_focus,
-          sp.company_keyword_focus AS company_keyword_focus,
           sp.role_name_i18n AS role_name_i18n,
           sp.keyword_focus AS keyword_focus,
           sp.is_active AS is_active,
@@ -55,19 +50,6 @@ class SearchProfileRepository:
             rows = connection.execute(query, (candidate_id,)).fetchall()
             profiles = []
             for row in rows:
-                queries = [
-                    str(item["query_text"] or "")
-                    for item in connection.execute(
-                        """
-                        SELECT query_text
-                        FROM search_profile_queries
-                        WHERE search_profile_id = ?
-                        ORDER BY sort_order ASC, id ASC
-                        """,
-                        (row["profile_id"],),
-                    ).fetchall()
-                    if str(item["query_text"] or "").strip()
-                ]
                 profiles.append(
                     SearchProfileRecord(
                         profile_id=int(row["profile_id"]),
@@ -76,12 +58,9 @@ class SearchProfileRepository:
                         scope_profile=str(row["scope_profile"] or ""),
                         target_role=str(row["target_role"] or ""),
                         location_preference=str(row["location_preference"] or ""),
-                        company_focus=str(row["company_focus"] or ""),
-                        company_keyword_focus=str(row["company_keyword_focus"] or ""),
                         role_name_i18n=str(row["role_name_i18n"] or ""),
                         keyword_focus=str(row["keyword_focus"] or ""),
                         is_active=bool(row["is_active"]),
-                        queries=queries,
                         created_at=str(row["created_at"] or ""),
                         updated_at=str(row["updated_at"] or ""),
                     )
@@ -99,8 +78,6 @@ class SearchProfileRepository:
                   scope_profile,
                   target_role,
                   location_preference,
-                  company_focus,
-                  company_keyword_focus,
                   role_name_i18n,
                   keyword_focus,
                   is_active,
@@ -113,15 +90,6 @@ class SearchProfileRepository:
             ).fetchone()
             if row is None:
                 return None
-            query_rows = connection.execute(
-                """
-                SELECT query_text
-                FROM search_profile_queries
-                WHERE search_profile_id = ?
-                ORDER BY sort_order ASC, id ASC
-                """,
-                (profile_id,),
-            ).fetchall()
         return SearchProfileRecord(
             profile_id=int(row["profile_id"]),
             candidate_id=int(row["candidate_id"]),
@@ -129,12 +97,9 @@ class SearchProfileRepository:
             scope_profile=str(row["scope_profile"] or ""),
             target_role=str(row["target_role"] or ""),
             location_preference=str(row["location_preference"] or ""),
-            company_focus=str(row["company_focus"] or ""),
-            company_keyword_focus=str(row["company_keyword_focus"] or ""),
             role_name_i18n=str(row["role_name_i18n"] or ""),
             keyword_focus=str(row["keyword_focus"] or ""),
             is_active=bool(row["is_active"]),
-            queries=[str(item["query_text"] or "") for item in query_rows if str(item["query_text"] or "").strip()],
             created_at=str(row["created_at"] or ""),
             updated_at=str(row["updated_at"] or ""),
         )
@@ -149,28 +114,18 @@ class SearchProfileRepository:
         scope_profile = self._safe_text(getattr(record, "scope_profile", ""))
         target_role = self._safe_text(getattr(record, "target_role", ""))
         location_preference = self._safe_text(getattr(record, "location_preference", ""))
-        company_focus = self._safe_text(getattr(record, "company_focus", ""))
-        company_keyword_focus = self._safe_text(getattr(record, "company_keyword_focus", ""))
         role_name_i18n = self._safe_text(getattr(record, "role_name_i18n", ""))
         keyword_focus = self._safe_text(getattr(record, "keyword_focus", ""))
-        raw_queries = getattr(record, "queries", [])
-        if not isinstance(raw_queries, (list, tuple)):
-            raw_queries = []
-        queries = [
-            self._safe_text(item)
-            for item in raw_queries
-            if self._safe_text(item)
-        ]
         with self.database.session() as connection:
             if record.profile_id is None:
                 cursor = connection.execute(
                     """
                     INSERT INTO search_profiles (
                       candidate_id, name, scope_profile, target_role, location_preference,
-                      company_focus, company_keyword_focus, role_name_i18n, keyword_focus,
+                      role_name_i18n, keyword_focus,
                       is_active, created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """,
                     (
                         candidate_id,
@@ -178,8 +133,6 @@ class SearchProfileRepository:
                         scope_profile,
                         target_role,
                         location_preference,
-                        company_focus,
-                        company_keyword_focus,
                         role_name_i18n,
                         keyword_focus,
                         1 if record.is_active else 0,
@@ -192,8 +145,7 @@ class SearchProfileRepository:
                     """
                     UPDATE search_profiles
                     SET candidate_id = ?, name = ?, scope_profile = ?, target_role = ?,
-                        location_preference = ?, company_focus = ?, company_keyword_focus = ?,
-                        role_name_i18n = ?, keyword_focus = ?, company_seed_list = '', is_active = ?, updated_at = CURRENT_TIMESTAMP
+                        location_preference = ?, role_name_i18n = ?, keyword_focus = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
                     (
@@ -202,26 +154,11 @@ class SearchProfileRepository:
                         scope_profile,
                         target_role,
                         location_preference,
-                        company_focus,
-                        company_keyword_focus,
                         role_name_i18n,
                         keyword_focus,
                         1 if record.is_active else 0,
                         profile_id,
                     ),
-                )
-
-            connection.execute(
-                "DELETE FROM search_profile_queries WHERE search_profile_id = ?",
-                (profile_id,),
-            )
-            for sort_order, query_text in enumerate(queries, start=1):
-                connection.execute(
-                    """
-                    INSERT INTO search_profile_queries (search_profile_id, query_text, sort_order, is_enabled)
-                    VALUES (?, ?, ?, 1)
-                    """,
-                    (profile_id, query_text, sort_order),
                 )
         return profile_id
 

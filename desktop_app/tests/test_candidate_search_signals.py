@@ -17,7 +17,6 @@ if str(SRC_ROOT) not in sys.path:
 
 from jobflow_desktop_app.ai.role_recommendations import CandidateSemanticProfile  # noqa: E402
 from jobflow_desktop_app.search.orchestration.candidate_search_signals import (  # noqa: E402
-    CandidateInputSignals,
     CandidateSearchSignals,
     ProfileSearchSignals,
     SemanticSearchSignals,
@@ -63,87 +62,130 @@ class CandidateSearchSignalsTests(unittest.TestCase):
             inactive_profile = context.profiles.get(inactive_profile_id)
             self.assertIsNotNone(active_profile)
             self.assertIsNotNone(inactive_profile)
-            context.profiles.save(
-                replace(
-                    active_profile,
-                    queries=["hydrogen platform companies", "fuel cell diagnostics companies"],
-                )
-            )
-            context.profiles.save(
-                replace(
-                    inactive_profile,
-                    company_focus="battery platforms",
-                )
-            )
 
             semantic_profile = CandidateSemanticProfile(
                 summary="Hydrogen diagnostics background",
-                background_keywords=("hydrogen systems", "hydrogen systems"),
-                target_direction_keywords=("fuel cell diagnostics",),
-                core_business_areas=("electrochemical durability",),
-                adjacent_business_areas=("reliability engineering",),
-                exploration_business_areas=("industrial technology",),
-                strong_capabilities=("degradation analytics",),
+                company_discovery_primary_anchors=("fuel cell durability", "electrolyzer reliability"),
+                company_discovery_secondary_anchors=("industrial gas decarbonization",),
+                job_fit_core_terms=("hydrogen systems", "fuel cell diagnostics", "electrochemical durability"),
+                job_fit_support_terms=("reliability engineering", "degradation analytics"),
                 avoid_business_areas=("pure sales",),
             )
 
             signals = collect_candidate_search_signals(
-                candidate=context.candidates.get(candidate_id),
                 profiles=context.profiles.list_for_candidate(candidate_id),
                 semantic_profile=semantic_profile,
             )
 
-            self.assertEqual(signals.semantic.background_keywords, ["hydrogen systems"])
-            self.assertEqual(
-                signals.candidate.target_directions,
-                ["hydrogen systems", "fuel cell diagnostics"],
-            )
+            self.assertEqual(signals.semantic.job_fit_core_terms[:2], ["hydrogen systems", "fuel cell diagnostics"])
             self.assertIn("Hydrogen Reliability Engineer", signals.profile.role_names)
-            self.assertIn("hydrogen diagnostics", signals.profile.keyword_focus)
-            self.assertIn("hydrogen platform companies", signals.profile.queries)
-            self.assertNotIn("battery platforms", signals.profile.company_focus)
-            semantic_anchor_terms = signals.semantic_core_anchor_terms()
+            self.assertIn("Hydrogen Reliability Engineer", signals.profile.target_roles)
             self.assertEqual(
-                semantic_anchor_terms,
+                signals.profile.keyword_focus_terms[:2],
+                ["hydrogen diagnostics", "fuel cell validation"],
+            )
+            core_terms = signals.core_discovery_terms()
+            self.assertEqual(
+                core_terms[:5],
                 [
-                    "fuel cell diagnostics",
-                    "hydrogen systems",
-                    "electrochemical durability",
-                    "degradation analytics",
+                    "fuel cell durability",
+                    "electrolyzer reliability",
+                    "hydrogen diagnostics",
+                    "fuel cell validation",
+                    "Hydrogen Reliability Engineer",
                 ],
             )
-            self.assertIn("industrial automation", signals.business_hint_terms())
+            self.assertIn("reliability engineering", signals.adjacent_discovery_terms())
+            self.assertIn("industrial gas decarbonization", signals.adjacent_discovery_terms())
+            self.assertEqual(signals.explore_discovery_terms(), [])
 
     def test_signal_group_methods_expose_expected_candidate_and_semantic_terms(self) -> None:
         signals = CandidateSearchSignals(
             semantic=SemanticSearchSignals(
                 summary="Hydrogen profile",
-                target_direction_keywords=["fuel cell diagnostics"],
-                background_keywords=["hydrogen systems"],
-                core_business_areas=["electrochemical durability"],
-                strong_capabilities=["degradation analytics"],
-                adjacent_business_areas=["reliability engineering"],
-                exploration_business_areas=["industrial technology"],
+                company_discovery_primary_anchors=["fuel cell diagnostics"],
+                company_discovery_secondary_anchors=["reliability engineering"],
+                job_fit_core_terms=["hydrogen systems", "electrochemical durability"],
+                job_fit_support_terms=["degradation analytics", "systems integration"],
                 avoid_business_areas=["pure sales"],
-            ),
-            candidate=CandidateInputSignals(
-                target_directions=["hydrogen systems engineer"],
-                notes=["diagnostics background"],
             ),
             profile=ProfileSearchSignals(
                 role_names=["Hydrogen Systems Engineer"],
                 target_roles=["Hydrogen Systems Engineer"],
-                keyword_focus=["hydrogen diagnostics"],
-                company_focus=["industrial automation"],
-                company_keyword_focus=["systems integration"],
-                queries=["hydrogen companies"],
             ),
         )
 
-        self.assertIn("fuel cell diagnostics", signals.semantic_core_anchor_terms())
-        self.assertIn("electrochemical durability", signals.anchor_source_terms())
-        self.assertIn("systems integration", signals.business_hint_terms())
-        self.assertIn("hydrogen companies", signals.anchor_source_terms())
+        self.assertIn("fuel cell diagnostics", signals.core_discovery_terms())
+        self.assertIn("electrochemical durability", signals.core_discovery_terms())
+        self.assertIn("hydrogen systems", signals.core_discovery_terms())
+        self.assertIn("degradation analytics", signals.adjacent_discovery_terms())
+        self.assertIn("systems integration", signals.adjacent_discovery_terms())
+        self.assertEqual(signals.explore_discovery_terms(), [])
+
+    def test_core_discovery_terms_prioritize_business_focus_over_tools(self) -> None:
+        signals = CandidateSearchSignals(
+            semantic=SemanticSearchSignals(
+                summary="Localization profile",
+                company_discovery_primary_anchors=["software localization", "translation management systems"],
+                company_discovery_secondary_anchors=["content operations"],
+                job_fit_core_terms=["localization operations", "software localization"],
+                job_fit_support_terms=["memoQ", "Smartling", "linguistic QA"],
+                avoid_business_areas=[],
+            ),
+            profile=ProfileSearchSignals(
+                role_names=["Localization Project Manager"],
+                target_roles=["Localization Project Manager"],
+            ),
+        )
+
+        core_terms = signals.core_discovery_terms()
+        self.assertEqual(
+            core_terms[:4],
+            [
+                "software localization",
+                "translation management systems",
+                "Localization Project Manager",
+                "localization operations",
+            ],
+        )
+        self.assertEqual(
+            signals.adjacent_discovery_terms()[:3],
+            [
+                "content operations",
+                "Localization Project Manager",
+                "memoQ",
+            ],
+        )
+        self.assertIn("linguistic QA", signals.adjacent_discovery_terms())
+
+    def test_core_discovery_terms_prioritize_profile_targets_over_semantic_broad_terms(self) -> None:
+        signals = CandidateSearchSignals(
+            semantic=SemanticSearchSignals(
+                summary="Localization operations and global content tooling profile",
+                company_discovery_primary_anchors=["Localization platforms", "translation management systems"],
+                company_discovery_secondary_anchors=["content operations"],
+                job_fit_core_terms=["global content tooling", "software localization", "localization operations"],
+                job_fit_support_terms=["memoQ"],
+                avoid_business_areas=[],
+            ),
+            profile=ProfileSearchSignals(
+                role_names=["Localization Project Manager"],
+                target_roles=["Localization Project Manager"],
+            ),
+        )
+
+        core_terms = signals.core_discovery_terms()
+        self.assertEqual(
+            core_terms[:4],
+            [
+                "Localization platforms",
+                "translation management systems",
+                "Localization Project Manager",
+                "global content tooling",
+            ],
+        )
+        self.assertIn("global content tooling", core_terms)
+        self.assertLess(core_terms.index("Localization platforms"), core_terms.index("global content tooling"))
 
 
 if __name__ == "__main__":

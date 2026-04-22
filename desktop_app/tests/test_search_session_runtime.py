@@ -13,7 +13,6 @@ from jobflow_desktop_app.search.orchestration.search_session_runtime import (
     _combined_tail,
     _refresh_python_recommended_outputs,
     _remaining_search_session_seconds,
-    _stage_timeout_seconds,
     _write_main_runtime_config,
 )
 
@@ -39,7 +38,6 @@ class SearchSessionRuntimeTests(unittest.TestCase):
             effective_max_companies=5,
             query_rotation_seed=17,
             search_session_deadline=110.0,
-            session_pass_timeout_seconds=30,
         )
 
     def test_write_main_runtime_config_updates_runtime_and_syncs_config(self) -> None:
@@ -47,7 +45,7 @@ class SearchSessionRuntimeTests(unittest.TestCase):
             run_dir = Path(temp_dir)
             built_config = {
                 "sources": {"maxCompaniesPerRun": 3},
-                "adaptiveSearch": {"passWorkBudgetSeconds": 120},
+                "adaptiveSearch": {},
             }
             signals = object()
             candidate_context = object()
@@ -78,7 +76,6 @@ class SearchSessionRuntimeTests(unittest.TestCase):
             sync_search_run_configs.assert_called_once_with(
                 runtime.search_run_id,
                 runtime_config=built_config,
-                resume_config=None,
             )
 
     def test_write_main_runtime_config_refreshes_candidate_context_before_build(self) -> None:
@@ -87,13 +84,10 @@ class SearchSessionRuntimeTests(unittest.TestCase):
             candidate_context = runtime_config_builder.RuntimeCandidateConfigContext(
                 candidate_inputs=runtime_config_builder.RuntimeCandidateInputPrep(
                     resume_path="resume.md",
-                    resume_text="resume text",
-                    scope_profile="hydrogen_mainline",
-                    target_role="Systems Engineer",
+                    scope_profiles=("hydrogen_mainline",),
                     target_roles=[],
                 ),
                 signals=object(),
-                discovery_anchor_plan=SimpleNamespace(core=["hydrogen systems"], adjacent=[], explore=[]),
             )
             refreshed_context = object()
             runner = SimpleNamespace(
@@ -122,15 +116,13 @@ class SearchSessionRuntimeTests(unittest.TestCase):
                 refreshed_context,
             )
 
-    def test_timeout_helpers_bound_remaining_budget(self) -> None:
+    def test_remaining_search_session_seconds_bounds_remaining_budget(self) -> None:
         with TemporaryDirectory() as temp_dir, patch(
             "jobflow_desktop_app.search.orchestration.search_session_runtime.time.monotonic",
             return_value=100.0,
         ):
             runtime = self._make_runtime(Path(temp_dir))
             self.assertEqual(_remaining_search_session_seconds(runtime), 10)
-            self.assertEqual(_stage_timeout_seconds(runtime, 30), 10)
-            self.assertEqual(_stage_timeout_seconds(runtime, 5), 5)
 
     def test_refresh_python_recommended_outputs_calls_runner_refresh(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -172,7 +164,10 @@ class SearchSessionRuntimeTests(unittest.TestCase):
             self.assertIn("[discover]\nline b", combined)
             self.assertTrue(outcome.cancelled)
             self.assertEqual(outcome.exit_code, -2)
-            runner._refresh_resume_pending_jobs.assert_called_once_with(run_dir)
+            runner._refresh_resume_pending_jobs.assert_called_once_with(
+                run_dir,
+                current_run_id=None,
+            )
             write_progress.assert_called_once()
             self.assertEqual(write_progress.call_args.kwargs["status"], "cancelled")
             self.assertEqual(write_progress.call_args.kwargs["stage"], "done")

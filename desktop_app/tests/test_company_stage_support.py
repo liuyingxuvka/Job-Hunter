@@ -21,11 +21,26 @@ class CompanyStageSupportTests(unittest.TestCase):
             {
                 "name": "Acme Energy",
                 "website": "https://acme.example",
+                "careersDiscoveryCache": {
+                    "website": "https://acme.example",
+                    "jobsPageUrl": "https://acme.example/careers",
+                    "pageType": "jobs_listing",
+                    "careersUrl": "https://acme.example/careers",
+                    "sampleJobUrls": ["https://boards.greenhouse.io/acme/jobs/1"],
+                },
             },
             {
                 "name": "Existing Workday",
                 "website": "https://existing.example",
                 "careersUrl": "https://company.myworkdayjobs.com/foo",
+                "jobPageCoverage": {
+                    "companySearchCache": {
+                        "cache-key": {
+                            "query": "site:company.myworkdayjobs.com Existing Workday careers jobs",
+                            "jobs": [{"title": "Role", "url": "https://company.myworkdayjobs.com/foo/job/1"}],
+                        }
+                    }
+                },
             },
         ]
         fetch_result = SimpleNamespace(
@@ -46,6 +61,13 @@ class CompanyStageSupportTests(unittest.TestCase):
                     "website": "https://acme.example",
                     "snapshotComplete": True,
                     "knownJobUrls": ["https://boards.greenhouse.io/acme/jobs/1"],
+                    "careersDiscoveryCache": {
+                        "website": "https://acme.example",
+                        "jobsPageUrl": "https://acme.example/careers",
+                        "pageType": "jobs_listing",
+                        "careersUrl": "https://acme.example/careers",
+                        "sampleJobUrls": ["https://boards.greenhouse.io/acme/jobs/1"],
+                    },
                 }
             ],
             remaining_companies=[
@@ -53,6 +75,14 @@ class CompanyStageSupportTests(unittest.TestCase):
                     "name": "Existing Workday",
                     "website": "https://existing.example",
                     "careersUrl": "https://company.myworkdayjobs.com/foo",
+                    "jobPageCoverage": {
+                        "companySearchCache": {
+                            "cache-key": {
+                                "query": "site:company.myworkdayjobs.com Existing Workday careers jobs",
+                                "jobs": [{"title": "Role", "url": "https://company.myworkdayjobs.com/foo/job/1"}],
+                            }
+                        }
+                    },
                 }
             ],
         )
@@ -80,7 +110,9 @@ class CompanyStageSupportTests(unittest.TestCase):
         )
         self.assertTrue(acme["snapshotComplete"])
         self.assertEqual(acme["knownJobUrls"], ["https://boards.greenhouse.io/acme/jobs/1"])
+        self.assertEqual(acme["careersDiscoveryCache"]["jobsPageUrl"], "https://acme.example/careers")
         self.assertEqual(existing["careersUrl"], "https://company.myworkdayjobs.com/foo")
+        self.assertIn("cache-key", existing["jobPageCoverage"]["companySearchCache"])
 
 
 if __name__ == "__main__":

@@ -54,5 +54,4 @@ class SearchRuntimeCandidateStateStore:
             companies=companies,
         )
 
-
 __all__ = ["SearchRuntimeCandidateStateStore"]

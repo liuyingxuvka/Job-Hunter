@@ -66,13 +66,10 @@ def semantic_profile_prompt_lines(profile: CandidateSemanticProfile | None) -> l
         return []
     sections: list[tuple[str, tuple[str, ...] | str, int | None]] = [
         ("AI semantic summary:", profile.summary, None),
-        ("AI extracted target-direction keywords:", profile.target_direction_keywords, 14),
-        ("AI extracted background keywords:", profile.background_keywords, 14),
-        ("AI extracted core business areas:", profile.core_business_areas, 24),
-        ("AI extracted strong capabilities:", profile.strong_capabilities, 10),
-        ("AI extracted adjacent business areas:", profile.adjacent_business_areas, 16),
-        ("AI extracted exploration business areas:", profile.exploration_business_areas, 8),
-        ("AI extracted seniority signals:", profile.seniority_signals, 8),
+        ("AI extracted company-discovery primary anchors:", profile.company_discovery_primary_anchors, 10),
+        ("AI extracted company-discovery secondary anchors:", profile.company_discovery_secondary_anchors, 8),
+        ("AI extracted job-fit core terms:", profile.job_fit_core_terms, 16),
+        ("AI extracted job-fit support terms:", profile.job_fit_support_terms, 12),
     ]
     lines: list[str] = []
     lines.extend(
@@ -113,10 +110,10 @@ def compact_role_recommendation_semantic_profile_lines(
         lines.extend(["AI semantic summary:", profile.summary])
 
     sections: list[tuple[str, tuple[str, ...], int]] = [
-        ("AI extracted target-direction keywords:", profile.target_direction_keywords, 8),
-        ("AI extracted background keywords:", profile.background_keywords, 8),
-        ("AI extracted core business areas:", profile.core_business_areas, 12),
-        ("AI extracted strong capabilities:", profile.strong_capabilities, 8),
+        ("AI extracted company-discovery primary anchors:", profile.company_discovery_primary_anchors, 8),
+        ("AI extracted company-discovery secondary anchors:", profile.company_discovery_secondary_anchors, 6),
+        ("AI extracted job-fit core terms:", profile.job_fit_core_terms, 10),
+        ("AI extracted job-fit support terms:", profile.job_fit_support_terms, 8),
     ]
     for label, values, limit in sections:
         if not values:
@@ -199,7 +196,7 @@ def build_role_recommendation_prompt(
             "Prefer titles that include concrete domain or method context.",
             "Prioritize the candidate's demonstrated domain continuity from resume, notes, and self-described directions.",
             "Do not over-index on isolated software/tool keywords if they are not central to the candidate's main work.",
-            "Treat any inferred scope label as soft evidence only; do not force a hydrogen or adjacent-MBSE direction unless the resume, notes, and self-described directions clearly support it.",
+            "Treat any inferred scope label as soft evidence only; do not force the candidate into a legacy default domain if the resume, notes, and self-described directions do not clearly support it.",
             "Provide both role.name_en and role.name_zh.",
             "role.description_zh must be Chinese and 2-3 sentences with concrete details.",
             "role.description_en must be English and 2-3 sentences with concrete details.",

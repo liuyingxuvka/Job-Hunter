@@ -10,6 +10,8 @@ from PySide6.QtCore import QThread, Qt
 from PySide6.QtTest import QTest
 
 from jobflow_desktop_app.app.pages.search_results import SearchResultsStep
+from jobflow_desktop_app.search.orchestration.job_search_runner import SearchRunResult
+from jobflow_desktop_app.search.state.search_progress_state import SearchStats
 
 try:
     from ._helpers import (
@@ -133,7 +135,9 @@ class SearchResultsControlsTests(unittest.TestCase):
 
             step = self._make_step(context, fake_runner)
             self.addCleanup(controller.release_all)
-            with self._patched_busy_task(controller):
+            with self._patched_busy_task(controller), patch(
+                "jobflow_desktop_app.app.pages.search_results_search_flow.QMessageBox.information"
+            ):
                 step.set_candidate(context.candidates.get(candidate_id))
                 process_events()
 
@@ -180,6 +184,105 @@ class SearchResultsControlsTests(unittest.TestCase):
                 self.assertFalse(step.search_duration_combo.isEnabled())
                 self.assertIn("正在后台搜索岗位", step.results_meta_label.text())
                 self.assertIn("后台进度", step.results_progress_label.text())
+
+    def test_successful_early_stop_due_to_no_new_companies_shows_information_popup(self) -> None:
+        controller = _BusyTaskController()
+        with make_temp_context() as context:
+            save_openai_settings(context, api_key="test-key", model="gpt-5-nano")
+            candidate_id = create_candidate(context, name="Demo Candidate")
+            create_profile(context, candidate_id, name="Localization Manager", is_active=True)
+            fake_runner = FakeJobSearchRunner()
+            fake_runner.load_live_jobs = lambda candidate_id: []  # type: ignore[method-assign]
+            fake_runner.set_jobs(
+                [],
+                stats=SearchStats(
+                    candidate_company_pool_count=5,
+                    main_discovered_job_count=0,
+                    main_scored_job_count=0,
+                    recommended_job_count=0,
+                    main_pending_analysis_count=0,
+                ),
+            )
+            fake_runner.set_run_result(
+                SearchRunResult(
+                    success=True,
+                    exit_code=0,
+                    message="Timed search session completed. Timed search session ended because no actionable work units remained for this session.",
+                    stdout_tail="",
+                    stderr_tail="",
+                    run_dir=context.paths.project_root,
+                    details={"stopReason": "no_qualified_new_companies"},
+                )
+            )
+
+            step = self._make_step(context, fake_runner)
+            self.addCleanup(controller.release_all)
+            with self._patched_busy_task(controller), patch(
+                "jobflow_desktop_app.app.pages.search_results_search_flow.QMessageBox.information"
+            ) as info_box:
+                step.set_candidate(context.candidates.get(candidate_id))
+                process_events()
+
+                QTest.mouseClick(step.refresh_button, Qt.LeftButton)
+                process_events()
+                controller.finish_last_success()
+                process_events()
+
+                info_box.assert_called_once()
+                self.assertIn("当前没有发现新的合格公司", info_box.call_args.args[2])
+                self.assertIn("本轮搜索已结束。", info_box.call_args.args[2])
+                self.assertIn("本轮搜索已结束", step.results_meta_label.text())
+                self.assertIn("建议过几天再试", step.results_progress_label.text())
+
+    def test_successful_finish_shows_summary_in_status_and_popup(self) -> None:
+        controller = _BusyTaskController()
+        with make_temp_context() as context:
+            save_openai_settings(context, api_key="test-key", model="gpt-5-nano")
+            candidate_id = create_candidate(context, name="Demo Candidate")
+            create_profile(context, candidate_id, name="Localization Manager", is_active=True)
+            fake_runner = FakeJobSearchRunner()
+            fake_runner.load_live_jobs = lambda candidate_id: []  # type: ignore[method-assign]
+            fake_runner.set_jobs(
+                [],
+                stats=SearchStats(
+                    candidate_company_pool_count=6,
+                    main_discovered_job_count=8,
+                    main_scored_job_count=0,
+                    recommended_job_count=0,
+                    main_pending_analysis_count=8,
+                ),
+            )
+            fake_runner.set_run_result(
+                SearchRunResult(
+                    success=True,
+                    exit_code=0,
+                    message="Timed search session completed.",
+                    stdout_tail="",
+                    stderr_tail="",
+                    run_dir=context.paths.project_root,
+                )
+            )
+
+            step = self._make_step(context, fake_runner)
+            self.addCleanup(controller.release_all)
+            with self._patched_busy_task(controller), patch(
+                "jobflow_desktop_app.app.pages.search_results_search_flow.QMessageBox.information"
+            ) as info_box:
+                step.set_candidate(context.candidates.get(candidate_id))
+                process_events()
+
+                QTest.mouseClick(step.refresh_button, Qt.LeftButton)
+                process_events()
+                controller.finish_last_success()
+                process_events()
+
+                info_box.assert_called_once()
+                self.assertIn("本轮搜索已结束。", info_box.call_args.args[2])
+                self.assertIn("本轮找到 8 条", info_box.call_args.args[2])
+                self.assertIn("建议现在继续搜索", info_box.call_args.args[2])
+                self.assertIn("本轮搜索已结束", step.results_meta_label.text())
+                self.assertIn("本轮找到 8 条", step.results_progress_label.text())
+                self.assertIn("建议现在继续搜索", step.results_progress_label.text())
 
 
 if __name__ == "__main__":  # pragma: no cover

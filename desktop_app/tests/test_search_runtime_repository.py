@@ -13,6 +13,12 @@ from jobflow_desktop_app.db.repositories.search_runtime import (
     SearchRunJobRepository,
     SearchRunRepository,
 )
+from jobflow_desktop_app.search.state.runtime_db_mirror import SearchRuntimeMirror
+from jobflow_desktop_app.search.state.runtime_recovery import (
+    INTERRUPTED_SEARCH_EVENT,
+    INTERRUPTED_SEARCH_MESSAGE,
+    recover_interrupted_search_runs,
+)
 
 
 class SearchRuntimeRepositoryTests(unittest.TestCase):
@@ -28,6 +34,21 @@ class SearchRuntimeRepositoryTests(unittest.TestCase):
                         "name": "Acme Hydrogen",
                         "website": "https://acme.example",
                         "careersUrl": "https://acme.example/careers",
+                        "careersDiscoveryCache": {
+                            "website": "https://acme.example",
+                            "jobsPageUrl": "https://acme.example/careers",
+                            "pageType": "jobs_listing",
+                            "careersUrl": "https://acme.example/careers",
+                            "sampleJobUrls": ["https://acme.example/jobs/1"],
+                        },
+                        "jobPageCoverage": {
+                            "companySearchCache": {
+                                "cache-key": {
+                                    "query": "site:acme.example Acme careers jobs",
+                                    "jobs": [{"title": "Role", "url": "https://acme.example/jobs/1"}],
+                                }
+                            }
+                        },
                     },
                     {
                         "name": "Beta Systems",
@@ -44,6 +65,12 @@ class SearchRuntimeRepositoryTests(unittest.TestCase):
                 ],
                 ["Acme Hydrogen", "Beta Systems"],
             )
+            payload = repository.load_candidate_pool(candidate_id=candidate_id)[0]
+            self.assertEqual(
+                payload["careersDiscoveryCache"]["jobsPageUrl"],
+                "https://acme.example/careers",
+            )
+            self.assertIn("cache-key", payload["jobPageCoverage"]["companySearchCache"])
 
             with context.database.session() as connection:
                 rows = connection.execute(
@@ -181,6 +208,45 @@ class SearchRuntimeRepositoryTests(unittest.TestCase):
             self.assertIsNotNone(latest)
             assert latest is not None
             self.assertEqual(latest.search_run_id, second_run_id)
+
+    def test_recover_interrupted_search_runs_marks_running_runs_cancelled_and_refreshes_counts(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context)
+            mirror = SearchRuntimeMirror(context.database)
+            run_jobs = SearchRunJobRepository(context.database)
+            run_id = mirror.create_run(
+                candidate_id=candidate_id,
+                run_dir=context.paths.runtime_dir / "search_runs" / "candidate_test",
+                status="running",
+                current_stage="company_sources",
+                started_at="2026-04-21T10:00:00+00:00",
+            )
+            run_jobs.replace_bucket(
+                search_run_id=run_id,
+                candidate_id=candidate_id,
+                job_bucket="found",
+                rows=[
+                    {
+                        "job_key": "job-1",
+                        "title": "Localization Program Manager",
+                        "analysis_completed": False,
+                        "recommended": False,
+                        "job_json": '{"title":"Localization Program Manager"}',
+                    }
+                ],
+            )
+
+            recovered = recover_interrupted_search_runs(mirror)
+            latest = mirror.latest_run(candidate_id)
+
+            self.assertEqual(recovered, [run_id])
+            self.assertIsNotNone(latest)
+            assert latest is not None
+            self.assertEqual(latest.status, "cancelled")
+            self.assertEqual(latest.current_stage, "done")
+            self.assertEqual(latest.last_message, INTERRUPTED_SEARCH_MESSAGE)
+            self.assertEqual(latest.last_event, INTERRUPTED_SEARCH_EVENT)
+            self.assertEqual(latest.jobs_found_count, 1)
 
     def test_job_review_state_repository_resolves_job_id_by_newest_run_id(self) -> None:
         with make_temp_context() as context:

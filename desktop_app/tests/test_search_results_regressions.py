@@ -51,6 +51,15 @@ class _RunningThread(QThread):
         self._release.set()
 
 
+class _FakeRuntimeMirror:
+    def __init__(self, companies: list[dict]) -> None:
+        self._companies = [dict(item) for item in companies]
+
+    def load_candidate_company_pool(self, *, candidate_id: int) -> list[dict]:
+        del candidate_id
+        return [dict(item) for item in self._companies]
+
+
 class SearchResultsRegressionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.app = get_qapp()
@@ -118,10 +127,54 @@ class SearchResultsRegressionTests(unittest.TestCase):
 
             self.assertEqual(step.table.rowCount(), 2)
             self.assertIn("另有 1 条上次未补完的岗位", step.results_meta_label.text())
+            self.assertIn("本轮找到 6 条", step.results_progress_label.text())
+            self.assertIn("建议现在继续搜索", step.results_progress_label.text())
             self.assertIn("已评分 5 条", step.results_stats_label.text())
             self.assertIn("待补完 1 条", step.results_stats_label.text())
             self.assertIn("补完待处理岗位", step._search_progress_text(candidate_id)[1])
             self.assertNotIn("已运行", step._search_progress_text(candidate_id)[1])
+
+    def test_internal_stats_show_latest_company_diagnosis_when_available(self) -> None:
+        with make_temp_context() as context:
+            fake_runner = FakeJobSearchRunner()
+            fake_runner.runtime_mirror = _FakeRuntimeMirror(
+                [
+                    {
+                        "name": "Lokalise",
+                        "lastSearchedAt": "2026-04-18T10:00:00Z",
+                        "sourceDiagnostics": {
+                            "reason": "all_jobs_filtered",
+                            "sourcePath": "company_search",
+                            "rawJobsFetched": 3,
+                            "snapshotJobs": 0,
+                            "selectedJobs": 0,
+                            "queuedJobs": 0,
+                        },
+                    }
+                ]
+            )
+            fake_runner.set_jobs(
+                [],
+                stats=SearchStats(
+                    candidate_company_pool_count=1,
+                    main_discovered_job_count=0,
+                    main_scored_job_count=0,
+                    main_pending_analysis_count=0,
+                ),
+            )
+            candidate_id = self._make_candidate_bundle(
+                context,
+                candidate_name="Demo Candidate",
+                profile_name="Localization Manager",
+            )
+
+            step = self._make_step(context, fake_runner)
+            step.set_candidate(context.candidates.get(candidate_id))
+            process_events()
+
+            self.assertIn("最近公司诊断：", step.results_stats_label.text())
+            self.assertIn("Lokalise", step.results_stats_label.text())
+            self.assertIn("抓到了岗位，但全部被过滤", step.results_stats_label.text())
 
     def test_running_search_on_one_candidate_keeps_other_candidate_read_only(self) -> None:
         with make_temp_context() as context:

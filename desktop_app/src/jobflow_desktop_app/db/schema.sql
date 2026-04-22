@@ -32,25 +32,12 @@ CREATE TABLE IF NOT EXISTS search_profiles (
   scope_profile TEXT NOT NULL,
   target_role TEXT NOT NULL DEFAULT '',
   location_preference TEXT NOT NULL DEFAULT '',
-  company_focus TEXT NOT NULL DEFAULT '',
-  company_keyword_focus TEXT NOT NULL DEFAULT '',
   role_name_i18n TEXT NOT NULL DEFAULT '',
   keyword_focus TEXT NOT NULL DEFAULT '',
-  company_seed_list TEXT NOT NULL DEFAULT '',
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS search_profile_queries (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  search_profile_id INTEGER NOT NULL,
-  query_text TEXT NOT NULL,
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  is_enabled INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (search_profile_id) REFERENCES search_profiles(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS companies (
@@ -99,7 +86,6 @@ CREATE TABLE IF NOT EXISTS search_runs (
   jobs_scored_count INTEGER NOT NULL DEFAULT 0,
   jobs_recommended_count INTEGER NOT NULL DEFAULT 0,
   config_json TEXT DEFAULT '',
-  resume_config_json TEXT DEFAULT '',
   error_message TEXT DEFAULT '',
   FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE SET NULL,
   FOREIGN KEY (search_profile_id) REFERENCES search_profiles(id) ON DELETE SET NULL
@@ -207,7 +193,6 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 
 CREATE INDEX IF NOT EXISTS idx_search_profiles_candidate_id ON search_profiles(candidate_id);
-CREATE INDEX IF NOT EXISTS idx_profile_queries_profile_id ON search_profile_queries(search_profile_id);
 CREATE INDEX IF NOT EXISTS idx_resumes_candidate_id ON resumes(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_search_runs_candidate_id ON search_runs(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_job_analyses_job_id ON job_analyses(job_id);

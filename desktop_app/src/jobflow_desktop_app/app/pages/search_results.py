@@ -344,12 +344,23 @@ class SearchResultsStep(QWidget):
         self.search_duration_combo.setEnabled(has_candidate and not issue)
         self.refresh_button.setToolTip(issue)
         self.search_duration_combo.setToolTip(issue)
-        self._set_results_progress_detail_with_level(issue, alert=bool(issue))
+        if issue:
+            self._set_results_progress_detail_with_level(issue, alert=True)
+        else:
+            self.results_progress_label.setStyleSheet("")
 
     def set_target_ai_busy_state(self, busy: bool, message: str = "") -> None:
+        was_blocked = bool(self._target_ai_busy)
         self._target_ai_busy = bool(busy)
         self._target_ai_busy_message = str(message or "").strip() if self._target_ai_busy else ""
         self._apply_search_prerequisite_state()
+        if (
+            was_blocked
+            and not self._target_ai_busy
+            and not self._is_search_running(self.current_candidate_id)
+            and self.current_candidate_id is not None
+        ):
+            search_results_candidate_state.reload_existing_results(self, int(self.current_candidate_id))
 
     def _set_results_main_status(self, text: str) -> None:
         message = str(text or "").strip()
@@ -456,23 +467,61 @@ class SearchResultsStep(QWidget):
                 candidate_name=candidate_name,
             )
         )
-        self._set_results_progress_detail("")
+        self._set_results_progress_detail(
+            _t(
+                self.ui_language,
+                "如需继续补完岗位或继续搜索新的公司，可以再次点击“开始搜索”。",
+                "Click Start Search again whenever you want to resume pending jobs or continue searching for new companies.",
+            )
+        )
 
-    def _set_finished_status(self, pending_after_run: int, candidate_name: str | None = None) -> None:
-        if pending_after_run > 0:
-            message = self._candidate_status_text(
-                f"搜索已完成；仍有 {pending_after_run} 条主流程岗位待补完，下次开始搜索时会优先继续处理。",
-                f"Search finished; {pending_after_run} main-stage job(s) are still pending and will resume first the next time you start search.",
-                candidate_name=candidate_name,
-            )
-        else:
-            message = self._candidate_status_text(
-                "搜索已完成。",
-                "Search finished.",
-                candidate_name=candidate_name,
-            )
+    def _load_current_search_stats(self, candidate_id: int | None = None):
+        target_candidate_id = candidate_id if candidate_id is not None else self.current_candidate_id
+        if target_candidate_id is None:
+            return None
+        try:
+            return self.runner.load_search_stats(int(target_candidate_id))
+        except Exception:
+            return None
+
+    def _set_finished_status(self, pending_after_run: int, candidate_name: str | None = None) -> str:
+        message = self._candidate_status_text(
+            "本轮搜索已结束。",
+            "This search round finished.",
+            candidate_name=candidate_name,
+        )
         self._set_results_main_status(message)
-        self._set_results_progress_detail("")
+        stats = self._load_current_search_stats()
+        detail_message = search_results_status.search_completion_detail(
+            self.ui_language,
+            discovered_job_count=getattr(stats, "main_discovered_job_count", 0),
+            scored_job_count=getattr(stats, "main_scored_job_count", 0),
+            recommended_job_count=getattr(stats, "recommended_job_count", 0),
+            pending_job_count=pending_after_run,
+            candidate_company_pool_count=getattr(stats, "candidate_company_pool_count", 0),
+        )
+        self._set_results_progress_detail(detail_message)
+        return detail_message
+
+    def _set_no_qualified_company_status(self, candidate_name: str | None = None) -> str:
+        message = self._candidate_status_text(
+            "本轮搜索已结束。",
+            "This search round finished.",
+            candidate_name=candidate_name,
+        )
+        self._set_results_main_status(message)
+        stats = self._load_current_search_stats()
+        detail_message = search_results_status.search_completion_detail(
+            self.ui_language,
+            discovered_job_count=getattr(stats, "main_discovered_job_count", 0),
+            scored_job_count=getattr(stats, "main_scored_job_count", 0),
+            recommended_job_count=getattr(stats, "recommended_job_count", 0),
+            pending_job_count=getattr(stats, "main_pending_analysis_count", 0),
+            candidate_company_pool_count=getattr(stats, "candidate_company_pool_count", 0),
+            no_qualified_company_stop=True,
+        )
+        self._set_results_progress_detail(detail_message)
+        return detail_message
 
     def _set_failed_status(self, reason: str, candidate_name: str | None = None) -> None:
         detail = str(reason or "").strip()
@@ -544,9 +593,17 @@ class SearchResultsStep(QWidget):
         search_results_candidate_state.reload_existing_results(self, candidate_id)
 
     def set_ai_validation_state(self, message: str, level: str = "idle") -> None:
+        was_blocked = bool(self._blocked_ai_issue())
         self._ai_validation_message = str(message or "").strip()
         self._ai_validation_level = str(level or "idle").strip().lower() or "idle"
         self._apply_search_prerequisite_state()
+        if (
+            was_blocked
+            and not self._blocked_ai_issue()
+            and not self._is_search_running(self.current_candidate_id)
+            and self.current_candidate_id is not None
+        ):
+            search_results_candidate_state.reload_existing_results(self, int(self.current_candidate_id))
 
     def _effective_search_settings(self) -> OpenAISettings | None:
         settings = self.context.settings.get_effective_openai_settings()
@@ -712,12 +769,6 @@ class SearchResultsStep(QWidget):
     @staticmethod
     def _job_key(job: JobSearchResult) -> str:
         return search_results_live_state.job_key(job)
-
-    def _status_store_key(self) -> str:
-        return search_results_review_state.status_store_key(self.current_candidate_id)
-
-    def _hidden_store_key(self) -> str:
-        return search_results_review_state.hidden_store_key(self.current_candidate_id)
 
     def _load_review_state(self, candidate_id: int) -> None:
         self.status_by_job_key, self.hidden_job_keys = search_results_review_state.load_review_state(

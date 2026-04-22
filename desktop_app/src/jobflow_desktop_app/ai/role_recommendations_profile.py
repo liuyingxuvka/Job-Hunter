@@ -11,7 +11,7 @@ from .role_recommendations_models import CandidateSemanticProfile, ResumeReadRes
 from .role_recommendations_resume import manual_background_summary
 
 
-SEMANTIC_PROFILE_SCHEMA_VERSION = 2
+SEMANTIC_PROFILE_SCHEMA_VERSION = 4
 
 
 def _normalize_semantic_list(
@@ -90,14 +90,23 @@ def parse_candidate_semantic_profile(
     profile = CandidateSemanticProfile(
         source_signature=str(payload.get("source_signature") or source_signature or "").strip(),
         summary=summary,
-        background_keywords=_normalize_semantic_list(payload.get("background_keywords"), max_items=20),
-        target_direction_keywords=_normalize_semantic_list(payload.get("target_direction_keywords"), max_items=20),
-        core_business_areas=_normalize_semantic_list(payload.get("core_business_areas"), max_items=45),
-        adjacent_business_areas=_normalize_semantic_list(payload.get("adjacent_business_areas"), max_items=30),
-        exploration_business_areas=_normalize_semantic_list(payload.get("exploration_business_areas"), max_items=15),
+        company_discovery_primary_anchors=_normalize_semantic_list(
+            payload.get("company_discovery_primary_anchors"),
+            max_items=12,
+        ),
+        company_discovery_secondary_anchors=_normalize_semantic_list(
+            payload.get("company_discovery_secondary_anchors"),
+            max_items=8,
+        ),
+        job_fit_core_terms=_normalize_semantic_list(
+            payload.get("job_fit_core_terms"),
+            max_items=30,
+        ),
+        job_fit_support_terms=_normalize_semantic_list(
+            payload.get("job_fit_support_terms"),
+            max_items=20,
+        ),
         avoid_business_areas=_normalize_semantic_list(payload.get("avoid_business_areas"), max_items=10),
-        strong_capabilities=_normalize_semantic_list(payload.get("strong_capabilities"), max_items=10),
-        seniority_signals=_normalize_semantic_list(payload.get("seniority_signals"), max_items=8),
     )
     if not profile.is_usable():
         return None
@@ -105,14 +114,11 @@ def parse_candidate_semantic_profile(
         profile = CandidateSemanticProfile(
             source_signature=source_signature,
             summary=profile.summary,
-            background_keywords=profile.background_keywords,
-            target_direction_keywords=profile.target_direction_keywords,
-            core_business_areas=profile.core_business_areas,
-            adjacent_business_areas=profile.adjacent_business_areas,
-            exploration_business_areas=profile.exploration_business_areas,
+            company_discovery_primary_anchors=profile.company_discovery_primary_anchors,
+            company_discovery_secondary_anchors=profile.company_discovery_secondary_anchors,
+            job_fit_core_terms=profile.job_fit_core_terms,
+            job_fit_support_terms=profile.job_fit_support_terms,
             avoid_business_areas=profile.avoid_business_areas,
-            strong_capabilities=profile.strong_capabilities,
-            seniority_signals=profile.seniority_signals,
         )
     return profile
 

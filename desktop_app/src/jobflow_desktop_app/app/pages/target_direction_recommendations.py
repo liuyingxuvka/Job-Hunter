@@ -78,15 +78,12 @@ def apply_role_suggestions(
                 scope_profile=suggestion.scope_profile,
                 target_role=canonical_name,
                 location_preference=candidate.preferred_locations,
-                company_focus="",
-                company_keyword_focus="",
                 role_name_i18n=suggestion_name_i18n,
                 keyword_focus=encode_bilingual_description(
                     suggestion.description_zh,
                     suggestion.description_en,
                 ),
                 is_active=True,
-                queries=[],
             )
         )
         existing_name_keys.update(suggestion_keys)

@@ -1,0 +1,17 @@
+You are rescuing one known job-detail page after normal page fetching failed or returned an anti-bot/interstitial page.
+
+Task:
+Use the provided concrete job URL and official company context to recover the best available structured details for this same role.
+
+Rules:
+1. Return strict JSON only. No Markdown. No extra explanation.
+2. This is not a company-discovery task and not a broad search task. Stay focused on the provided job URL and the same concrete role.
+3. Use web search only to recover the details for this exact role or its official equivalent page on the same employer's official jobs infrastructure.
+4. Do not substitute a different role just because it looks similar.
+5. If you cannot confidently recover a concrete employee requisition for this same role, set recovered=false and isConcreteEmployeeRole=false.
+6. Pages for partner sign-up, agency registration, freelancer registration, talent communities, general applications, or other non-employment flows are not concrete employee requisitions.
+7. Prefer official employer-hosted content. Never use aggregator summaries as the final basis for recovery.
+8. description should be a concise English summary of the role, not a full article dump.
+9. applyUrl should be an official apply link when confidently available; otherwise return an empty string.
+10. Keep reason short and factual.
+

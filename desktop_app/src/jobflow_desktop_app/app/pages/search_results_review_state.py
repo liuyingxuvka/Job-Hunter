@@ -9,14 +9,6 @@ from ..widgets.common import _t
 from . import search_results_review_store
 
 
-def status_store_key(candidate_id: int | None) -> str:
-    return search_results_review_store.status_store_key(candidate_id)
-
-
-def hidden_store_key(candidate_id: int | None) -> str:
-    return search_results_review_store.hidden_store_key(candidate_id)
-
-
 def load_review_state(settings, candidate_id: int, normalize_status_code: Callable[[str], str | None]):
     return search_results_review_store.load_review_state(settings, candidate_id, normalize_status_code)
 
@@ -107,8 +99,6 @@ def delete_selected_rows(
 __all__ = [
     "apply_status_change",
     "delete_selected_rows",
-    "hidden_store_key",
     "load_review_state",
     "save_review_state",
-    "status_store_key",
 ]

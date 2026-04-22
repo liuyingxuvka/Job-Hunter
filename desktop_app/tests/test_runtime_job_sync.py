@@ -108,8 +108,8 @@ class RuntimeJobSyncTests(unittest.TestCase):
         self.assertEqual(row["job_id"], 7)
         self.assertEqual(row["job_key"], "https://example.com/jobs/1")
         self.assertTrue(row["analysis_completed"])
-        self.assertTrue(row["recommended"])
-        self.assertTrue(row["pending_resume"])
+        self.assertNotIn("recommended", row)
+        self.assertNotIn("pending_resume", row)
 
 
 if __name__ == "__main__":  # pragma: no cover

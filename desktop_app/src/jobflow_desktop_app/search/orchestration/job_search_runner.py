@@ -23,12 +23,8 @@ from ..state.search_progress_state import SearchProgress, SearchStats
 from ..state.runtime_db_mirror import build_search_runtime_mirror
 from ..state.runtime_run_locator import candidate_id_from_run_dir, project_root_from_run_dir
 from . import (
-    company_discovery_queries,
     job_search_runner_session,
 )
-
-
-TIMED_SEARCH_EMPTY_ROUNDS_BEFORE_END = 3
 
 @dataclass(frozen=True)
 class SearchRunResult:
@@ -39,6 +35,7 @@ class SearchRunResult:
     stderr_tail: str
     run_dir: Path
     cancelled: bool = False
+    details: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -76,9 +73,6 @@ class SearchStageRunResult:
     cancelled: bool = False
 
 
-DiscoveryAnchorPlan = company_discovery_queries.DiscoveryAnchorPlan
-
-
 class JobSearchRunner:
     def __init__(self, project_root: Path) -> None:
         self.project_root = Path(project_root)
@@ -113,7 +107,6 @@ class JobSearchRunner:
             result_factory=SearchRunResult,
             time_ns_fn=time.time_ns,
             time_monotonic_fn=time.monotonic,
-            empty_rounds_before_end=TIMED_SEARCH_EMPTY_ROUNDS_BEFORE_END,
         )
 
     def load_recommended_jobs(self, candidate_id: int) -> list[JobSearchResult]:
@@ -177,6 +170,25 @@ class JobSearchRunner:
         return candidate_id, runtime_mirror, runtime_mirror.latest_run(candidate_id)
 
     @classmethod
+    def _previous_search_run_snapshot(
+        cls,
+        run_dir: Path,
+        *,
+        current_run_id: int | None = None,
+    ):
+        candidate_id, runtime_mirror, latest_run = cls._search_run_context_for_run_dir(run_dir)
+        if runtime_mirror is None or candidate_id is None:
+            return None
+        if current_run_id is None:
+            return latest_run
+        recent_runs = list(runtime_mirror.recent_runs(candidate_id, limit=2))
+        if not recent_runs:
+            return None
+        if int(recent_runs[0].search_run_id) != int(current_run_id):
+            return recent_runs[0]
+        return recent_runs[1] if len(recent_runs) > 1 else None
+
+    @classmethod
     def _merge_resume_pending_job_lists(
         cls,
         run_dir: Path,
@@ -203,26 +215,69 @@ class JobSearchRunner:
         )
 
     @classmethod
-    def _load_resume_pending_jobs(cls, run_dir: Path, include_fallback: bool = True) -> list[dict]:
+    def _load_resume_pending_jobs(
+        cls,
+        run_dir: Path,
+        include_fallback: bool = True,
+        *,
+        current_run_id: int | None = None,
+    ) -> list[dict]:
         candidate_id, runtime_mirror, latest_run = cls._search_run_context_for_run_dir(run_dir)
         if runtime_mirror is None or latest_run is None or candidate_id is None:
             return []
+        source_run = latest_run
         pending_jobs = runtime_mirror.load_run_bucket_jobs(
-            search_run_id=latest_run.search_run_id,
+            search_run_id=source_run.search_run_id,
             job_bucket="resume_pending",
         )
+        if not pending_jobs and current_run_id is not None and int(source_run.search_run_id) == int(current_run_id):
+            previous_run = cls._previous_search_run_snapshot(
+                run_dir,
+                current_run_id=current_run_id,
+            )
+            if previous_run is not None:
+                source_run = previous_run
+                pending_jobs = runtime_mirror.load_run_bucket_jobs(
+                    search_run_id=source_run.search_run_id,
+                    job_bucket="resume_pending",
+                )
+        if pending_jobs and current_run_id is not None and int(source_run.search_run_id) == int(current_run_id):
+            all_jobs = runtime_mirror.load_run_bucket_jobs(
+                search_run_id=source_run.search_run_id,
+                job_bucket="all",
+            )
+            recommended_jobs = runtime_mirror.load_run_bucket_jobs(
+                search_run_id=source_run.search_run_id,
+                job_bucket="recommended",
+            )
+            found_jobs = runtime_mirror.load_run_bucket_jobs(
+                search_run_id=source_run.search_run_id,
+                job_bucket="found",
+            )
+            return state_merge_resume_pending_job_lists(
+                run_dir,
+                pending_jobs,
+                found_jobs,
+                all_jobs,
+                recommended_jobs,
+                current_run_id=source_run.search_run_id,
+            )
         if pending_jobs or not include_fallback:
-            return pending_jobs
+            return state_normalize_resume_pending_jobs(
+                pending_jobs,
+                run_dir,
+                current_run_id=source_run.search_run_id,
+            )
         all_jobs = runtime_mirror.load_run_bucket_jobs(
-            search_run_id=latest_run.search_run_id,
+            search_run_id=source_run.search_run_id,
             job_bucket="all",
         )
         recommended_jobs = runtime_mirror.load_run_bucket_jobs(
-            search_run_id=latest_run.search_run_id,
+            search_run_id=source_run.search_run_id,
             job_bucket="recommended",
         )
         found_jobs = runtime_mirror.load_run_bucket_jobs(
-            search_run_id=latest_run.search_run_id,
+            search_run_id=source_run.search_run_id,
             job_bucket="found",
         )
         pending_jobs = state_collect_resume_pending_jobs_from_job_lists(
@@ -230,18 +285,31 @@ class JobSearchRunner:
             recommended_jobs,
         )
         if pending_jobs:
-            return pending_jobs
-        return state_collect_resume_pending_jobs_from_job_lists(
+            return state_normalize_resume_pending_jobs(
+                pending_jobs,
+                run_dir,
+                current_run_id=source_run.search_run_id,
+            )
+        return state_merge_resume_pending_job_lists(
+            run_dir,
             found_jobs,
             all_jobs,
             recommended_jobs,
+            current_run_id=source_run.search_run_id,
         )
 
     @classmethod
-    def _write_resume_pending_jobs(cls, run_dir: Path, include_found_fallback: bool = False) -> int:
+    def _write_resume_pending_jobs(
+        cls,
+        run_dir: Path,
+        include_found_fallback: bool = False,
+        *,
+        current_run_id: int | None = None,
+    ) -> int:
         pending_jobs = cls._load_resume_pending_jobs(
             run_dir,
             include_fallback=include_found_fallback,
+            current_run_id=current_run_id,
         )
         candidate_id, runtime_mirror, latest_run = cls._search_run_context_for_run_dir(run_dir)
         if runtime_mirror is not None and latest_run is not None and candidate_id is not None:
@@ -266,9 +334,13 @@ class JobSearchRunner:
         )
 
     @classmethod
-    def _refresh_resume_pending_jobs(cls, run_dir: Path) -> int:
+    def _refresh_resume_pending_jobs(cls, run_dir: Path, *, current_run_id: int | None = None) -> int:
         try:
-            return cls._write_resume_pending_jobs(run_dir, include_found_fallback=True)
+            return cls._write_resume_pending_jobs(
+                run_dir,
+                include_found_fallback=True,
+                current_run_id=current_run_id,
+            )
         except Exception:
             return 0
 
@@ -324,13 +396,11 @@ class JobSearchRunner:
         search_run_id: int | None,
         *,
         runtime_config: dict | None = None,
-        resume_config: dict | None = None,
     ) -> None:
         job_search_runner_runtime_io.sync_search_run_configs(
             self,
             search_run_id,
             runtime_config=runtime_config,
-            resume_config=resume_config,
         )
 
     def _store_semantic_profile_snapshot(
@@ -366,7 +436,6 @@ class JobSearchRunner:
         return job_search_runner_runtime_io.tail(text, max_lines=max_lines, max_chars=max_chars)
 
 __all__ = [
-    "DiscoveryAnchorPlan",
     "JobSearchResult",
     "JobSearchRunner",
     "SearchRunResult",

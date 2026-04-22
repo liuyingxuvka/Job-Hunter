@@ -18,6 +18,7 @@ from .prompts import (
     normalize_target_role_binding_payload,
     normalize_target_roles,
     prepare_analysis_for_storage,
+    target_role_binding_min_score,
 )
 from ...ai.client import parse_response_json
 from .scoring import unified_recommend_threshold
@@ -91,6 +92,8 @@ class JobAnalysisService:
         target_roles = normalize_target_roles(_target_roles_from_config(config))
         if not target_roles:
             return None
+        if not _should_run_target_role_binding(config, analysis):
+            return None
 
         analysis_config = config.get("analysis") if isinstance(config.get("analysis"), Mapping) else {}
         model = str(analysis_config.get("model") or "").strip()
@@ -158,6 +161,28 @@ def _target_roles_from_config(config: Mapping[str, Any]) -> list[Mapping[str, An
     if not isinstance(target_roles, list):
         return []
     return [item for item in target_roles if isinstance(item, Mapping)]
+
+
+def _analysis_score(value: object) -> int:
+    try:
+        if isinstance(value, bool):
+            return 0
+        return max(0, min(100, int(float(value))))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _should_run_target_role_binding(
+    config: Mapping[str, Any],
+    analysis: Mapping[str, Any],
+) -> bool:
+    if analysis.get("recommend") is True:
+        return True
+    binding_floor = target_role_binding_min_score(config)
+    overall_score = _analysis_score(
+        analysis.get("overallScore", analysis.get("matchScore", analysis.get("score"))),
+    )
+    return overall_score >= binding_floor
 
 
 __all__ = [

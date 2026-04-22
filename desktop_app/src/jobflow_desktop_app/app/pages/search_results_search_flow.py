@@ -9,6 +9,13 @@ from PySide6.QtWidgets import QMessageBox
 
 from ..widgets.common import _t
 from . import search_results_runtime_state
+from . import search_results_status
+
+
+def _is_no_qualified_company_stop(details: object) -> bool:
+    if not isinstance(details, dict):
+        return False
+    return str(details.get("stopReason") or "").strip() == "no_qualified_new_companies"
 
 
 def toggle_search(page) -> None:
@@ -226,23 +233,52 @@ def run_search(page, candidate_id: int | None = None, *, run_busy_task_fn) -> No
         visible_count = page._render_jobs(jobs)
         page._refresh_results_stats_label()
         pending_after_run = page._main_pending_analysis_count(int(target_candidate_id))
-        page._set_finished_status(pending_after_run, candidate.name)
+        if _is_no_qualified_company_stop(getattr(result, "details", None)):
+            detail_text = page._set_no_qualified_company_status(candidate.name)
+            page._show_notification_toast(
+                _t(
+                    page.ui_language,
+                    "本轮搜索已结束：当前没有新的合格公司。",
+                    "This search round finished with no new qualified companies.",
+                ),
+                level="warning",
+                duration_ms=5000,
+            )
+            QMessageBox.information(
+                page,
+                _t(page.ui_language, "岗位搜索结果", "Search Results"),
+                search_results_status.search_completion_popup_message(
+                    page.ui_language,
+                    detail_text=detail_text,
+                ),
+            )
+            return
+
+        detail_text = page._set_finished_status(pending_after_run, candidate.name)
         page._show_notification_toast(
             (
                 _t(
                     page.ui_language,
-                    "岗位搜索已完成。",
-                    "Job search finished.",
+                    "本轮搜索已结束。",
+                    "This search round finished.",
                 )
-                if visible_count > 0
+                if pending_after_run <= 0
                 else _t(
                     page.ui_language,
-                    "岗位搜索已完成，当前没有可展示结果。",
-                    "Job search finished. No displayable results yet.",
+                    f"本轮搜索已结束，仍有 {pending_after_run} 条待补完岗位。",
+                    f"This search round finished with {pending_after_run} pending job(s) remaining.",
                 )
             ),
             level="success",
             duration_ms=5000,
+        )
+        QMessageBox.information(
+            page,
+            _t(page.ui_language, "岗位搜索结果", "Search Results"),
+            search_results_status.search_completion_popup_message(
+                page.ui_language,
+                detail_text=detail_text,
+            ),
         )
 
     def _on_error(exc: Exception) -> None:
@@ -269,7 +305,6 @@ def run_search(page, candidate_id: int | None = None, *, run_busy_task_fn) -> No
             return
         page._reset_search_runtime_state()
         page._refresh_results_stats_label()
-        page._set_results_progress_detail("")
         page._apply_search_prerequisite_state()
 
     started = run_busy_task_fn(

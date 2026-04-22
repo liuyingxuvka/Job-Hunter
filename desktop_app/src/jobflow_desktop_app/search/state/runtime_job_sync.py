@@ -105,8 +105,6 @@ def build_runtime_bucket_rows(
                 "date_found": str(item.get("dateFound") or "").strip(),
                 "match_score": extract_match_score(item.get("analysis")),
                 "analysis_completed": analysis_completed(item.get("analysis")),
-                "recommended": bool((item.get("analysis") or {}).get("recommend")),
-                "pending_resume": bucket == "resume_pending",
                 "job_json": json.dumps(item, ensure_ascii=False),
             }
         )

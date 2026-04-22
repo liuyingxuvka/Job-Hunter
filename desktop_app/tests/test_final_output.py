@@ -220,6 +220,27 @@ class FinalOutputTests(unittest.TestCase):
         self.assertEqual(jobs[0]["title"], "Hydrogen Diagnostics Engineer")
         self.assertEqual(jobs[0]["outputUrl"], "https://acme.example.com/careers/jobs/55555/apply")
 
+    def test_post_verify_skipped_flag_allows_output_even_when_main_config_requires_check(self) -> None:
+        skipped = self._job(
+            title="Hydrogen Diagnostics Engineer",
+            url="https://acme.example.com/careers/jobs/66666",
+            apply_url="https://acme.example.com/careers/jobs/66666/apply",
+            score=77,
+            verified=None,
+        )
+        skipped["analysis"]["postVerifySkipped"] = True
+
+        result = rebuild_recommended_output_payload(
+            all_jobs=[skipped],
+            existing_recommended_jobs=[],
+            config=self._config(mode="replace", post_verify_enabled=True),
+            generated_at="2026-04-14T12:30:00Z",
+        )
+
+        jobs = result.payload["jobs"]
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]["title"], "Hydrogen Diagnostics Engineer")
+
     def test_passes_final_output_check_accepts_resolved_apply_url_when_source_url_missing(self) -> None:
         job = self._job(
             title="Fuel Cell Reliability Engineer",

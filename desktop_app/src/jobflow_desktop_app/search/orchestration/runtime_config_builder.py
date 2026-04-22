@@ -4,7 +4,7 @@ import copy
 import os
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +23,6 @@ from ..runtime_defaults import DEFAULT_RUNTIME_CONFIG
 from .. import runtime_strategy
 from .candidate_search_signals import (
     CandidateSearchSignals,
-    load_runtime_resume_text,
     resolve_candidate_search_signals,
 )
 from . import company_discovery_queries as company_discovery_queries_module
@@ -31,14 +30,13 @@ from . import company_discovery_queries as company_discovery_queries_module
 HTTP_REQUEST_TIMEOUT_MS = 12000
 DISCOVERY_COMPANIES_PER_QUERY_CAP = 12
 JOB_LINK_HARD_CAP_PER_COMPANY = 40
+COMPANY_FIT_TOOL_TERMS = set(company_discovery_queries_module.TOOL_ONLY_DISCOVERY_TERMS)
 
 
 @dataclass(frozen=True)
 class RuntimeCandidateInputPrep:
     resume_path: str
-    resume_text: str
-    scope_profile: str
-    target_role: str
+    scope_profiles: tuple[str, ...]
     target_roles: list[dict[str, object]]
 
 
@@ -46,19 +44,15 @@ class RuntimeCandidateInputPrep:
 class RuntimeCandidateConfigContext:
     candidate_inputs: RuntimeCandidateInputPrep
     signals: CandidateSearchSignals
-    discovery_anchor_plan: company_discovery_queries_module.DiscoveryAnchorPlan
+    discovery_query_input: dict[str, object] = field(default_factory=dict)
 
     @property
     def resume_path(self) -> str:
         return self.candidate_inputs.resume_path
 
     @property
-    def scope_profile(self) -> str:
-        return self.candidate_inputs.scope_profile
-
-    @property
-    def target_role(self) -> str:
-        return self.candidate_inputs.target_role
+    def scope_profiles(self) -> tuple[str, ...]:
+        return self.candidate_inputs.scope_profiles
 
     @property
     def target_roles(self) -> list[dict[str, object]]:
@@ -247,49 +241,21 @@ def resolve_resume_path(candidate: CandidateRecord, run_dir: Path) -> str:
     return str(generated_resume.resolve())
 
 
-def resolve_scope_profile(profiles: list[SearchProfileRecord]) -> str:
+def resolve_scope_profiles(profiles: list[SearchProfileRecord]) -> tuple[str, ...]:
     active_profiles = [profile for profile in profiles if profile.is_active]
     source = active_profiles if active_profiles else profiles
-    scope_counts: dict[str, int] = {}
+    values: list[str] = []
+    seen: set[str] = set()
     for profile in source:
         scope_profile = str(profile.scope_profile or "").strip()
         if not scope_profile:
             continue
-        scope_counts[scope_profile] = scope_counts.get(scope_profile, 0) + 1
-    if not scope_counts:
-        return ""
-    return max(
-        scope_counts.items(),
-        key=lambda item: (item[1], 1 if item[0] == "hydrogen_mainline" else 0),
-    )[0]
-
-
-def resolve_target_role(candidate: CandidateRecord, profiles: list[SearchProfileRecord]) -> str:
-    active_profiles = [profile for profile in profiles if profile.is_active]
-    source = active_profiles if active_profiles else profiles
-    chunks: list[str] = []
-    seen: set[str] = set()
-    for profile in source:
-        for raw in role_name_query_lines(profile.role_name_i18n, fallback_name=profile.name):
-            text = str(raw or "").strip()
-            if not text:
-                continue
-            key = text.casefold()
-            if key in seen:
-                continue
-            seen.add(key)
-            chunks.append(text)
-        target_role = str(profile.target_role or "").strip()
-        if target_role:
-            key = target_role.casefold()
-            if key not in seen:
-                seen.add(key)
-                chunks.append(target_role)
-    if chunks:
-        return " ; ".join(chunks[:8])
-    if str(candidate.target_directions or "").strip():
-        return str(candidate.target_directions or "").strip()
-    return "Systems Engineer"
+        key = scope_profile.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        values.append(scope_profile)
+    return tuple(values)
 
 
 def build_target_roles_payload(candidate: CandidateRecord, profiles: list[SearchProfileRecord]) -> list[dict[str, object]]:
@@ -298,9 +264,13 @@ def build_target_roles_payload(candidate: CandidateRecord, profiles: list[Search
     payload: list[dict[str, object]] = []
     seen: set[str] = set()
     for profile in source:
-        zh_name, en_name = decode_bilingual_role_name(profile.role_name_i18n, fallback_name=profile.name)
         target_role_text = str(profile.target_role or "").strip()
-        display_name = en_name or zh_name or target_role_text or str(profile.name or "").strip()
+        fallback_role_name = target_role_text or str(profile.name or "").strip()
+        zh_name, en_name = decode_bilingual_role_name(
+            profile.role_name_i18n,
+            fallback_name=fallback_role_name,
+        )
+        display_name = en_name or zh_name or fallback_role_name
         if not display_name and not target_role_text:
             continue
         role_id = (
@@ -358,14 +328,6 @@ def resolve_model_override(settings: OpenAISettings | None) -> str:
     return settings.model.strip()
 
 
-def load_feedback_keywords(runtime_mirror: Any, candidate_id: int | None, *, limit: int = 16) -> list[str]:
-    if candidate_id is None or runtime_mirror is None:
-        return []
-    return runtime_mirror.load_latest_run_feedback(
-        candidate_id=candidate_id,
-    ).get("keywords", [])[:limit]
-
-
 def prepare_runtime_candidate_inputs(
     *,
     candidate: CandidateRecord,
@@ -373,15 +335,11 @@ def prepare_runtime_candidate_inputs(
     run_dir: Path,
 ) -> RuntimeCandidateInputPrep:
     resume_path = resolve_resume_path(candidate, run_dir)
-    resume_text = load_runtime_resume_text(resume_path, max_chars=12000)
-    scope_profile = resolve_scope_profile(profiles)
-    target_role = resolve_target_role(candidate, profiles)
+    scope_profiles = resolve_scope_profiles(profiles)
     target_roles = build_target_roles_payload(candidate, profiles)
     return RuntimeCandidateInputPrep(
         resume_path=resume_path,
-        resume_text=resume_text,
-        scope_profile=scope_profile,
-        target_role=target_role,
+        scope_profiles=scope_profiles,
         target_roles=target_roles,
     )
 
@@ -393,29 +351,25 @@ def build_runtime_candidate_context_from_inputs(
     semantic_profile: CandidateSemanticProfile | None,
     candidate_inputs: RuntimeCandidateInputPrep,
     signals: CandidateSearchSignals | None = None,
-    feedback_keywords: list[str] | None = None,
 ) -> RuntimeCandidateConfigContext:
     resolved_signals = resolve_candidate_search_signals(
-        candidate=candidate,
         profiles=profiles,
         semantic_profile=semantic_profile,
         signals=signals,
     )
-    discovery_anchor_plan = company_discovery_queries_module.build_discovery_anchor_plan(
-        scope_profile=candidate_inputs.scope_profile,
-        signals=resolved_signals,
-        resume_text=candidate_inputs.resume_text,
-        feedback_keywords=list(feedback_keywords or []),
-    )
     return RuntimeCandidateConfigContext(
         candidate_inputs=candidate_inputs,
         signals=resolved_signals,
-        discovery_anchor_plan=discovery_anchor_plan,
+        discovery_query_input=build_candidate_context_company_discovery_query_input(
+            candidate=candidate,
+            profiles=profiles,
+            semantic_profile=semantic_profile,
+            candidate_inputs=candidate_inputs,
+        ),
     )
 
 
 def build_runtime_candidate_context(
-    runtime_mirror: Any,
     *,
     candidate: CandidateRecord,
     profiles: list[SearchProfileRecord],
@@ -428,19 +382,16 @@ def build_runtime_candidate_context(
         profiles=profiles,
         run_dir=run_dir,
     )
-    candidate_id = int(candidate.candidate_id) if candidate.candidate_id is not None else None
     return build_runtime_candidate_context_from_inputs(
         candidate=candidate,
         profiles=profiles,
         semantic_profile=semantic_profile,
         candidate_inputs=candidate_inputs,
         signals=signals,
-        feedback_keywords=load_feedback_keywords(runtime_mirror, candidate_id),
     )
 
 
 def refresh_runtime_candidate_context(
-    runtime_mirror: Any,
     *,
     candidate: CandidateRecord,
     profiles: list[SearchProfileRecord],
@@ -448,34 +399,192 @@ def refresh_runtime_candidate_context(
     candidate_context: RuntimeCandidateConfigContext,
     signals: CandidateSearchSignals | None = None,
 ) -> RuntimeCandidateConfigContext:
-    candidate_id = int(candidate.candidate_id) if candidate.candidate_id is not None else None
     return build_runtime_candidate_context_from_inputs(
         candidate=candidate,
         profiles=profiles,
         semantic_profile=semantic_profile,
         candidate_inputs=candidate_context.candidate_inputs,
         signals=signals or candidate_context.signals,
-        feedback_keywords=load_feedback_keywords(runtime_mirror, candidate_id),
     )
 
 
-def build_candidate_context_company_discovery_queries(
-    candidate_context: RuntimeCandidateConfigContext,
+def _normalize_discovery_query_input_terms(
+    values: list[object],
     *,
-    query_rotation_seed: int,
+    limit: int,
 ) -> list[str]:
-    return (
-        company_discovery_queries_module.build_company_discovery_queries_from_anchor_plan(
-            anchor_plan=candidate_context.discovery_anchor_plan,
-            rotation_seed=query_rotation_seed,
-        )
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        text = company_discovery_queries_module.normalize_business_hint(str(raw or "").strip())
+        if not text:
+            continue
+        if text.casefold() in COMPANY_FIT_TOOL_TERMS:
+            continue
+        if company_discovery_queries_module.looks_like_role_phrase(text):
+            continue
+        if company_discovery_queries_module.looks_like_business_noise(text):
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(text)
+        if len(normalized) >= limit:
+            break
+    return normalized
+
+
+def build_candidate_context_company_discovery_query_input(
+    *,
+    candidate: CandidateRecord,
+    profiles: list[SearchProfileRecord],
+    semantic_profile: CandidateSemanticProfile | None,
+    candidate_inputs: RuntimeCandidateInputPrep,
+) -> dict[str, object]:
+    active_profiles = [profile for profile in profiles if profile.is_active]
+    source_profiles = active_profiles if active_profiles else profiles
+    desired_work_directions: list[object] = []
+    if semantic_profile is not None and semantic_profile.is_usable():
+        desired_work_directions.extend(semantic_profile.company_discovery_primary_anchors or [])
+        desired_work_directions.extend(semantic_profile.company_discovery_secondary_anchors or [])
+        desired_work_directions.extend(semantic_profile.job_fit_core_terms or [])
+        desired_work_directions.extend(semantic_profile.job_fit_support_terms or [])
+    for profile in source_profiles:
+        desired_work_directions.extend(description_query_lines(profile.keyword_focus))
+    desired_work_directions.extend(_non_empty_lines(candidate.target_directions, limit=8))
+    location_preference = candidate_location_preference_text(
+        base_location_struct=candidate.base_location_struct,
+        preferred_locations_struct=candidate.preferred_locations_struct,
+        base_location_text=candidate.base_location,
+        preferred_locations_text=candidate.preferred_locations,
     )
+    summary = ""
+    avoid_business_areas: list[str] = []
+    if semantic_profile is not None and semantic_profile.is_usable():
+        summary = _truncate_text(semantic_profile.summary, 260)
+        avoid_business_areas = _normalize_discovery_query_input_terms(
+            list(semantic_profile.avoid_business_areas or []),
+            limit=8,
+        )
+    if not summary:
+        summary = _truncate_text(candidate.notes, 260)
+    target_role_names: list[str] = []
+    seen_target_roles: set[str] = set()
+    for target_role in candidate_inputs.target_roles:
+        display_name = str(
+            target_role.get("displayName")
+            or target_role.get("targetRoleText")
+            or target_role.get("nameEn")
+            or target_role.get("nameZh")
+            or ""
+        ).strip()
+        if not display_name:
+            continue
+        key = display_name.casefold()
+        if key in seen_target_roles:
+            continue
+        seen_target_roles.add(key)
+        target_role_names.append(display_name)
+        if len(target_role_names) >= 6:
+            break
+    return {
+        "summary": summary,
+        "targetRoles": target_role_names,
+        "desiredWorkDirections": _normalize_discovery_query_input_terms(
+            desired_work_directions,
+            limit=18,
+        ),
+        "avoidBusinessAreas": avoid_business_areas,
+        "locationPreference": _truncate_text(location_preference, 160),
+    }
+
+
+def _normalize_company_fit_terms(
+    values: list[str],
+    *,
+    limit: int,
+    allow_tools_only: bool,
+) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        text = company_discovery_queries_module.normalize_business_hint(str(raw or "").strip())
+        if not text:
+            continue
+        key = text.casefold()
+        is_tool_only = key in COMPANY_FIT_TOOL_TERMS
+        if is_tool_only and not allow_tools_only:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(text)
+        if len(normalized) >= limit:
+            break
+    return normalized
+
+
+def _truncate_text(value: object, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _non_empty_lines(value: object, *, limit: int) -> list[str]:
+    lines: list[str] = []
+    seen: set[str] = set()
+    for raw_line in str(value or "").splitlines():
+        line = _truncate_text(raw_line, 96)
+        if not line:
+            continue
+        key = line.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(line)
+        if len(lines) >= limit:
+            break
+    return lines
+
+
+def build_candidate_context_company_fit_terms(
+    candidate_context: RuntimeCandidateConfigContext,
+) -> dict[str, list[str]]:
+    signals = getattr(candidate_context, "signals", None)
+    profile = getattr(signals, "profile", None)
+    semantic = getattr(signals, "semantic", None)
+    if profile is None or semantic is None:
+        return {"core": [], "support": []}
+    return {
+        "core": _normalize_company_fit_terms(
+            [
+                *getattr(profile, "target_roles", []),
+                *getattr(profile, "keyword_focus_terms", []),
+                *getattr(semantic, "job_fit_core_terms", []),
+            ],
+            limit=18,
+            allow_tools_only=False,
+        ),
+        "support": _normalize_company_fit_terms(
+            [
+                *getattr(semantic, "job_fit_support_terms", []),
+                *getattr(profile, "role_names", []),
+            ],
+            limit=14,
+            allow_tools_only=False,
+        ),
+    }
 
 
 def apply_runtime_candidate_context(
     *,
     candidate_config: dict,
     search_config: dict,
+    sources_config: dict | None = None,
     candidate: CandidateRecord,
     candidate_context: RuntimeCandidateConfigContext,
     semantic_profile: CandidateSemanticProfile | None,
@@ -484,8 +593,7 @@ def apply_runtime_candidate_context(
         candidate_config,
         {
             "resumePath": candidate_context.resume_path,
-            "scopeProfile": candidate_context.scope_profile,
-            "targetRole": candidate_context.target_role,
+            "scopeProfiles": list(candidate_context.scope_profiles),
             "targetRoles": candidate_context.target_roles,
             "locationPreference": candidate_location_preference_text(
                 base_location_struct=candidate.base_location_struct,
@@ -509,6 +617,13 @@ def apply_runtime_candidate_context(
             "maxJobsPerQuery": min(50, max(10, int(search_config.get("maxJobsPerQuery", 30)))),
         },
     )
+    if isinstance(sources_config, dict):
+        update_section(
+            sources_config,
+            {
+                "companyFitTerms": build_candidate_context_company_fit_terms(candidate_context),
+            },
+        )
 
 
 def apply_runtime_model_override(
@@ -570,22 +685,18 @@ def populate_runtime_config_common(
     model_override: str,
     signals: CandidateSearchSignals | None = None,
     candidate_context: RuntimeCandidateConfigContext | None = None,
-) -> list[str]:
+) -> RuntimeCandidateConfigContext:
     resolved_candidate_context = candidate_context or build_runtime_candidate_context(
-        runtime_mirror,
         candidate=candidate,
         profiles=profiles,
         run_dir=run_dir,
         semantic_profile=semantic_profile,
         signals=signals,
     )
-    company_discovery_queries = build_candidate_context_company_discovery_queries(
-        resolved_candidate_context,
-        query_rotation_seed=query_rotation_seed,
-    )
     apply_runtime_candidate_context(
         candidate_config=candidate_config,
         search_config=search_config,
+        sources_config=sources_config,
         candidate=candidate,
         candidate_context=resolved_candidate_context,
         semantic_profile=semantic_profile,
@@ -599,7 +710,13 @@ def populate_runtime_config_common(
     )
     apply_runtime_analysis_defaults(analysis_config=analysis_config)
     update_section(fetch_config, {"timeoutMs": HTTP_REQUEST_TIMEOUT_MS})
-    return company_discovery_queries
+    update_section(
+        company_discovery_config,
+        {
+            "companyDiscoveryInput": resolved_candidate_context.discovery_query_input,
+        },
+    )
+    return resolved_candidate_context
 
 
 def apply_runtime_config_resume_pending_stage(*, sources_config: dict, company_discovery_config: dict, analysis_config: dict, output_config: dict) -> None:
@@ -607,8 +724,6 @@ def apply_runtime_config_resume_pending_stage(*, sources_config: dict, company_d
         sources_config,
         {
             "enableWebSearch": False,
-            "enableCompanySources": False,
-            "requireCompanyDiscovery": False,
             "enableCompanySearchFallback": False,
         },
     )
@@ -616,41 +731,37 @@ def apply_runtime_config_resume_pending_stage(*, sources_config: dict, company_d
         company_discovery_config,
         {
             "enableAutoDiscovery": False,
-            "queries": [],
         },
     )
     update_section(
         analysis_config,
         {
             "scoringUseWebSearch": False,
-            "postVerifyEnabled": True,
-            "postVerifyUseWebSearch": True,
-            "postVerifyRequireChecked": True,
+            # Resume/finalize should focus on clearing queued jobs, not spend
+            # extra budget on the optional post-verify pass.
+            "postVerifyEnabled": False,
+            "postVerifyUseWebSearch": False,
+            "postVerifyRequireChecked": False,
         },
     )
-def apply_runtime_config_main_stage(*, search_config: dict, sources_config: dict, company_discovery_config: dict, analysis_config: dict, translation_config: dict, adaptive_search_config: dict, fetch_config: dict, output_config: dict, company_discovery_queries: list[str], query_rotation_seed: int) -> None:
+def apply_runtime_config_main_stage(*, search_config: dict, sources_config: dict, company_discovery_config: dict, analysis_config: dict, translation_config: dict, adaptive_search_config: dict, fetch_config: dict, output_config: dict) -> None:
     adaptive_strategy = runtime_strategy.derive_adaptive_runtime_strategy(adaptive_search_config)
     update_section(
         sources_config,
         {
             "enableWebSearch": False,
-            "enableCompanySources": True,
-            "requireCompanyDiscovery": True,
             "maxCompaniesPerRun": adaptive_strategy["max_companies_per_run"],
             "maxJobsPerCompany": adaptive_strategy["max_jobs_per_company"],
             "maxJobLinksPerCompany": JOB_LINK_HARD_CAP_PER_COMPANY,
             "enableCompanySearchFallback": True,
             "companyRotationIntervalDays": adaptive_strategy["company_rotation_interval_days"],
-            "companyRotationSeed": int(query_rotation_seed),
         },
     )
     update_section(
         company_discovery_config,
         {
             "enableAutoDiscovery": True,
-            "queries": company_discovery_queries,
-            "maxNewCompaniesPerRun": adaptive_strategy["max_new_companies_per_run"],
-            "maxCompaniesPerQuery": DISCOVERY_COMPANIES_PER_QUERY_CAP,
+            "maxCompaniesPerCall": 5,
         },
     )
     update_section(search_config, {"maxJobsPerQuery": adaptive_strategy["max_jobs_per_query"]})
@@ -658,9 +769,11 @@ def apply_runtime_config_main_stage(*, search_config: dict, sources_config: dict
         analysis_config,
         {
             "scoringUseWebSearch": False,
-            "postVerifyEnabled": True,
-            "postVerifyUseWebSearch": True,
-            "postVerifyRequireChecked": True,
+            # Post-verify remains opt-in in the main stage; default runs should
+            # not spend extra web-search budget on a second verification pass.
+            "postVerifyEnabled": False,
+            "postVerifyUseWebSearch": False,
+            "postVerifyRequireChecked": False,
             "maxJobsToAnalyzePerRun": adaptive_strategy["analysis_work_cap"],
             "jdFetchMaxJobsPerRun": adaptive_strategy["analysis_work_cap"],
             "postVerifyMaxJobsPerRun": adaptive_strategy["analysis_work_cap"],
@@ -679,7 +792,6 @@ def apply_runtime_config_main_stage(*, search_config: dict, sources_config: dict
 
 def build_company_sources_only_runtime_config(runtime_config: dict) -> dict:
     config = copy.deepcopy(runtime_config)
-    ensure_dict(config, "sources")["requireCompanyDiscovery"] = False
     ensure_dict(config, "companyDiscovery")["enableAutoDiscovery"] = False
     return config
 
@@ -700,7 +812,7 @@ def build_runtime_config(
     config = copy.deepcopy(base_config)
     sections = runtime_config_sections(config)
     runtime_strategy.compact_adaptive_search_config(sections.adaptive_search)
-    company_discovery_queries = populate_runtime_config_common(
+    populate_runtime_config_common(
         runtime_mirror,
         candidate_config=sections.candidate,
         search_config=sections.search,
@@ -736,8 +848,6 @@ def build_runtime_config(
         adaptive_search_config=sections.adaptive_search,
         fetch_config=sections.fetch,
         output_config=sections.output,
-        company_discovery_queries=company_discovery_queries,
-        query_rotation_seed=query_rotation_seed,
     )
     runtime_strategy.compact_adaptive_search_config(sections.adaptive_search)
     return config
@@ -755,7 +865,8 @@ __all__ = [
     "apply_runtime_config_main_stage",
     "apply_runtime_config_resume_pending_stage",
     "apply_runtime_model_override",
-    "build_candidate_context_company_discovery_queries",
+    "build_candidate_context_company_discovery_query_input",
+    "build_candidate_context_company_fit_terms",
     "build_company_sources_only_runtime_config",
     "build_runtime_candidate_context",
     "build_runtime_candidate_context_from_inputs",
@@ -765,13 +876,11 @@ __all__ = [
     "coerce_bool",
     "ensure_dict",
     "load_base_config",
-    "load_feedback_keywords",
     "prepare_runtime_candidate_inputs",
     "refresh_runtime_candidate_context",
     "resolve_model_override",
     "resolve_resume_path",
-    "resolve_scope_profile",
-    "resolve_target_role",
+    "resolve_scope_profiles",
     "runtime_config_sections",
     "update_section",
 ]

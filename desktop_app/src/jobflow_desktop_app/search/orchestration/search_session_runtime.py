@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import runtime_config_builder
+from ..companies.state import reconcile_company_pipeline_state_in_memory
 from ..stages.executor import PythonStageExecutor, PythonStageRunResult
 
 
@@ -30,11 +31,9 @@ class SearchSessionRuntime:
     effective_max_companies: int
     query_rotation_seed: int
     search_session_deadline: float
-    session_pass_timeout_seconds: int
     candidate_search_signals: Any | None = None
     candidate_context: Any | None = None
     search_run_id: int | None = None
-    empty_rounds_before_end: int = 3
 
 
 @dataclass(frozen=True)
@@ -45,6 +44,7 @@ class SearchSessionOutcome:
     stdout_tail: str
     stderr_tail: str
     cancelled: bool = False
+    details: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -65,7 +65,6 @@ def _sync_runtime_configs(
     runtime: SearchSessionRuntime,
     *,
     runtime_config: dict | None = None,
-    resume_config: dict | None = None,
 ) -> None:
     sync_fn = getattr(runtime.runner, "_sync_search_run_configs", None)
     if not callable(sync_fn):
@@ -73,7 +72,6 @@ def _sync_runtime_configs(
     sync_fn(
         runtime.search_run_id,
         runtime_config=runtime_config,
-        resume_config=resume_config,
     )
 
 
@@ -81,7 +79,6 @@ def _write_main_runtime_config(runtime: SearchSessionRuntime, rotation_seed: int
     candidate_context = runtime.candidate_context
     if isinstance(candidate_context, runtime_config_builder.RuntimeCandidateConfigContext):
         candidate_context = runtime_config_builder.refresh_runtime_candidate_context(
-            getattr(runtime.runner, "runtime_mirror", None),
             candidate=runtime.candidate,
             profiles=runtime.profiles,
             semantic_profile=runtime.semantic_profile,
@@ -118,15 +115,35 @@ def _remaining_search_session_seconds(runtime: SearchSessionRuntime) -> int:
     return max(0, int(runtime.search_session_deadline - time.monotonic()))
 
 
-def _stage_timeout_seconds(runtime: SearchSessionRuntime, default_timeout: int) -> int:
-    return min(max(1, int(default_timeout)), _remaining_search_session_seconds(runtime))
-
-
 def _refresh_resume_pending_jobs(runtime: SearchSessionRuntime) -> int:
     count = runtime.runner._write_resume_pending_jobs(
         runtime.run_dir,
         include_found_fallback=True,
+        current_run_id=runtime.search_run_id,
     )
+    runtime_mirror = getattr(runtime.runner, "runtime_mirror", None)
+    if runtime_mirror is not None and runtime.search_run_id is not None:
+        try:
+            companies = runtime_mirror.load_candidate_company_pool(
+                candidate_id=runtime.candidate_id,
+            )
+            if companies:
+                all_jobs = runtime_mirror.load_run_bucket_jobs(
+                    search_run_id=runtime.search_run_id,
+                    job_bucket="all",
+                )
+                reconciliation = reconcile_company_pipeline_state_in_memory(
+                    companies=companies,
+                    jobs=all_jobs,
+                    config=runtime.current_main_runtime_config,
+                )
+                if bool(reconciliation.get("changed")):
+                    runtime_mirror.replace_candidate_company_pool(
+                        candidate_id=runtime.candidate_id,
+                        companies=companies,
+                    )
+        except Exception:
+            pass
     return count
 
 
@@ -151,7 +168,7 @@ def _run_resume_stage(
 ) -> PythonStageRunResult | None:
     if runtime.search_run_id is None or runtime.runner.runtime_mirror is None:
         return None
-    timeout = _stage_timeout_seconds(runtime, runtime.session_pass_timeout_seconds)
+    timeout = _remaining_search_session_seconds(runtime)
     if timeout <= 0:
         return None
     _set_stage(runtime, stage_name)
@@ -181,15 +198,10 @@ def _run_company_discovery_stage(
     runtime: SearchSessionRuntime,
     message: str,
     start_event: str,
-    *,
-    query_budget: int,
-    max_new_companies: int,
 ) -> PythonStageRunResult | None:
     if runtime.search_run_id is None or runtime.runner.runtime_mirror is None:
         return None
-    if query_budget <= 0 or max_new_companies <= 0:
-        return None
-    timeout = _stage_timeout_seconds(runtime, runtime.session_pass_timeout_seconds)
+    timeout = _remaining_search_session_seconds(runtime)
     if timeout <= 0:
         return None
     _set_stage(runtime, "company_discovery")
@@ -205,8 +217,6 @@ def _run_company_discovery_stage(
         config=runtime.current_main_runtime_config,
         env=runtime.env,
         timeout_seconds=timeout,
-        query_budget=query_budget,
-        max_new_companies=max_new_companies,
         cancel_event=runtime.cancel_event,
         progress_callback=lambda line: runtime.write_progress(
             status="running",
@@ -223,7 +233,7 @@ def _run_company_selection_stage(
 ) -> PythonStageRunResult | None:
     if runtime.runner.runtime_mirror is None:
         return None
-    timeout = _stage_timeout_seconds(runtime, runtime.session_pass_timeout_seconds)
+    timeout = _remaining_search_session_seconds(runtime)
     if timeout <= 0:
         return None
     _set_stage(runtime, "company_selection")
@@ -234,6 +244,7 @@ def _run_company_selection_stage(
     )
     return PythonStageExecutor.run_company_selection_stage_for_runtime(
         runtime_mirror=runtime.runner.runtime_mirror,
+        search_run_id=runtime.search_run_id,
         candidate_id=runtime.candidate_id,
         config=runtime.current_main_runtime_config,
         env=runtime.env,
@@ -257,7 +268,7 @@ def _run_company_sources_stage(
 ) -> PythonStageRunResult | None:
     if runtime.search_run_id is None or runtime.runner.runtime_mirror is None:
         return None
-    timeout = _stage_timeout_seconds(runtime, runtime.session_pass_timeout_seconds)
+    timeout = _remaining_search_session_seconds(runtime)
     if timeout <= 0:
         return None
     _set_stage(runtime, "company_sources")
@@ -303,7 +314,10 @@ def _cancelled_outcome(
         max_lines=8,
         max_chars=1200,
     )
-    runtime.runner._refresh_resume_pending_jobs(runtime.run_dir)
+    runtime.runner._refresh_resume_pending_jobs(
+        runtime.run_dir,
+        current_run_id=runtime.search_run_id,
+    )
     runtime.write_progress(
         status="cancelled",
         stage="done",
@@ -334,6 +348,5 @@ __all__ = [
     "_run_company_sources_stage",
     "_run_resume_stage",
     "_set_stage",
-    "_stage_timeout_seconds",
     "_write_main_runtime_config",
 ]

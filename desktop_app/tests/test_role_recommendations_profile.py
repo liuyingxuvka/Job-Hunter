@@ -33,14 +33,11 @@ class RoleRecommendationsProfileTests(unittest.TestCase):
         payload = """
         {
           "summary": "  Focused on energy systems and reliability.  ",
-          "background_keywords": ["energy systems", "energy systems", " validation "],
-          "target_direction_keywords": ["hydrogen systems"],
-          "core_business_areas": ["fuel cell systems"],
-          "adjacent_business_areas": [],
-          "exploration_business_areas": [],
-          "avoid_business_areas": ["generic software roles"],
-          "strong_capabilities": ["requirements traceability"],
-          "seniority_signals": ["senior"]
+          "company_discovery_primary_anchors": ["fuel cell durability", "electrolyzer reliability"],
+          "company_discovery_secondary_anchors": ["industrial gas decarbonization"],
+          "job_fit_core_terms": ["energy systems", "energy systems", " validation ", "fuel cell systems"],
+          "job_fit_support_terms": ["requirements traceability"],
+          "avoid_business_areas": ["generic software roles"]
         }
         """.strip()
 
@@ -54,7 +51,14 @@ class RoleRecommendationsProfileTests(unittest.TestCase):
         assert profile is not None
         self.assertEqual(profile.source_signature, "sig-1")
         self.assertEqual(profile.summary, "Focused on energy systems and reliability.")
-        self.assertEqual(profile.background_keywords, ("energy systems", "validation"))
+        self.assertEqual(
+            profile.job_fit_core_terms,
+            ("energy systems", "validation", "fuel cell systems"),
+        )
+        self.assertEqual(
+            profile.company_discovery_primary_anchors,
+            ("fuel cell durability", "electrolyzer reliability"),
+        )
 
     def test_signature_and_cache_round_trip(self) -> None:
         candidate = self._candidate()
@@ -65,8 +69,8 @@ class RoleRecommendationsProfileTests(unittest.TestCase):
         profile = CandidateSemanticProfile(
             source_signature=signature,
             summary="Energy systems focus",
-            target_direction_keywords=("hydrogen systems",),
-            core_business_areas=("fuel cell systems",),
+            company_discovery_primary_anchors=("hydrogen systems",),
+            job_fit_core_terms=("fuel cell systems",),
         )
 
         with TemporaryDirectory() as temp_dir:

@@ -6,6 +6,11 @@ from typing import Any
 
 from ..output.final_output import normalize_job_url
 from ..run_state import analysis_completed
+from ..state.work_unit_state import normalize_work_unit_state
+
+MAX_COMPANY_COOLDOWN_DAYS = 28
+NO_NEW_JOB_STREAK_KEY = "noNewJobCooldownStreak"
+COOLDOWN_APPLIED_AT_KEY = "cooldownAppliedAt"
 
 
 def get_company_cooldown_until(
@@ -13,23 +18,112 @@ def get_company_cooldown_until(
     *,
     jobs_found_count: int,
     new_jobs_count: int,
+    no_new_job_streak: int = 1,
     now: datetime | None = None,
 ) -> str:
+    del jobs_found_count
     current = now or datetime.now(timezone.utc)
     cooldown_base_days = max(
         1,
         int(_to_number(adaptive_search, "cooldownBaseDays", default=7)),
     )
-    no_jobs_days = cooldown_base_days
-    some_jobs_no_new_days = cooldown_base_days
     with_new_days = max(1, cooldown_base_days // 3)
     if new_jobs_count > 0:
         days = with_new_days
-    elif jobs_found_count > 0:
-        days = some_jobs_no_new_days
     else:
-        days = no_jobs_days
+        days = min(
+            MAX_COMPANY_COOLDOWN_DAYS,
+            max(1, int(no_new_job_streak)) * cooldown_base_days,
+        )
     return (current + timedelta(days=days)).replace(microsecond=0).isoformat()
+
+
+def company_pending_analysis_count(company: Mapping[str, Any]) -> int:
+    return max(0, int(_coerce_int(company.get("snapshotPendingAnalysisCount"))))
+
+
+def company_source_coverage_complete(company: Mapping[str, Any]) -> bool:
+    coverage_state = company.get("jobPageCoverage")
+    if isinstance(coverage_state, Mapping) and "coverageComplete" in coverage_state:
+        return bool(coverage_state.get("coverageComplete"))
+    return company.get("snapshotComplete") is True
+
+
+def company_has_materialized_jobs_entry(company: Mapping[str, Any]) -> bool:
+    jobs_page_url = str(company.get("jobsPageUrl") or company.get("careersUrl") or "").strip()
+    if jobs_page_url:
+        return True
+    sample_job_urls = company.get("sampleJobUrls")
+    if isinstance(sample_job_urls, list) and any(str(item or "").strip() for item in sample_job_urls):
+        return True
+    careers_cache = company.get("careersDiscoveryCache")
+    if not isinstance(careers_cache, Mapping):
+        return False
+    if str(careers_cache.get("jobsPageUrl") or careers_cache.get("careersUrl") or "").strip():
+        return True
+    cache_samples = careers_cache.get("sampleJobUrls")
+    return isinstance(cache_samples, list) and any(str(item or "").strip() for item in cache_samples)
+
+
+def _pending_listing_urls(company: Mapping[str, Any]) -> list[object]:
+    coverage_state = company.get("jobPageCoverage")
+    if not isinstance(coverage_state, Mapping):
+        return []
+    return list(coverage_state.get("pendingListingUrls") or [])
+
+
+def _source_work_state(company: Mapping[str, Any]) -> dict[str, object]:
+    return normalize_work_unit_state(company.get("sourceWorkState"))
+
+
+def _source_work_reason_counts_as_unfinished(reason: object) -> bool:
+    text = str(reason or "").strip().casefold()
+    if not text:
+        return False
+    return text == "ai_job_prerank_pending_retry"
+
+
+def company_has_unfinished_source_work(company: Mapping[str, Any]) -> bool:
+    coverage_state = company.get("jobPageCoverage")
+    if isinstance(coverage_state, Mapping):
+        if _pending_listing_urls(company):
+            return True
+        if coverage_state.get("coverageComplete") is False:
+            return True
+    source_work_state = _source_work_state(company)
+    if (
+        source_work_state
+        and not bool(source_work_state.get("abandoned"))
+        and _source_work_reason_counts_as_unfinished(source_work_state.get("lastFailureReason"))
+    ):
+        return True
+    return False
+
+
+def company_has_started_source_work(company: Mapping[str, Any]) -> bool:
+    if str(company.get("lastSearchedAt") or "").strip():
+        return True
+    if _pending_listing_urls(company):
+        return True
+    coverage_state = company.get("jobPageCoverage")
+    if isinstance(coverage_state, Mapping) and "coverageComplete" in coverage_state:
+        return True
+    if _source_work_state(company):
+        return True
+    if company_source_coverage_complete(company):
+        return True
+    return False
+
+
+def company_source_lifecycle_bucket(company: Mapping[str, Any]) -> int:
+    pending_analysis_count = company_pending_analysis_count(company)
+    if pending_analysis_count > 0:
+        return 0
+    if company_has_unfinished_source_work(company):
+        return 1
+    if not company_has_started_source_work(company):
+        return 2
+    return 3
 
 
 def reconcile_company_pipeline_state_in_memory(
@@ -56,7 +150,7 @@ def reconcile_company_pipeline_state_in_memory(
         pending_urls: set[str] = set()
         for url in snapshot_urls:
             job = existing_by_url.get(url)
-            if job is None or not analysis_completed(job.get("analysis")):
+            if job is not None and not analysis_completed(job.get("analysis")):
                 pending_urls.add(url)
         for url in known_job_urls:
             job = existing_by_url.get(url)
@@ -64,7 +158,7 @@ def reconcile_company_pipeline_state_in_memory(
                 pending_urls.add(url)
 
         pending_analysis_count = len(pending_urls)
-        previous_pending = int(_coerce_int(item.get("snapshotPendingAnalysisCount")))
+        previous_pending = company_pending_analysis_count(item)
         if pending_analysis_count > 0:
             pending_companies += 1
             if previous_pending != pending_analysis_count:
@@ -79,14 +173,34 @@ def reconcile_company_pipeline_state_in_memory(
             del item["snapshotPendingAnalysisCount"]
             changed = True
 
-        if item.get("snapshotComplete") is True:
+        source_work_state = _source_work_state(item)
+        if source_work_state and not bool(source_work_state.get("abandoned")):
+            if "cooldownUntil" in item:
+                del item["cooldownUntil"]
+                changed = True
+            continue
+
+        if company_source_coverage_complete(item):
+            last_searched_at = str(item.get("lastSearchedAt") or "").strip()
+            cooldown_applied_at = str(item.get(COOLDOWN_APPLIED_AT_KEY) or "").strip()
+            new_jobs_count = max(0, int(_coerce_int(item.get("lastNewJobsCount"))))
+            no_new_job_streak = max(0, int(_coerce_int(item.get(NO_NEW_JOB_STREAK_KEY))))
+            if last_searched_at and cooldown_applied_at != last_searched_at:
+                next_streak = 0 if new_jobs_count > 0 else (no_new_job_streak + 1)
+                if int(_coerce_int(item.get(NO_NEW_JOB_STREAK_KEY))) != next_streak:
+                    item[NO_NEW_JOB_STREAK_KEY] = next_streak
+                    changed = True
+                item[COOLDOWN_APPLIED_AT_KEY] = last_searched_at
+                changed = True
+                no_new_job_streak = next_streak
             next_cooldown = get_company_cooldown_until(
                 adaptive_search if isinstance(adaptive_search, Mapping) else {},
                 jobs_found_count=max(
                     0,
                     int(_coerce_int(item.get("lastJobsFoundCount"), default=len(snapshot_urls))),
                 ),
-                new_jobs_count=max(0, int(_coerce_int(item.get("lastNewJobsCount")))),
+                new_jobs_count=new_jobs_count,
+                no_new_job_streak=max(1, no_new_job_streak),
                 now=current,
             )
             if str(item.get("cooldownUntil") or "").strip() != next_cooldown:
@@ -150,6 +264,12 @@ def _to_number(
 
 
 __all__ = [
+    "company_has_materialized_jobs_entry",
+    "company_has_started_source_work",
+    "company_source_coverage_complete",
+    "company_has_unfinished_source_work",
+    "company_pending_analysis_count",
+    "company_source_lifecycle_bucket",
     "get_company_cooldown_until",
     "reconcile_company_pipeline_state_in_memory",
 ]

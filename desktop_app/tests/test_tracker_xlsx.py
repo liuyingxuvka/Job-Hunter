@@ -19,10 +19,10 @@ from jobflow_desktop_app.search.output.tracker_xlsx import (  # noqa: E402
 
 
 class TrackerXlsxTests(unittest.TestCase):
-    def _config(self, *, adjacent: bool = False) -> dict:
+    def _config(self) -> dict:
         return {
             "candidate": {
-                "scopeProfile": "adjacent_mbse" if adjacent else "hydrogen_mainline",
+                "scopeProfile": "general_search",
             }
         }
 
@@ -49,8 +49,8 @@ class TrackerXlsxTests(unittest.TestCase):
                 "overallScore": 74,
                 "matchScore": 74,
                 "fitLevelCn": "匹配",
-                "fitTrack": "hydrogen_core",
-                "jobCluster": "Core-Domain",
+                "fitTrack": "direct_fit",
+                "jobCluster": "Direct-Fit",
                 "primaryEvidenceCn": "氢能耐久性与诊断关键词",
                 "summaryCn": "氢能耐久性岗位",
                 "recommendReasonCn": "与候选人方向相符",
@@ -107,13 +107,13 @@ class TrackerXlsxTests(unittest.TestCase):
                 xlsx_path=path,
                 jobs=[job],
                 manual_by_url={},
-                config=self._config(adjacent=True),
+                config=self._config(),
             )
 
             workbook = load_workbook(path)
             sheet = workbook[TRACKER_SHEET_NAME]
             headers = [cell.value for cell in sheet[1]]
-            self.assertIn("副线方向", headers)
+            self.assertNotIn("副线方向", headers)
             self.assertIn("规范链接", headers)
             canonical_column = headers.index("规范链接") + 1
             url_column = headers.index("职位链接") + 1

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from .job_search_runner import (
-    DiscoveryAnchorPlan,
     JobSearchResult,
     JobSearchRunner,
     SearchRunResult,
@@ -9,7 +8,6 @@ from .job_search_runner import (
 )
 
 __all__ = [
-    "DiscoveryAnchorPlan",
     "JobSearchResult",
     "JobSearchRunner",
     "SearchRunResult",

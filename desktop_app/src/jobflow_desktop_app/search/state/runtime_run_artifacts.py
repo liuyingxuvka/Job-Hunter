@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .runtime_job_sync import write_runtime_job_buckets
+from .runtime_job_sync import merge_runtime_jobs, write_runtime_job_buckets
 
 
 class SearchRunArtifactsStore:
@@ -82,9 +82,16 @@ class SearchRunArtifactsStore:
         found_jobs: list[dict[str, Any]],
         candidate_companies: list[dict[str, Any]],
     ) -> None:
+        existing_found_jobs = self.run_jobs.load_bucket_jobs(
+            search_run_id=search_run_id,
+            job_bucket="found",
+        )
+        merged_found_jobs = list(
+            merge_runtime_jobs([existing_found_jobs, found_jobs]).values()
+        )
         buckets = {
             "all": [dict(item) for item in all_jobs if isinstance(item, dict)],
-            "found": [dict(item) for item in found_jobs if isinstance(item, dict)],
+            "found": merged_found_jobs,
         }
         write_runtime_job_buckets(
             search_run_id=search_run_id,

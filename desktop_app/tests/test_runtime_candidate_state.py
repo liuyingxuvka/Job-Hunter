@@ -28,7 +28,7 @@ class RuntimeCandidateStateTests(unittest.TestCase):
                 profile_payload={
                     "source_signature": "sig-1",
                     "summary": "Hydrogen systems and durability validation",
-                    "background_keywords": ["hydrogen", "durability"],
+                    "job_fit_core_terms": ["hydrogen", "durability"],
                 },
             )
             candidate_state.store_semantic_profile(candidate_id=candidate_id, profile_payload={})
@@ -66,7 +66,6 @@ class RuntimeCandidateStateTests(unittest.TestCase):
                 [item.get("name") for item in candidate_state.load_candidate_company_pool(candidate_id=candidate_id)],
                 ["Acme Hydrogen", "Beta Systems"],
             )
-
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

@@ -88,12 +88,9 @@ def ensure_profile_bilingual_for_ui(
         scope_profile=profile.scope_profile,
         target_role=updated_target_role,
         location_preference=profile.location_preference,
-        company_focus=profile.company_focus,
-        company_keyword_focus=profile.company_keyword_focus,
         role_name_i18n=updated_role_name_i18n,
         keyword_focus=updated_keyword_focus,
         is_active=profile.is_active,
-        queries=list(profile.queries),
         created_at=profile.created_at,
         updated_at=profile.updated_at,
     )

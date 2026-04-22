@@ -38,13 +38,12 @@ class SearchSessionResumeGateTests(unittest.TestCase):
             effective_max_companies=4,
             query_rotation_seed=11,
             search_session_deadline=9999.0,
-            session_pass_timeout_seconds=30,
         )
 
-    def test_run_initial_resume_gate_retries_once_before_stopping_when_queue_does_not_shrink(self) -> None:
+    def test_run_initial_resume_gate_allows_discovery_to_continue_when_queue_does_not_shrink(self) -> None:
         with TemporaryDirectory() as temp_dir, patch(
             "jobflow_desktop_app.search.orchestration.search_session_resume_gate._refresh_resume_pending_jobs",
-            side_effect=[1, 1, 1],
+            side_effect=[1, 1],
         ), patch(
             "jobflow_desktop_app.search.orchestration.search_session_resume_gate._run_resume_stage",
             return_value=SimpleNamespace(
@@ -59,28 +58,24 @@ class SearchSessionResumeGateTests(unittest.TestCase):
             runtime = self._make_runtime(Path(temp_dir))
             result = run_initial_resume_gate(runtime, [], [], [])
 
-            self.assertIsNotNone(result.early_outcome)
+            self.assertIsNone(result.early_outcome)
             self.assertEqual(result.pending_after_round, 1)
             self.assertFalse(result.resume_phase_failed)
-            self.assertIn("unfinished jobs remain queued", result.early_outcome.message)
-            self.assertIn("repeated passes", result.early_outcome.message)
+            self.assertFalse(result.resume_phase_failed)
 
-    def test_run_initial_resume_gate_clears_queue_after_successive_resume_passes(self) -> None:
+    def test_run_initial_resume_gate_reports_remaining_queue_after_single_resume_pass(self) -> None:
         with TemporaryDirectory() as temp_dir, patch(
             "jobflow_desktop_app.search.orchestration.search_session_resume_gate._refresh_resume_pending_jobs",
-            side_effect=[2, 1, 0],
+            side_effect=[2, 1],
         ), patch(
             "jobflow_desktop_app.search.orchestration.search_session_resume_gate._run_resume_stage",
-            side_effect=[
-                SimpleNamespace(success=True, exit_code=0, message="resume 1", stdout_tail="", stderr_tail="", cancelled=False),
-                SimpleNamespace(success=True, exit_code=0, message="resume 2", stdout_tail="", stderr_tail="", cancelled=False),
-            ],
+            return_value=SimpleNamespace(success=True, exit_code=0, message="resume 1", stdout_tail="", stderr_tail="", cancelled=False),
         ):
             runtime = self._make_runtime(Path(temp_dir))
             result = run_initial_resume_gate(runtime, [], [], [])
 
             self.assertIsNone(result.early_outcome)
-            self.assertEqual(result.pending_after_round, 0)
+            self.assertEqual(result.pending_after_round, 1)
             self.assertFalse(result.resume_phase_failed)
 
     def test_run_initial_resume_gate_stops_when_queue_refresh_fails(self) -> None:
@@ -121,10 +116,10 @@ class SearchSessionResumeGateTests(unittest.TestCase):
             self.assertFalse(result.finalize_phase_failed)
             self.assertEqual(result.finalize_status, "cleared")
 
-    def test_run_finalize_resume_gate_retries_once_before_marking_incomplete(self) -> None:
+    def test_run_finalize_resume_gate_marks_incomplete_after_single_pass(self) -> None:
         with TemporaryDirectory() as temp_dir, patch(
             "jobflow_desktop_app.search.orchestration.search_session_resume_gate._refresh_resume_pending_jobs",
-            side_effect=[1, 1],
+            side_effect=[1],
         ), patch(
             "jobflow_desktop_app.search.orchestration.search_session_resume_gate._run_resume_stage",
             return_value=SimpleNamespace(

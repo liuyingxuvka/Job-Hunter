@@ -1,5 +1,5 @@
 - fitTrack 取值为内部分类枚举，输出时优先选择最贴近候选人画像的方向。
-- hydrogen_core = 核心业务主线
-- energy_digitalization = 数字化/平台
-- battery_ess_powertrain = 装备/能量系统
-- test_validation_reliability = 测试验证/可靠性
+- direct_fit = 目标岗位直配
+- adjacent_fit = 相邻业务方向
+- transferable_fit = 可迁移能力方向
+- exploratory_fit = 扩展探索方向

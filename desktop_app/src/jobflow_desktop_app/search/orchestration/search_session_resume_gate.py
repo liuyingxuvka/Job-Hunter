@@ -12,8 +12,6 @@ from .search_session_runtime import (
     _run_resume_stage,
 )
 
-MAX_STALLED_RESUME_PASSES = 2
-
 
 @dataclass(frozen=True)
 class ResumeGateResult:
@@ -46,61 +44,56 @@ def _run_resume_queue_gate(
     stage_notes: list[str],
 ) -> tuple[int, bool, SearchSessionOutcome | None]:
     phase_failed = False
-    stalled_passes = 0
-    while pending_after_round > 0:
-        if runtime.cancel_event is not None and runtime.cancel_event.is_set():
-            return (
-                pending_after_round,
-                phase_failed,
-                _cancelled_outcome(
-                    runtime,
-                    cancel_message,
-                ),
-            )
-        phase_result = _run_resume_stage(
-            runtime,
-            phase_message,
-            start_event,
-            stage_name=stage_name,
+    if pending_after_round <= 0:
+        return pending_after_round, phase_failed, None
+    if runtime.cancel_event is not None and runtime.cancel_event.is_set():
+        return (
+            pending_after_round,
+            phase_failed,
+            _cancelled_outcome(
+                runtime,
+                cancel_message,
+            ),
         )
-        if phase_result is None:
-            break
-        if phase_result.stdout_tail:
-            stage_stdout.append((stage_name, phase_result.stdout_tail))
-        if phase_result.stderr_tail:
-            stage_stderr.append((stage_name, phase_result.stderr_tail))
-        if phase_result.cancelled:
-            return (
-                pending_after_round,
-                phase_failed,
-                _cancelled_outcome(
-                    runtime,
-                    cancel_message,
-                    stdout_tail=phase_result.stdout_tail,
-                    stderr_tail=phase_result.stderr_tail,
-                ),
-            )
-        if not phase_result.success:
-            stage_notes.append(
-                f"{failure_note} (exit {phase_result.exit_code})."
-            )
-            phase_failed = True
-            break
-        try:
-            next_pending = _refresh_resume_pending_jobs(runtime)
-        except Exception as exc:
-            stage_notes.append(f"Resume queue final check skipped: {exc}")
-            break
-        if next_pending >= pending_after_round and next_pending > 0:
-            stalled_passes += 1
-            pending_after_round = next_pending
-            if stalled_passes >= MAX_STALLED_RESUME_PASSES:
-                stage_notes.append(stalled_note)
-                break
-            stage_notes.append(retry_note)
-            continue
-        stalled_passes = 0
-        pending_after_round = next_pending
+    phase_result = _run_resume_stage(
+        runtime,
+        phase_message,
+        start_event,
+        stage_name=stage_name,
+    )
+    if phase_result is None:
+        return pending_after_round, phase_failed, None
+    if phase_result.stdout_tail:
+        stage_stdout.append((stage_name, phase_result.stdout_tail))
+    if phase_result.stderr_tail:
+        stage_stderr.append((stage_name, phase_result.stderr_tail))
+    if phase_result.cancelled:
+        return (
+            pending_after_round,
+            phase_failed,
+            _cancelled_outcome(
+                runtime,
+                cancel_message,
+                stdout_tail=phase_result.stdout_tail,
+                stderr_tail=phase_result.stderr_tail,
+            ),
+        )
+    if not phase_result.success:
+        stage_notes.append(
+            f"{failure_note} (exit {phase_result.exit_code})."
+        )
+        phase_failed = True
+        return pending_after_round, phase_failed, None
+    try:
+        next_pending = _refresh_resume_pending_jobs(runtime)
+    except Exception as exc:
+        stage_notes.append(f"Resume queue final check skipped: {exc}")
+        return pending_after_round, phase_failed, None
+    if next_pending >= pending_after_round and next_pending > 0:
+        stage_notes.append(stalled_note)
+    elif next_pending > 0:
+        stage_notes.append(retry_note)
+    pending_after_round = next_pending
     return pending_after_round, phase_failed, None
 
 
@@ -168,7 +161,7 @@ def run_initial_resume_gate(
             early_outcome=cancelled_outcome,
         )
 
-    if resume_phase_failed or pending_after_round > 0:
+    if resume_phase_failed:
         message = "Search stopped before discovery because unfinished jobs remain queued."
         if stage_notes:
             message = f"{message} {' '.join(stage_notes)}"

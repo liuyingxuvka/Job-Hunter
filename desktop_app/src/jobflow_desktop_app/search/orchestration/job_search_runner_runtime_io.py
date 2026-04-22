@@ -21,7 +21,6 @@ def _latest_runtime_config(runner, candidate_id: int) -> dict:
     try:
         payload = runner.runtime_mirror.load_run_config(
             candidate_id=int(candidate_id),
-            resume=False,
         )
     except Exception:
         return {}
@@ -346,7 +345,6 @@ def sync_search_run_configs(
     search_run_id: int | None,
     *,
     runtime_config: dict | None = None,
-    resume_config: dict | None = None,
 ) -> None:
     if runner.runtime_mirror is None:
         return
@@ -354,7 +352,6 @@ def sync_search_run_configs(
         runner.runtime_mirror.update_configs(
             search_run_id,
             runtime_config=runtime_config,
-            resume_config=resume_config,
         )
     except Exception:
         return

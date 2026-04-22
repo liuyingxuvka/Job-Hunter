@@ -27,7 +27,7 @@ class RoleRecommendationsParseTests(unittest.TestCase):
             [suggestion.name for suggestion in suggestions],
             ["Fuel Cell Systems Engineer", "燃料电池测试工程师"],
         )
-        self.assertEqual(suggestions[0].scope_profile, "hydrogen_mainline")
+        self.assertEqual(suggestions[0].scope_profile, "")
 
     def test_parse_refined_manual_role_accepts_nested_payload_and_fallback_description(self) -> None:
         payload = """

@@ -195,6 +195,8 @@ Invoke-Python -PythonSpec $pythonSpec -Arguments @(
   $buildRoot,
   "--paths",
   (Join-Path $desktopRoot "src"),
+  "--collect-data",
+  "jobflow_desktop_app",
   "--collect-submodules",
   "jobflow_desktop_app",
   $entryScript

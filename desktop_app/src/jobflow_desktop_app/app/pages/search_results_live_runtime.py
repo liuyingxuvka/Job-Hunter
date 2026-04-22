@@ -58,43 +58,14 @@ def search_progress_text(page, candidate_id: int | None) -> tuple[str, str]:
     stop_requested = bool(getattr(session, "stop_requested", False))
     queued_restart = bool(getattr(session, "queued_restart", False))
     queued_duration_label = str(getattr(session, "queued_restart_duration_label", "")).strip()
-    if stop_requested:
-        if queued_restart:
-            duration_label = queued_duration_label or page._selected_search_duration_label()
-            if page.ui_language == "en":
-                detail_message = f"Finishing: {stage_label} | next round queued: {duration_label}"
-            else:
-                detail_message = f"后台收尾：{stage_label} · 下一轮已排队：{duration_label}"
-            dialog_message = _t(
-                page.ui_language,
-                f"系统正在等待当前阶段安全结束，当前阶段：{stage_label}。下一轮搜索已经排队，时长为 {duration_label}。",
-                f"Waiting for the current stage to end safely. Current stage: {stage_label}. The next search round is already queued for {duration_label}.",
-            )
-            return detail_message, dialog_message
-
-        detail_message = _t(
-            page.ui_language,
-            f"后台收尾：{stage_label}",
-            f"Finishing: {stage_label}",
-        )
-        dialog_message = _t(
-            page.ui_language,
-            f"系统正在等待当前阶段安全结束，当前阶段：{stage_label}。你可以先调整下一次搜索时长。",
-            f"Waiting for the current stage to end safely. Current stage: {stage_label}. You can already adjust the next search duration.",
-        )
-        return detail_message, dialog_message
-
-    detail_message = _t(
+    return search_results_status.search_progress_text(
         page.ui_language,
-        f"后台进度：{stage_label}",
-        f"Background progress: {stage_label}",
+        progress,
+        stop_requested=stop_requested,
+        queued_restart=queued_restart,
+        queued_duration_label=queued_duration_label,
+        selected_duration_label=page._selected_search_duration_label(),
     )
-    dialog_message = _t(
-        page.ui_language,
-        f"系统正在后台搜索岗位，当前阶段：{stage_label}。你可以继续操作，搜索会在后台持续运行。",
-        f"Searching jobs in the background. Current stage: {stage_label}. You can keep working while search continues.",
-    )
-    return detail_message, dialog_message
 
 
 def start_live_results_updates(page, candidate_id: int) -> None:

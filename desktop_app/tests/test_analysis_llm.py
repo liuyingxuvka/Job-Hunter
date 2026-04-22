@@ -30,7 +30,15 @@ class AnalysisLlmTests(unittest.TestCase):
     def setUp(self) -> None:
         self.config = {
             "candidate": {
-                "targetRole": "Hydrogen durability engineer",
+                "targetRoles": [
+                    {
+                        "roleId": "profile:0",
+                        "profileId": 0,
+                        "nameEn": "Hydrogen durability engineer",
+                        "displayName": "Hydrogen durability engineer",
+                        "targetRoleText": "Hydrogen durability engineer",
+                    }
+                ],
                 "locationPreference": "Berlin / Remote",
             },
             "analysis": {
@@ -48,7 +56,7 @@ class AnalysisLlmTests(unittest.TestCase):
         }
         self.candidate_profile = {
             "summary": "Hydrogen durability and PEM degradation researcher",
-            "background_keywords": ["PEM", "degradation", "durability"],
+            "job_fit_core_terms": ["PEM", "degradation", "durability"],
         }
         self.target_roles = [
             TargetRoleDefinition(

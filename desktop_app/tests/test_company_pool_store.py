@@ -25,6 +25,14 @@ class CompanyPoolStoreTests(unittest.TestCase):
                 "knownJobUrls": ["https://example.com/a"],
                 "sourceEvidence": {"webSearch": {"query": "old"}},
                 "jobLinkCoverage": {"recentSeenJobUrls": ["https://example.com/a"], "cursor": 1},
+                "jobPageCoverage": {
+                    "companySearchCache": {
+                        "old-cache": {
+                            "query": "site:acme.example Acme careers jobs",
+                            "jobs": [{"title": "Old role", "url": "https://example.com/a"}],
+                        }
+                    }
+                },
             },
             {
                 "name": "Acme Hydrogen",
@@ -33,6 +41,14 @@ class CompanyPoolStoreTests(unittest.TestCase):
                 "snapshotComplete": True,
                 "sourceEvidence": {"webSearch": {"query": "new"}},
                 "jobLinkCoverage": {"recentSeenJobUrls": ["https://example.com/b"], "cursor": 3},
+                "jobPageCoverage": {
+                    "companySearchCache": {
+                        "new-cache": {
+                            "query": "site:acme.example Acme jobs",
+                            "jobs": [{"title": "New role", "url": "https://example.com/b"}],
+                        }
+                    }
+                },
             },
         )
 
@@ -43,6 +59,8 @@ class CompanyPoolStoreTests(unittest.TestCase):
         )
         self.assertEqual(merged["jobLinkCoverage"]["cursor"], 3)
         self.assertEqual(merged["sourceEvidence"]["webSearch"]["query"], "new")
+        self.assertIn("old-cache", merged["jobPageCoverage"]["companySearchCache"])
+        self.assertIn("new-cache", merged["jobPageCoverage"]["companySearchCache"])
 
     def test_merge_companies_into_master_updates_existing_record(self) -> None:
         merged_companies, changed = merge_companies_into_master(
@@ -63,7 +81,7 @@ class CompanyPoolStoreTests(unittest.TestCase):
         self.assertTrue(company["snapshotComplete"])
         self.assertEqual(company["knownJobUrls"], ["https://example.com/a"])
 
-    def test_merge_companies_into_master_keeps_boolean_state_monotonic(self) -> None:
+    def test_merge_companies_into_master_allows_snapshot_complete_to_be_cleared(self) -> None:
         merged_companies, changed = merge_companies_into_master(
             [
                 {
@@ -84,8 +102,36 @@ class CompanyPoolStoreTests(unittest.TestCase):
 
         self.assertEqual(changed, 1)
         company = merged_companies[0]
-        self.assertTrue(company["snapshotComplete"])
+        self.assertFalse(company["snapshotComplete"])
         self.assertEqual(company["knownJobUrls"], ["https://example.com/a"])
+
+    def test_merge_company_runtime_state_replaces_source_diagnostics_snapshot(self) -> None:
+        merged = merge_company_runtime_state(
+            {
+                "name": "Acme Hydrogen",
+                "website": "https://acme.example",
+                "sourceDiagnostics": {
+                    "reason": "transient_fetch_error",
+                    "aiRankingError": "old error",
+                },
+            },
+            {
+                "name": "Acme Hydrogen",
+                "website": "https://acme.example",
+                "sourceDiagnostics": {
+                    "reason": "queued_jobs",
+                    "queuedJobs": 2,
+                },
+            },
+        )
+
+        self.assertEqual(
+            merged["sourceDiagnostics"],
+            {
+                "reason": "queued_jobs",
+                "queuedJobs": 2,
+            },
+        )
 
     def test_merge_companies_into_master_appends_new_company(self) -> None:
         merged_companies, changed = merge_companies_into_master(
@@ -99,6 +145,26 @@ class CompanyPoolStoreTests(unittest.TestCase):
             [company["name"] for company in merged_companies],
             ["Acme Hydrogen", "Beta Power"],
         )
+
+    def test_merge_company_runtime_state_replaces_source_work_state(self) -> None:
+        merged = merge_company_runtime_state(
+            {
+                "name": "Acme Hydrogen",
+                "website": "https://acme.example",
+                "sourceWorkState": {
+                    "technicalFailureCount": 2,
+                    "abandoned": False,
+                    "lastFailedRunId": 7,
+                },
+            },
+            {
+                "name": "Acme Hydrogen",
+                "website": "https://acme.example",
+                "sourceWorkState": {},
+            },
+        )
+
+        self.assertNotIn("sourceWorkState", merged)
 
 
 if __name__ == "__main__":

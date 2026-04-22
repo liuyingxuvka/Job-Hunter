@@ -119,7 +119,7 @@ def create_profile(
     candidate_id: int,
     *,
     name: str = "Systems Engineer",
-    scope_profile: str = "adjacent_mbse",
+    scope_profile: str = "",
     keyword_focus: str = "requirements and validation",
     is_active: bool = True,
     role_name_i18n: str = "",
@@ -132,12 +132,9 @@ def create_profile(
             scope_profile=scope_profile,
             target_role=name,
             location_preference="Munich\nBerlin\nRemote",
-            company_focus="industrial automation",
-            company_keyword_focus="systems integration employer",
             role_name_i18n=role_name_i18n,
             keyword_focus=keyword_focus,
             is_active=is_active,
-            queries=[],
         )
     )
 

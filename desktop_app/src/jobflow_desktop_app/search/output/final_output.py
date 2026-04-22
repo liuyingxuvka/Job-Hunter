@@ -16,17 +16,17 @@ from ..analysis.scoring_contract import overall_score, passes_unified_recommenda
 Job = dict[str, Any]
 
 TRACK_CLUSTER_LABEL = {
-    "hydrogen_core": "Core-Domain",
-    "energy_digitalization": "Digital-Platforms",
-    "battery_ess_powertrain": "Energy-Systems",
-    "test_validation_reliability": "Validation-Reliability",
+    "direct_fit": "Direct-Fit",
+    "adjacent_fit": "Adjacent-Domain",
+    "transferable_fit": "Transferable-Skills",
+    "exploratory_fit": "Exploratory",
 }
 
 TRACK_CN_LABEL = {
-    "hydrogen_core": "核心业务主线",
-    "energy_digitalization": "数字化/平台",
-    "battery_ess_powertrain": "装备/能量系统",
-    "test_validation_reliability": "测试验证/可靠性",
+    "direct_fit": "目标岗位直配",
+    "adjacent_fit": "相邻业务方向",
+    "transferable_fit": "可迁移能力方向",
+    "exploratory_fit": "扩展探索方向",
 }
 
 AGGREGATOR_HOST_TOKENS = (
@@ -40,10 +40,6 @@ AGGREGATOR_HOST_TOKENS = (
     "talent.",
     "jobleads.",
     "join.com",
-    "lever.co",
-    "greenhouse.io",
-    "smartrecruiters.com",
-    "workable.com",
 )
 
 PARKING_HOST_TOKENS = (
@@ -156,7 +152,7 @@ def normalize_job_url(raw_url: object) -> str:
     query_items = [
         (key, value)
         for key, value in parse_qsl(parts.query, keep_blank_values=True)
-        if not key.lower().startswith(("utm_", "fbclid", "gclid", "gh_jid"))
+        if not key.lower().startswith(("utm_", "fbclid", "gclid"))
     ]
     query = urlencode(query_items, doseq=True)
     return urlunsplit((scheme, netloc, path.rstrip("/") or "/", query, ""))
@@ -653,10 +649,10 @@ def build_final_output_dedupe_key(job: Mapping[str, Any], config: Mapping[str, A
 def _analysis_with_derived_defaults(job: Mapping[str, Any]) -> dict[str, Any]:
     analysis = job.get("analysis")
     normalized = dict(analysis) if isinstance(analysis, Mapping) else {}
-    fit_track = str(normalized.get("fitTrack") or "").strip() or "hydrogen_core"
+    fit_track = str(normalized.get("fitTrack") or "").strip() or "direct_fit"
     normalized.setdefault("fitTrack", fit_track)
-    normalized.setdefault("jobCluster", TRACK_CLUSTER_LABEL.get(fit_track, TRACK_CLUSTER_LABEL["hydrogen_core"]))
-    normalized.setdefault("industryTrackCn", TRACK_CN_LABEL.get(fit_track, TRACK_CN_LABEL["hydrogen_core"]))
+    normalized.setdefault("jobCluster", TRACK_CLUSTER_LABEL.get(fit_track, TRACK_CLUSTER_LABEL["direct_fit"]))
+    normalized.setdefault("industryTrackCn", TRACK_CN_LABEL.get(fit_track, TRACK_CN_LABEL["direct_fit"]))
     return normalized
 
 
@@ -682,6 +678,8 @@ def enrich_recommended_job(job: Mapping[str, Any], config: Mapping[str, Any] | N
 
 def pass_post_verify(job: Mapping[str, Any], config: Mapping[str, Any] | None, *, require_recommend: bool) -> bool:
     if is_limited_platform_listing_job(job, config):
+        return True
+    if _config_value(job, "analysis", "postVerifySkipped", default=False) is True:
         return True
     if not _config_bool(config, "analysis", "postVerifyEnabled", default=False):
         return True

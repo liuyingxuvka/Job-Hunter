@@ -153,6 +153,5 @@ class DatabaseBootstrapTests(unittest.TestCase):
                 [(1, "acme", "Acme Hydrogen")],
             )
 
-
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

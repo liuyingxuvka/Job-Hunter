@@ -14,7 +14,6 @@ from ...db.repositories.search_runtime import (
 )
 from .runtime_candidate_state import SearchRuntimeCandidateStateStore
 from .runtime_run_artifacts import SearchRunArtifactsStore
-from .runtime_run_feedback import SearchRunFeedbackStore
 from .runtime_run_state import SearchRunStateStore
 
 
@@ -40,9 +39,6 @@ class SearchRuntimeMirror:
             jobs=self.jobs,
             analyses=self.analyses,
             run_jobs=self.run_jobs,
-        )
-        self.run_feedback = SearchRunFeedbackStore(
-            artifacts=self.artifacts,
         )
 
     def create_run(
@@ -86,12 +82,10 @@ class SearchRuntimeMirror:
         search_run_id: int | None,
         *,
         runtime_config: dict[str, Any] | None = None,
-        resume_config: dict[str, Any] | None = None,
     ) -> None:
         self.run_state.update_configs(
             search_run_id,
             runtime_config=runtime_config,
-            resume_config=resume_config,
         )
 
     def store_semantic_profile(
@@ -108,6 +102,9 @@ class SearchRuntimeMirror:
     def latest_run(self, candidate_id: int) -> Any | None:
         return self.run_state.latest_run(candidate_id)
 
+    def recent_runs(self, candidate_id: int, *, limit: int = 5) -> list[Any]:
+        return self.run_state.recent_runs(candidate_id, limit=limit)
+
     def load_latest_bucket_jobs(
         self,
         *,
@@ -122,25 +119,12 @@ class SearchRuntimeMirror:
     def load_latest_progress_payload(self, candidate_id: int) -> dict[str, Any] | None:
         return self.run_state.load_latest_progress_payload(candidate_id)
 
-    def load_latest_run_feedback(
-        self,
-        *,
-        candidate_id: int,
-    ) -> dict[str, list[str]]:
-        return self.run_feedback.load_latest_run_feedback(
-            candidate_id=candidate_id,
-        )
-
     def load_run_config(
         self,
         *,
         candidate_id: int,
-        resume: bool = False,
     ) -> dict[str, Any]:
-        return self.run_state.load_run_config(
-            candidate_id=candidate_id,
-            resume=resume,
-        )
+        return self.run_state.load_run_config(candidate_id=candidate_id)
 
     def count_candidate_company_pool(self, candidate_id: int) -> int:
         return self.candidate_state.count_candidate_company_pool(candidate_id)

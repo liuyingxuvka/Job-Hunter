@@ -1,0 +1,49 @@
+Company: {company_name}
+Page URL: {page_url}
+
+Task:
+- You are given one official company careers/jobs page, a structured list of links that were found on that page, and a few official sample job detail URLs when available.
+- Find as many concrete public job detail pages for this same company as you can identify confidently, but return at most {max_jobs} new job detail pages in this call.
+- The returned jobs should be new detail pages that are not already in seen_job_urls_json.
+- Also identify additional official listing/archive/pagination pages that should be crawled next to continue covering this same company's openings.
+- Aim for coverage, not just one or two examples. If the company clearly has multiple openings, keep searching until you exhaust confident public job-detail candidates.
+- Use only the provided page text, links, and sample URLs. Do not perform web search in this step.
+- It is acceptable to return URLs that are not present in links_json when you are confident they are real official public job detail pages for this same company.
+- Prefer real job detail pages, ATS detail pages, and PDF job specifications that clearly correspond to a specific role.
+- Prefer the same official host family that appears in page_url or sampleJobUrls, or the official hosted jobs board used by this company.
+- If the official careers page mostly acts as a brand page or entry page, infer the most likely underlying job/detail URLs only from the provided links, sample URLs, and page text.
+- Concrete detail pages on professional job platforms are acceptable when they are clearly for this same company and a specific role; do not reject them only because they are on LinkedIn, Wellfound, or an investor/jobs partner page.
+- Exclude generic careers homepages, team/category pages, saved-jobs pages, teams pages, departments pages, locations pages, interns/students landing pages, blog/news pages, privacy pages, contact pages, partner sign-up pages, freelancer registration pages, talent communities, and general application forms that are not tied to a specific role.
+- Exclude site-chrome and application UI pages such as dashboard/profile pages, how-we-hire/how-we-work pages, recommendations pages, generic search results pages, teams indexes, and other navigation URLs that are not one concrete requisition.
+- A valid item must look like one specific opening: the title should read like a real job title, not a navigation label or section heading.
+- If a page mostly exposes a search UI or navigation chrome, do not return those UI URLs; instead, use the page, links, sample URLs, and web search to find the underlying concrete job detail pages.
+- Use nextListingUrls for official listing/archive/pagination pages that are worth crawling next for broader coverage. Do not put concrete job detail pages into nextListingUrls.
+- If this page already looks like the deepest useful listing page and you do not see additional listing/archive/pagination pages to continue, return an empty nextListingUrls array.
+- Think of nextListingUrls as the explicit remaining frontier that should be crawled after this page.
+- Return every additional listing/archive/pagination page you can identify confidently; do not leave remaining frontier pages unstated.
+- If there are no additional listing/archive/pagination pages worth crawling after this page, return an empty nextListingUrls array.
+- Treat URLs/titles like Teams, Dashboard, How we hire, How we work, Recommended jobs, Job alerts, Privacy policy, Search results, or similar site UI labels as explicit non-job examples.
+- If the visible title is site chrome, duplicated icon text, or a section label instead of a role title, do not return that page as a job.
+- Never return mirror pages or platform search-result/list pages.
+- If the page clearly indicates there are currently no openings, return an empty jobs array.
+- If sampleJobUrls show a likely detail-page pattern, use them as a hint, but do not stop after only reproducing those examples.
+- If you can identify more than {max_jobs} confident new detail pages from this same page, return the best {max_jobs} now and use nextListingUrls to preserve the remaining listing frontier for later crawling.
+- Do not invent inaccessible or speculative URLs. Return only URLs you are confident are real public pages.
+- Keep summaries extremely short and factual, ideally under 12 words.
+
+Page text excerpt:
+{page_text}
+
+Sample official job detail URLs:
+{sample_job_urls_json}
+
+Already seen job detail URLs:
+{seen_job_urls_json}
+
+Links found on this page:
+{links_json}
+
+Output:
+- Return JSON matching the schema.
+- For each chosen job item, provide title, url, location, summary.
+- Also return nextListingUrls.

@@ -31,7 +31,7 @@ class ReviewFeedbackTests(unittest.TestCase):
         title: str = "Fuel Cell Reliability Engineer",
         company: str = "Acme Hydrogen",
         date_found: str = "2026-04-14T12:00:00Z",
-        fit_track: str = "hydrogen_core",
+        fit_track: str = "direct_fit",
     ) -> dict:
         return {
             "url": url,
@@ -67,14 +67,14 @@ class ReviewFeedbackTests(unittest.TestCase):
                 "appliedCn": " 已投递 ",
             }
         )
-        self.assertEqual(normalized["fitTrack"], "hydrogen_core")
+        self.assertEqual(normalized["fitTrack"], "direct_fit")
         self.assertEqual(normalized["interest"], "感兴趣")
         self.assertEqual(normalized["appliedCn"], "已投递")
 
     def test_classify_feedback_row_can_be_both_positive_and_negative(self) -> None:
         result = classify_feedback_row(
             {
-                "fitTrack": "hydrogen_core",
+                "fitTrack": "direct_fit",
                 "interest": "感兴趣",
                 "responseStatus": "已拒",
             }
@@ -83,36 +83,36 @@ class ReviewFeedbackTests(unittest.TestCase):
         self.assertTrue(result["negative"])
 
     def test_build_feedback_rows_from_review_state_normalizes_keys(self) -> None:
-        job = self._job(url="HTTPS://ACME.EXAMPLE.COM/JOBS/123", fit_track="battery_ess_powertrain")
+        job = self._job(url="HTTPS://ACME.EXAMPLE.COM/JOBS/123", fit_track="transferable_fit")
         rows = build_feedback_rows_from_review_state(
             [job],
             statuses_by_job_key={"https://acme.example.com/jobs/123": "applied"},
             hidden_job_keys=["https://ACME.EXAMPLE.COM/jobs/123"],
         )
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["fitTrack"], "battery_ess_powertrain")
+        self.assertEqual(rows[0]["fitTrack"], "transferable_fit")
         self.assertEqual(rows[0]["appliedCn"], "已投递")
         self.assertEqual(rows[0]["hidden"], "是")
 
     def test_compute_track_feedback_stats_aggregates_per_track(self) -> None:
         rows = [
             {
-                "fitTrack": "hydrogen_core",
+                "fitTrack": "direct_fit",
                 "interest": "感兴趣",
             },
             {
-                "fitTrack": "hydrogen_core",
+                "fitTrack": "direct_fit",
                 "notInterested": "是",
             },
             {
-                "fitTrack": "battery_ess_powertrain",
+                "fitTrack": "transferable_fit",
                 "responseStatus": "Offer",
             },
         ]
         stats = compute_track_feedback_stats(rows)
-        self.assertEqual(stats["hydrogen_core"], {"positive": 1, "negative": 1})
-        self.assertEqual(stats["battery_ess_powertrain"], {"positive": 1, "negative": 0})
-        self.assertEqual(stats["energy_digitalization"], {"positive": 0, "negative": 0})
+        self.assertEqual(stats["direct_fit"], {"positive": 1, "negative": 1})
+        self.assertEqual(stats["transferable_fit"], {"positive": 1, "negative": 0})
+        self.assertEqual(stats["adjacent_fit"], {"positive": 0, "negative": 0})
 
     def test_load_review_state_snapshot_handles_missing_invalid_and_valid_payloads(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -152,4 +152,3 @@ class ReviewFeedbackTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

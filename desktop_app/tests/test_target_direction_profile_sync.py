@@ -81,12 +81,9 @@ class TargetDirectionProfileSyncTests(unittest.TestCase):
             scope_profile="",
             target_role="Systems Engineer",
             location_preference="Munich",
-            company_focus="",
-            company_keyword_focus="",
             role_name_i18n="",
             keyword_focus="systems",
             is_active=True,
-            queries=[],
         )
 
         item = QListWidgetItem("Systems Engineer")

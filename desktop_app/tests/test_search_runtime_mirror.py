@@ -40,7 +40,6 @@ class SearchRuntimeMirrorTests(unittest.TestCase):
             mirror.update_configs(
                 search_run_id,
                 runtime_config={"output": {"recommendedXlsxPath": "./jobs_recommended.xlsx"}},
-                resume_config={"analysis": {"postVerifyEnabled": True}},
             )
 
             with context.database.session() as connection:
@@ -53,8 +52,7 @@ class SearchRuntimeMirrorTests(unittest.TestCase):
                       current_stage,
                       last_message,
                       last_event,
-                      config_json,
-                      resume_config_json
+                      config_json
                     FROM search_runs
                     WHERE id = ?
                     """,
@@ -69,7 +67,6 @@ class SearchRuntimeMirrorTests(unittest.TestCase):
             self.assertEqual(str(row["last_message"]), "Collecting direct ATS jobs.")
             self.assertEqual(str(row["last_event"]), "Processed 2 companies.")
             self.assertIn('"recommendedXlsxPath"', str(row["config_json"]))
-            self.assertIn('"postverifyenabled": true', str(row["resume_config_json"]).lower())
 
     def test_update_progress_marks_error_message_when_status_is_error(self) -> None:
         with make_temp_context() as context:
@@ -122,7 +119,7 @@ class SearchRuntimeMirrorTests(unittest.TestCase):
                 profile_payload={
                     "source_signature": "sig-1",
                     "summary": "Hydrogen systems and aging diagnostics",
-                    "background_keywords": ["hydrogen", "aging"],
+                    "job_fit_core_terms": ["hydrogen", "aging"],
                 },
             )
             mirror.replace_candidate_company_pool(
@@ -364,6 +361,91 @@ class SearchRuntimeMirrorTests(unittest.TestCase):
             self.assertEqual(
                 [str(row["company_name"]) for row in company_rows],
                 ["Acme Hydrogen"],
+            )
+
+    def test_commit_company_sources_round_preserves_found_bucket_across_later_empty_rounds(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context)
+            profile_id = create_profile(context, candidate_id)
+            run_dir = context.paths.runtime_dir / "search_runs" / f"candidate_{candidate_id}"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            mirror = SearchRuntimeMirror(context.database)
+
+            search_run_id = mirror.create_run(
+                candidate_id=candidate_id,
+                run_dir=run_dir,
+                status="running",
+                current_stage="company_sources",
+                started_at="2026-04-16T10:00:00+00:00",
+            )
+            analyzed_job = {
+                "title": "Hydrogen Systems Engineer",
+                "company": "Acme Hydrogen",
+                "location": "Berlin",
+                "url": "https://acme.example/jobs/1",
+                "canonicalUrl": "https://acme.example/jobs/1",
+                "dateFound": "2026-04-16T10:00:00Z",
+                "analysis": {
+                    "overallScore": 82,
+                    "matchScore": 82,
+                    "recommend": True,
+                    "boundTargetRole": {
+                        "profileId": profile_id,
+                        "roleId": f"profile:{profile_id}",
+                    },
+                },
+            }
+            followup_job = {
+                "title": "Battery Reliability Engineer",
+                "company": "Beta Power",
+                "location": "Munich",
+                "url": "https://beta.example/jobs/2",
+                "canonicalUrl": "https://beta.example/jobs/2",
+                "dateFound": "2026-04-16T11:00:00Z",
+                "analysis": {},
+            }
+
+            mirror.commit_company_sources_round(
+                search_run_id=search_run_id,
+                candidate_id=candidate_id,
+                all_jobs=[analyzed_job],
+                found_jobs=[analyzed_job],
+                candidate_companies=[{"name": "Acme Hydrogen"}],
+            )
+            mirror.commit_company_sources_round(
+                search_run_id=search_run_id,
+                candidate_id=candidate_id,
+                all_jobs=[analyzed_job, followup_job],
+                found_jobs=[],
+                candidate_companies=[{"name": "Acme Hydrogen"}, {"name": "Beta Power"}],
+            )
+
+            with context.database.session() as connection:
+                search_run = connection.execute(
+                    """
+                    SELECT jobs_found_count, jobs_scored_count, jobs_recommended_count
+                    FROM search_runs
+                    WHERE id = ?
+                    """,
+                    (search_run_id,),
+                ).fetchone()
+                bucket_rows = connection.execute(
+                    """
+                    SELECT job_bucket, COUNT(*) AS total
+                    FROM search_run_jobs
+                    WHERE search_run_id = ?
+                    GROUP BY job_bucket
+                    ORDER BY job_bucket
+                    """,
+                    (search_run_id,),
+                ).fetchall()
+
+            self.assertEqual(int(search_run["jobs_found_count"]), 1)
+            self.assertEqual(int(search_run["jobs_scored_count"]), 1)
+            self.assertEqual(int(search_run["jobs_recommended_count"]), 0)
+            self.assertEqual(
+                [(str(row["job_bucket"]), int(row["total"])) for row in bucket_rows],
+                [("all", 2), ("found", 1)],
             )
 
     def test_build_search_runtime_mirror_returns_none_without_db_and_mirror_with_db(self) -> None:

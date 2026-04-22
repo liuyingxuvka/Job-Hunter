@@ -89,6 +89,37 @@ class SearchResultsStatusTests(unittest.TestCase):
         )
         self.assertEqual((idle_detail, idle_dialog), ("", ""))
 
+    def test_search_completion_messages_cover_pending_and_no_qualified_states(self) -> None:
+        pending_detail = search_results_status.search_completion_detail(
+            "zh",
+            discovered_job_count=8,
+            scored_job_count=0,
+            recommended_job_count=0,
+            pending_job_count=8,
+            candidate_company_pool_count=5,
+        )
+        self.assertIn("本轮找到 8 条", pending_detail)
+        self.assertIn("当前公司池 5 家", pending_detail)
+        self.assertIn("建议现在继续搜索", pending_detail)
+
+        no_qualified_detail = search_results_status.search_completion_detail(
+            "en",
+            discovered_job_count=0,
+            scored_job_count=0,
+            recommended_job_count=0,
+            pending_job_count=0,
+            candidate_company_pool_count=5,
+            no_qualified_company_stop=True,
+        )
+        self.assertIn("No new qualified companies were found", no_qualified_detail)
+
+        popup_text = search_results_status.search_completion_popup_message(
+            "zh",
+            detail_text=pending_detail,
+        )
+        self.assertIn("本轮搜索已结束。", popup_text)
+        self.assertIn("本轮找到 8 条", popup_text)
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

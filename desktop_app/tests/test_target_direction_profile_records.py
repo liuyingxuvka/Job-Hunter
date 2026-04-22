@@ -68,9 +68,6 @@ class TargetDirectionProfileRecordsTests(unittest.TestCase):
             scope_profile="core",
             target_role="Old Name",
             location_preference="Munich, Germany",
-            company_focus="Energy",
-            company_keyword_focus="PEM",
-            queries=["one", "two"],
         )
         updated_record = build_updated_profile_record(
             profile_id=3,
@@ -93,8 +90,6 @@ class TargetDirectionProfileRecordsTests(unittest.TestCase):
 
         self.assertEqual(updated_record.scope_profile, "core")
         self.assertEqual(updated_record.location_preference, "Munich, Germany")
-        self.assertEqual(updated_record.company_focus, "Energy")
-        self.assertEqual(updated_record.queries, ["one", "two"])
         self.assertFalse(updated_record.is_active)
 
 

@@ -11,8 +11,6 @@ from jobflow_desktop_app.search.stages.executor import PythonStageRunResult
 from jobflow_desktop_app.search.orchestration.search_session_orchestrator import (
     DiscoveryRoundOutcome,
     RoundProgress,
-    _measure_round_progress,
-    _next_empty_round_count,
     _run_discovery_round,
     _run_round_stage,
     run_search_session,
@@ -24,6 +22,7 @@ from jobflow_desktop_app.search.orchestration.search_session_resume_gate import 
 from jobflow_desktop_app.search.orchestration.search_session_runtime import (
     SearchSessionOutcome,
     SearchSessionRuntime,
+    _refresh_resume_pending_jobs,
 )
 
 
@@ -37,6 +36,8 @@ class SearchSessionOrchestratorTests(unittest.TestCase):
         )
         runtime_mirror = SimpleNamespace(
             load_candidate_company_pool=Mock(return_value=[]),
+            load_run_bucket_jobs=Mock(return_value=[]),
+            replace_candidate_company_pool=Mock(),
         )
         runner = SimpleNamespace(
             runtime_mirror=runtime_mirror,
@@ -65,8 +66,107 @@ class SearchSessionOrchestratorTests(unittest.TestCase):
             effective_max_companies=5,
             query_rotation_seed=17,
             search_session_deadline=9999.0,
-            session_pass_timeout_seconds=30,
         )
+
+    def test_run_search_session_records_direct_discovery_stop_after_no_new_companies(self) -> None:
+        with TemporaryDirectory() as temp_dir, patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator.run_initial_resume_gate",
+            return_value=ResumeGateResult(
+                pending_after_round=0,
+                resume_phase_failed=False,
+                early_outcome=None,
+            ),
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._write_main_runtime_config",
+            side_effect=lambda runtime, rotation_seed: runtime.current_main_runtime_config,
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._run_discovery_round",
+            return_value=DiscoveryRoundOutcome(
+                main_result=PythonStageRunResult(
+                    success=True,
+                    exit_code=0,
+                    message="discover ok",
+                    stdout_tail="",
+                    stderr_tail="",
+                ),
+                pending_after_round=0,
+                round_progress=RoundProgress(0, 0, 0, 0, 0),
+                attempted_query_discovery=True,
+                session_details={
+                    "stopReason": "no_qualified_new_companies",
+                },
+            ),
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._has_ready_companies_for_sources",
+            return_value=False,
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._refresh_python_recommended_outputs",
+            return_value=0,
+        ):
+            runtime = self._make_runtime(Path(temp_dir))
+            runtime.search_session_deadline = 10**12
+
+            outcome = run_search_session(runtime)
+
+            self.assertTrue(outcome.success)
+            self.assertEqual(
+                outcome.details,
+                {"stopReason": "no_qualified_new_companies"},
+            )
+            self.assertIn(
+                "Company discovery did not produce qualified new companies in this session. Try again later.",
+                outcome.message,
+            )
+
+    def test_run_search_session_ends_successfully_when_direct_discovery_finds_no_new_companies(self) -> None:
+        with TemporaryDirectory() as temp_dir, patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator.run_initial_resume_gate",
+            return_value=ResumeGateResult(
+                pending_after_round=0,
+                resume_phase_failed=False,
+                early_outcome=None,
+            ),
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._write_main_runtime_config",
+            side_effect=lambda runtime, rotation_seed: runtime.current_main_runtime_config,
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._run_discovery_round",
+            return_value=DiscoveryRoundOutcome(
+                main_result=PythonStageRunResult(
+                    success=True,
+                    exit_code=0,
+                    message="discover ok",
+                    stdout_tail="",
+                    stderr_tail="",
+                ),
+                pending_after_round=0,
+                round_progress=RoundProgress(0, 0, 0, 0, 0),
+                attempted_query_discovery=True,
+                session_details={
+                    "stopReason": "no_qualified_new_companies",
+                },
+            ),
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._has_ready_companies_for_sources",
+            return_value=False,
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._refresh_python_recommended_outputs",
+            return_value=0,
+        ):
+            runtime = self._make_runtime(Path(temp_dir))
+            runtime.search_session_deadline = 10**12
+
+            outcome = run_search_session(runtime)
+
+            self.assertTrue(outcome.success)
+            self.assertEqual(
+                outcome.details,
+                {"stopReason": "no_qualified_new_companies"},
+            )
+            self.assertIn(
+                "did not produce qualified new companies",
+                outcome.message.lower(),
+            )
 
     def test_run_search_session_refreshes_outputs_once_before_resume_gate_early_stop(self) -> None:
         with TemporaryDirectory() as temp_dir, patch(
@@ -145,7 +245,6 @@ class SearchSessionOrchestratorTests(unittest.TestCase):
             return_value=None,
         ):
             runtime = self._make_runtime(Path(temp_dir))
-            runtime.empty_rounds_before_end = 1
             runtime.search_session_deadline = 10**12
 
             outcome = run_search_session(runtime)
@@ -201,91 +300,74 @@ class SearchSessionOrchestratorTests(unittest.TestCase):
         ), patch(
             "jobflow_desktop_app.search.orchestration.search_session_orchestrator._refresh_round_outputs",
             return_value=None,
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._has_ready_companies_for_sources",
+            return_value=False,
         ):
             runtime = self._make_runtime(Path(temp_dir))
             runtime.runner.runtime_mirror.load_candidate_company_pool.return_value = [
-                {"name": "Stable Co", "snapshotComplete": True, "snapshotPendingAnalysisCount": 0},
-                {"name": "Priority Pending Co", "snapshotComplete": True, "snapshotPendingAnalysisCount": 2},
+                {
+                    "name": "Stable Co",
+                    "snapshotComplete": True,
+                    "snapshotPendingAnalysisCount": 0,
+                    "aiCompanyFitScore": 65,
+                },
+                {
+                    "name": "Priority Pending Co",
+                    "snapshotComplete": True,
+                    "snapshotPendingAnalysisCount": 2,
+                    "aiCompanyFitScore": 10,
+                },
             ]
-            runtime.empty_rounds_before_end = 1
             runtime.search_session_deadline = 10**12
             runtime.effective_max_companies = 1
 
             outcome = run_search_session(runtime)
 
             self.assertTrue(outcome.success)
-            runtime.runner.runtime_mirror.load_candidate_company_pool.assert_called_once_with(
+            runtime.runner.runtime_mirror.load_candidate_company_pool.assert_any_call(
                 candidate_id=runtime.candidate_id,
             )
             self.assertEqual(
                 run_sources_stage.call_args.kwargs["selected_companies"],
-                [{"name": "Priority Pending Co", "snapshotComplete": True, "snapshotPendingAnalysisCount": 2}],
+                [
+                    {
+                        "name": "Priority Pending Co",
+                        "snapshotComplete": True,
+                        "snapshotPendingAnalysisCount": 2,
+                        "aiCompanyFitScore": 10,
+                    }
+                ],
             )
 
-    def test_round_progress_helper_resets_empty_rounds_on_any_progress(self) -> None:
-        before = SimpleNamespace(
-            candidate_company_pool_count=2,
-            main_discovered_job_count=5,
-            main_pending_analysis_count=4,
-            recommended_job_count=1,
-        )
-        after = SimpleNamespace(
-            candidate_company_pool_count=3,
-            main_discovered_job_count=5,
-            main_pending_analysis_count=4,
-            recommended_job_count=1,
-        )
-        progress = _measure_round_progress(before, after)
-        self.assertEqual(
-            progress,
+    def test_round_progress_marks_any_positive_delta_as_progress(self) -> None:
+        self.assertTrue(
             RoundProgress(
                 company_pool_growth=1,
+                company_ranking_drop=0,
                 job_growth=0,
                 pending_drop=0,
                 recommended_job_growth=0,
-            ),
+            ).made_progress
         )
-        self.assertTrue(progress.made_progress)
-        self.assertEqual(_next_empty_round_count(2, progress), 0)
-        self.assertEqual(
-            _next_empty_round_count(
-                2,
-                RoundProgress(
-                    company_pool_growth=0,
-                    job_growth=0,
-                    pending_drop=0,
-                    recommended_job_growth=0,
-                ),
-            ),
-            3,
-        )
-
-    def test_round_progress_treats_recommended_job_growth_as_progress(self) -> None:
-        before = SimpleNamespace(
-            candidate_company_pool_count=1,
-            main_discovered_job_count=2,
-            main_pending_analysis_count=1,
-            recommended_job_count=0,
-        )
-        after = SimpleNamespace(
-            candidate_company_pool_count=1,
-            main_discovered_job_count=2,
-            main_pending_analysis_count=1,
-            recommended_job_count=2,
-        )
-
-        progress = _measure_round_progress(before, after)
-
-        self.assertEqual(
-            progress,
+        self.assertTrue(
             RoundProgress(
                 company_pool_growth=0,
+                company_ranking_drop=0,
                 job_growth=0,
                 pending_drop=0,
                 recommended_job_growth=2,
-            ),
+            ).made_progress
         )
-        self.assertTrue(progress.made_progress)
+        self.assertFalse(
+            RoundProgress(
+                company_pool_growth=0,
+                company_ranking_drop=0,
+                job_growth=0,
+                pending_drop=0,
+                recommended_job_growth=0,
+            ).made_progress
+        )
 
 
     def test_run_round_stage_records_tails_and_returns_cancelled_outcome(self) -> None:
@@ -380,6 +462,7 @@ class SearchSessionOrchestratorTests(unittest.TestCase):
                 runtime,
                 round_number=1,
                 search_stats_before_round=before,
+                unresolved_company_rankings_before_round=2,
                 stage_notes=stage_notes,
                 stage_stdout=stage_stdout,
                 stage_stderr=stage_stderr,
@@ -393,13 +476,182 @@ class SearchSessionOrchestratorTests(unittest.TestCase):
                 outcome.round_progress,
                 RoundProgress(
                     company_pool_growth=1,
+                    company_ranking_drop=2,
                     job_growth=2,
                     pending_drop=2,
                     recommended_job_growth=1,
                 ),
             )
 
-    def test_run_search_session_does_not_stop_on_empty_round_before_query_discovery_attempt(self) -> None:
+    def test_run_discovery_round_defers_discovery_and_sources_while_company_ranking_pending(self) -> None:
+        with TemporaryDirectory() as temp_dir, patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._run_company_discovery_stage",
+            return_value=PythonStageRunResult(
+                success=True,
+                exit_code=0,
+                message="discovery ok",
+                stdout_tail="",
+                stderr_tail="",
+            ),
+        ) as run_company_discovery_stage, patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._run_company_selection_stage",
+            return_value=PythonStageRunResult(
+                success=True,
+                exit_code=0,
+                message="selection ok",
+                stdout_tail="",
+                stderr_tail="",
+                payload={"selectedCompanies": []},
+            ),
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._run_company_sources_stage",
+            return_value=PythonStageRunResult(
+                success=True,
+                exit_code=0,
+                message="sources ok",
+                stdout_tail="",
+                stderr_tail="",
+            ),
+        ) as run_company_sources_stage, patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._refresh_resume_pending_jobs",
+            return_value=0,
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._refresh_round_outputs",
+            return_value=None,
+        ):
+            runtime = self._make_runtime(Path(temp_dir))
+            runtime.runner.runtime_mirror.load_candidate_company_pool.return_value = [
+                {
+                    "name": "Specialist Co",
+                    "website": "https://specialist.example",
+                }
+            ]
+            before = SimpleNamespace(
+                candidate_company_pool_count=3,
+                main_discovered_job_count=0,
+                main_pending_analysis_count=0,
+                recommended_job_count=0,
+            )
+            after = SimpleNamespace(
+                candidate_company_pool_count=3,
+                main_discovered_job_count=0,
+                main_pending_analysis_count=0,
+                recommended_job_count=0,
+            )
+            runtime.runner.load_search_stats.return_value = after
+            stage_notes: list[str] = []
+            stage_stdout: list[tuple[str, str]] = []
+            stage_stderr: list[tuple[str, str]] = []
+
+            outcome = _run_discovery_round(
+                runtime,
+                round_number=2,
+                search_stats_before_round=before,
+                unresolved_company_rankings_before_round=1,
+                stage_notes=stage_notes,
+                stage_stdout=stage_stdout,
+                stage_stderr=stage_stderr,
+            )
+
+            self.assertTrue(outcome.main_result.success)
+            self.assertFalse(outcome.attempted_query_discovery)
+            run_company_discovery_stage.assert_not_called()
+            run_company_sources_stage.assert_not_called()
+            self.assertIn(
+                "Python company discovery deferred until company fit ranking finishes for the current pool.",
+                stage_notes,
+            )
+
+    def test_run_discovery_round_skips_discovery_when_scored_companies_are_ready_for_sources(self) -> None:
+        with TemporaryDirectory() as temp_dir, patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._run_company_discovery_stage",
+            return_value=PythonStageRunResult(
+                success=True,
+                exit_code=0,
+                message="discovery ok",
+                stdout_tail="",
+                stderr_tail="",
+            ),
+        ) as run_company_discovery_stage, patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._run_company_selection_stage",
+            return_value=PythonStageRunResult(
+                success=True,
+                exit_code=0,
+                message="selection ok",
+                stdout_tail="",
+                stderr_tail="",
+                payload={
+                    "selectedCompanies": [
+                        {
+                            "name": "Ready Co",
+                            "website": "https://ready.example",
+                            "aiCompanyFitScore": 80,
+                        }
+                    ]
+                },
+            ),
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._run_company_sources_stage",
+            return_value=PythonStageRunResult(
+                success=True,
+                exit_code=0,
+                message="sources ok",
+                stdout_tail="",
+                stderr_tail="",
+                payload={"remainingSelectedCompanies": []},
+            ),
+        ) as run_company_sources_stage, patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._refresh_resume_pending_jobs",
+            return_value=0,
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._refresh_round_outputs",
+            return_value=None,
+        ):
+            runtime = self._make_runtime(Path(temp_dir))
+            runtime.runner.runtime_mirror.load_candidate_company_pool.return_value = [
+                {
+                    "name": "Ready Co",
+                    "website": "https://ready.example",
+                    "aiCompanyFitScore": 80,
+                }
+            ]
+            before = SimpleNamespace(
+                candidate_company_pool_count=1,
+                main_discovered_job_count=0,
+                main_pending_analysis_count=0,
+                recommended_job_count=0,
+            )
+            after = SimpleNamespace(
+                candidate_company_pool_count=1,
+                main_discovered_job_count=0,
+                main_pending_analysis_count=0,
+                recommended_job_count=0,
+            )
+            runtime.runner.load_search_stats.return_value = after
+            stage_notes: list[str] = []
+            stage_stdout: list[tuple[str, str]] = []
+            stage_stderr: list[tuple[str, str]] = []
+
+            outcome = _run_discovery_round(
+                runtime,
+                round_number=2,
+                search_stats_before_round=before,
+                unresolved_company_rankings_before_round=0,
+                stage_notes=stage_notes,
+                stage_stdout=stage_stdout,
+                stage_stderr=stage_stderr,
+            )
+
+            self.assertTrue(outcome.main_result.success)
+            self.assertFalse(outcome.attempted_query_discovery)
+            run_company_discovery_stage.assert_not_called()
+            run_company_sources_stage.assert_called_once()
+            self.assertIn(
+                "Python company discovery deferred because scored companies are already ready for the sources stage.",
+                stage_notes,
+            )
+
+    def test_run_search_session_stops_when_no_actionable_work_units_remain(self) -> None:
         with TemporaryDirectory() as temp_dir, patch(
             "jobflow_desktop_app.search.orchestration.search_session_orchestrator.run_initial_resume_gate",
             return_value=ResumeGateResult(
@@ -412,10 +664,13 @@ class SearchSessionOrchestratorTests(unittest.TestCase):
             side_effect=lambda runtime, rotation_seed: runtime.current_main_runtime_config,
         ), patch(
             "jobflow_desktop_app.search.orchestration.search_session_orchestrator._run_company_discovery_stage",
-            side_effect=[
-                PythonStageRunResult(success=True, exit_code=0, message="discovery r1", stdout_tail="", stderr_tail=""),
-                PythonStageRunResult(success=True, exit_code=0, message="discovery r2", stdout_tail="", stderr_tail=""),
-            ],
+            return_value=PythonStageRunResult(
+                success=True,
+                exit_code=0,
+                message="discovery r1",
+                stdout_tail="",
+                stderr_tail="",
+            ),
         ) as run_company_discovery_stage, patch(
             "jobflow_desktop_app.search.orchestration.search_session_orchestrator._run_company_selection_stage",
             return_value=PythonStageRunResult(
@@ -444,7 +699,6 @@ class SearchSessionOrchestratorTests(unittest.TestCase):
             return_value=None,
         ):
             runtime = self._make_runtime(Path(temp_dir))
-            runtime.empty_rounds_before_end = 1
             runtime.search_session_deadline = 10**12
             runtime.current_main_runtime_config = {
                 "adaptiveSearch": {"discoveryBreadth": 2},
@@ -462,31 +716,19 @@ class SearchSessionOrchestratorTests(unittest.TestCase):
                 main_pending_analysis_count=0,
                 recommended_job_count=0,
             )
-            stats_round_2_before = SimpleNamespace(
-                candidate_company_pool_count=1,
-                main_discovered_job_count=0,
-                main_pending_analysis_count=0,
-                recommended_job_count=0,
-            )
-            stats_round_2_after = SimpleNamespace(
-                candidate_company_pool_count=1,
-                main_discovered_job_count=0,
-                main_pending_analysis_count=0,
-                recommended_job_count=0,
-            )
             runtime.runner.load_search_stats.side_effect = [
                 stats_round_1_before,
                 stats_round_1_after,
-                stats_round_2_before,
-                stats_round_2_after,
             ]
 
             outcome = run_search_session(runtime)
 
             self.assertTrue(outcome.success)
-            self.assertEqual(run_company_discovery_stage.call_count, 2)
-            self.assertEqual(run_company_discovery_stage.call_args_list[0].kwargs["query_budget"], 0)
-            self.assertEqual(run_company_discovery_stage.call_args_list[1].kwargs["query_budget"], 2)
+            self.assertEqual(run_company_discovery_stage.call_count, 1)
+            self.assertIn(
+                "Timed search session ended because no actionable work units remained for this session.",
+                outcome.message,
+            )
 
     def test_run_search_session_reports_failure_when_runtime_config_refresh_fails(self) -> None:
         with TemporaryDirectory() as temp_dir, patch(
@@ -498,33 +740,53 @@ class SearchSessionOrchestratorTests(unittest.TestCase):
             ),
         ), patch(
             "jobflow_desktop_app.search.orchestration.search_session_orchestrator._write_main_runtime_config",
-            side_effect=[{"adaptiveSearch": {"discoveryBreadth": 2}, "output": {"recommendedMode": "replace"}}, RuntimeError("bad refresh")],
+            side_effect=RuntimeError("bad refresh"),
         ), patch(
             "jobflow_desktop_app.search.orchestration.search_session_orchestrator._run_discovery_round",
-            return_value=DiscoveryRoundOutcome(
-                main_result=PythonStageRunResult(
-                    success=True,
-                    exit_code=0,
-                    message="round ok",
-                    stdout_tail="",
-                    stderr_tail="",
+            side_effect=[
+                DiscoveryRoundOutcome(
+                    main_result=PythonStageRunResult(
+                        success=True,
+                        exit_code=0,
+                        message="round ok",
+                        stdout_tail="",
+                        stderr_tail="",
+                    ),
+                    pending_after_round=0,
+                    round_progress=RoundProgress(
+                        company_pool_growth=1,
+                        company_ranking_drop=0,
+                        job_growth=0,
+                        pending_drop=0,
+                        recommended_job_growth=0,
+                    ),
+                    attempted_query_discovery=False,
                 ),
-                pending_after_round=0,
-                round_progress=RoundProgress(
-                    company_pool_growth=0,
-                    job_growth=0,
-                    pending_drop=0,
-                    recommended_job_growth=0,
+                DiscoveryRoundOutcome(
+                    main_result=PythonStageRunResult(
+                        success=True,
+                        exit_code=0,
+                        message="round ok 2",
+                        stdout_tail="",
+                        stderr_tail="",
+                    ),
+                    pending_after_round=0,
+                    round_progress=RoundProgress(
+                        company_pool_growth=0,
+                        company_ranking_drop=0,
+                        job_growth=0,
+                        pending_drop=0,
+                        recommended_job_growth=0,
+                    ),
+                    attempted_query_discovery=False,
                 ),
-                attempted_query_discovery=False,
-            ),
+            ],
         ), patch(
             "jobflow_desktop_app.search.orchestration.search_session_orchestrator._refresh_python_recommended_outputs",
             return_value=0,
         ):
             runtime = self._make_runtime(Path(temp_dir))
             runtime.search_session_deadline = 10**12
-            runtime.empty_rounds_before_end = 9
             runtime.current_main_runtime_config = {
                 "adaptiveSearch": {"discoveryBreadth": 2},
                 "output": {"recommendedMode": "replace"},
@@ -534,6 +796,17 @@ class SearchSessionOrchestratorTests(unittest.TestCase):
 
             self.assertFalse(outcome.success)
             self.assertIn("could not be prepared", outcome.message)
+
+    def test_round_progress_treats_company_ranking_drop_as_progress(self) -> None:
+        progress = RoundProgress(
+            company_pool_growth=0,
+            company_ranking_drop=3,
+            job_growth=0,
+            pending_drop=0,
+            recommended_job_growth=0,
+        )
+
+        self.assertTrue(progress.made_progress)
 
     def test_run_search_session_reports_timeout_before_first_round_as_failure(self) -> None:
         with TemporaryDirectory() as temp_dir, patch(
@@ -554,6 +827,81 @@ class SearchSessionOrchestratorTests(unittest.TestCase):
 
             self.assertFalse(outcome.success)
             self.assertIn("before discovery could start", outcome.message)
+
+    def test_run_search_session_keeps_resume_pending_queue_when_successful_session_leaves_pending_jobs(self) -> None:
+        with TemporaryDirectory() as temp_dir, patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator.run_initial_resume_gate",
+            return_value=ResumeGateResult(
+                pending_after_round=0,
+                resume_phase_failed=False,
+                early_outcome=None,
+            ),
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._run_discovery_round",
+            return_value=DiscoveryRoundOutcome(
+                main_result=PythonStageRunResult(
+                    success=True,
+                    exit_code=0,
+                    message="round ok",
+                    stdout_tail="",
+                    stderr_tail="",
+                ),
+                pending_after_round=2,
+                round_progress=RoundProgress(
+                    company_pool_growth=1,
+                    company_ranking_drop=0,
+                    job_growth=1,
+                    pending_drop=0,
+                    recommended_job_growth=0,
+                ),
+                attempted_query_discovery=True,
+                finalize_phase_failed=False,
+                finalize_status="incomplete",
+            ),
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._refresh_python_recommended_outputs",
+            return_value=0,
+        ):
+            runtime = self._make_runtime(Path(temp_dir))
+            runtime.search_session_deadline = 10**12
+
+            outcome = run_search_session(runtime)
+
+            self.assertTrue(outcome.success)
+            self.assertIn("Pending jobs remain queued for a later manual session (2 job(s)).", outcome.message)
+            runtime.runner._clear_resume_pending_jobs.assert_not_called()
+
+    def test_refresh_resume_pending_jobs_reconciles_company_pending_counts(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            runtime = self._make_runtime(Path(temp_dir))
+            runtime.search_run_id = 99
+            runtime.current_main_runtime_config = {"adaptiveSearch": {"cooldownBaseDays": 7}}
+            companies = [
+                {
+                    "name": "Lionbridge",
+                    "website": "https://careers.lionbridge.com",
+                    "snapshotJobUrls": ["https://careers.lionbridge.com/jobs/director-of-language-ai"],
+                    "knownJobUrls": ["https://careers.lionbridge.com/jobs/director-of-language-ai"],
+                    "snapshotPendingAnalysisCount": 28,
+                    "snapshotComplete": True,
+                }
+            ]
+            runtime.runner.runtime_mirror.load_candidate_company_pool.return_value = companies
+            runtime.runner.runtime_mirror.load_run_bucket_jobs.return_value = [
+                {
+                    "url": "https://careers.lionbridge.com/jobs/director-of-language-ai",
+                    "analysis": {"recommend": True},
+                }
+            ]
+            runtime.runner.runtime_mirror.replace_candidate_company_pool = Mock()
+            runtime.runner._write_resume_pending_jobs = Mock(return_value=0)
+
+            count = _refresh_resume_pending_jobs(runtime)
+
+            self.assertEqual(count, 0)
+            runtime.runner.runtime_mirror.replace_candidate_company_pool.assert_called_once()
+            updated_companies = runtime.runner.runtime_mirror.replace_candidate_company_pool.call_args.kwargs["companies"]
+            self.assertEqual(updated_companies[0]["snapshotPendingAnalysisCount"], 1)
 
 
 if __name__ == "__main__":

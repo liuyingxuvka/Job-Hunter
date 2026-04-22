@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Sequence
 
 from .candidate_search_signals import (
     CandidateSearchSignals,
@@ -10,7 +10,7 @@ from .candidate_search_signals import (
 )
 
 
-DISCOVERY_BUCKETS = ("core", "adjacent", "explore")
+DISCOVERY_BUCKETS = ("core", "adjacent")
 
 DISCOVERY_BUCKET_RULES = {
     "core": {
@@ -23,78 +23,60 @@ DISCOVERY_BUCKET_RULES = {
         "query_limit": 2,
         "minimum_anchor_count": 1,
     },
-    "explore": {
-        "phrase_limit": 15,
-        "query_limit": 1,
-        "minimum_anchor_count": 1,
-    },
 }
 
-MAINLINE_BUSINESS_ANCHORS = {
-    "core": [
-        ("hydrogen systems", r"\bhydrogen\b|\bh2\b|氢能|氢系统"),
-        ("fuel cells", r"\bfuel cell\b|fuel-cell|燃料电池"),
-        ("electrolyzers", r"\belectroly[sz]er\b|electrolysis|电解槽|制氢"),
-        ("electrochemical diagnostics", r"electrochem|electrochemical|电化学|diagnostic|diagnostics|诊断"),
-        ("degradation and aging", r"degradation|aging|老化|降解"),
-        ("durability and reliability", r"durability|reliability|耐久|可靠性"),
-        ("lifetime prediction", r"lifetime|remaining useful life|寿命预测|rul"),
-        ("stack and balance-of-plant", r"\bstack\b|balance of plant|bop|堆|系统"),
-        ("MEA and membrane materials", r"\bmea\b|membrane electrode|membrane|膜电极|膜|催化剂|catalyst"),
-    ],
-    "adjacent": [
-        ("system validation and testing", r"validation|verification|test bench|testing|试验|验证|测试"),
-        ("energy digitalization and PHM", r"digital twin|phm|condition monitoring|asset health|predictive maintenance|数字孪生|状态监测|健康管理"),
-        ("industrial controls and automation", r"controls?|control systems?|automation|自动化|控制"),
-        ("systems engineering and MBSE", r"mbse|systems engineering|sysml|requirements|traceability|系统工程|需求|可追溯"),
-        ("technical diagnostics and monitoring", r"monitoring|diagnostics?|health management|监测|诊断|健康管理"),
-    ],
-    "explore": [
-        ("battery aging and diagnostics", r"\bbattery\b|\bbms\b|储能|电池|soh|soc"),
-        ("complex equipment reliability", r"complex equipment|industrial equipment|equipment reliability|高端装备|装备"),
-        ("model-based diagnostics", r"model-based|simulation|parameter identification|calibration|建模|参数辨识|标定"),
-        ("energy infrastructure platforms", r"energy infrastructure|industrial gas|grid|能源基础设施|工业气体"),
-    ],
+DEFAULT_SCOPE_ANCHORS: dict[str, dict[str, list[str]]] = {}
+
+TOOL_ONLY_DISCOVERY_TERMS = {
+    "python",
+    "sql",
+    "excel",
+    "power bi",
+    "powerbi",
+    "tableau",
 }
 
-ADJACENT_SCOPE_BUSINESS_ANCHORS = {
-    "core": [
-        ("systems engineering", r"systems engineering|system engineer|系统工程"),
-        ("MBSE and digital thread", r"mbse|sysml|digital thread|模型驱动|数字线程"),
-        ("requirements and traceability", r"requirements|traceability|需求|可追溯"),
-        ("verification and validation", r"verification|validation|v&v|验证|确认"),
-        ("reliability and durability", r"reliability|durability|可靠性|耐久"),
-        ("integration and qualification", r"integration|qualification|集成|鉴定"),
-    ],
-    "adjacent": [
-        ("digital twin and PHM", r"digital twin|phm|condition monitoring|状态监测|健康管理"),
-        ("industrial automation and controls", r"industrial automation|automation|controls?|工业自动化|控制"),
-        ("complex equipment platforms", r"complex equipment|industrial equipment|装备|平台"),
-        ("technical diagnostics", r"diagnostic|diagnostics|故障分析|诊断"),
-    ],
-    "explore": [
-        ("automotive and powertrain systems", r"automotive|vehicle|powertrain|battery|bms|汽车|动力总成|电池"),
-        ("energy infrastructure systems", r"energy infrastructure|grid|utility|能源基础设施|电网"),
-        ("aerospace and high-end manufacturing", r"aerospace|manufacturing|航空航天|高端制造"),
-    ],
+DISCOVERY_CONTEXT_STOPWORDS = {
+    "and",
+    "the",
+    "for",
+    "with",
+    "of",
+    "in",
+    "on",
+    "to",
+    "a",
+    "an",
+    "global",
+    "cross",
+    "functional",
 }
 
-DEFAULT_BUSINESS_ANCHORS = {
-    "hydrogen_mainline": {
-        "core": ["hydrogen systems", "fuel cells", "electrolyzers", "electrochemical diagnostics", "durability and reliability"],
-        "adjacent": ["system validation and testing", "energy digitalization and PHM", "industrial controls and automation"],
-        "explore": ["battery aging and diagnostics", "model-based diagnostics", "energy infrastructure platforms"],
-    },
-    "adjacent_mbse": {
-        "core": ["systems engineering", "MBSE and digital thread", "requirements and traceability", "verification and validation"],
-        "adjacent": ["digital twin and PHM", "industrial automation and controls", "technical diagnostics"],
-        "explore": ["automotive and powertrain systems", "energy infrastructure systems", "aerospace and high-end manufacturing"],
-    },
+DISCOVERY_GENERIC_SUPPORT_TOKENS = {
+    "vendor",
+    "management",
+    "operations",
+    "operation",
+    "governance",
+    "program",
+    "programs",
+    "performance",
+    "workflow",
+    "workflows",
+    "process",
+    "processes",
+    "quality",
+    "assurance",
+    "leadership",
+    "coordination",
+    "delivery",
+    "support",
+    "execution",
 }
 
 BUSINESS_COMPANY_QUERY_TEMPLATES = (
     "{anchor} companies",
-    "{anchor} industrial technology companies",
+    "{anchor} employers",
 )
 
 
@@ -102,7 +84,6 @@ BUSINESS_COMPANY_QUERY_TEMPLATES = (
 class DiscoveryAnchorPlan:
     core: list[str]
     adjacent: list[str]
-    explore: list[str]
 
 
 def _bucket_rule(bucket: str, key: str) -> int:
@@ -118,42 +99,24 @@ def discovery_query_limit() -> int:
     return sum(_bucket_rule(bucket, "query_limit") for bucket in DISCOVERY_BUCKETS)
 
 
-def anchor_library(scope_profile: str) -> dict[str, list[tuple[str, str]]]:
-    if scope_profile == "adjacent_mbse":
-        return ADJACENT_SCOPE_BUSINESS_ANCHORS
-    if scope_profile == "hydrogen_mainline":
-        return MAINLINE_BUSINESS_ANCHORS
-    merged: dict[str, list[tuple[str, str]]] = {}
-    for bucket in DISCOVERY_BUCKETS:
-        seen: set[tuple[str, str]] = set()
-        values: list[tuple[str, str]] = []
-        for label, pattern in MAINLINE_BUSINESS_ANCHORS.get(bucket, []) + ADJACENT_SCOPE_BUSINESS_ANCHORS.get(bucket, []):
-            key = (label.casefold(), pattern)
-            if key in seen:
-                continue
-            seen.add(key)
-            values.append((label, pattern))
-        merged[bucket] = values
-    return merged
+def _resolved_scope_profiles(scope_profiles: Sequence[str] | None) -> tuple[str, ...]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for raw in scope_profiles or ():
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        values.append(text)
+    return tuple(values)
 
 
-def default_anchor_buckets(scope_profile: str) -> dict[str, list[str]]:
-    if scope_profile == "adjacent_mbse":
-        return DEFAULT_BUSINESS_ANCHORS["adjacent_mbse"]
-    if scope_profile == "hydrogen_mainline":
-        return DEFAULT_BUSINESS_ANCHORS["hydrogen_mainline"]
-    merged: dict[str, list[str]] = {}
-    for bucket in DISCOVERY_BUCKETS:
-        seen: set[str] = set()
-        values: list[str] = []
-        for label in DEFAULT_BUSINESS_ANCHORS["hydrogen_mainline"].get(bucket, []) + DEFAULT_BUSINESS_ANCHORS["adjacent_mbse"].get(bucket, []):
-            normalized = label.casefold()
-            if normalized in seen:
-                continue
-            seen.add(normalized)
-            values.append(label)
-        merged[bucket] = values
-    return merged
+def default_anchor_buckets(scope_profiles: Sequence[str] | None) -> dict[str, list[str]]:
+    del scope_profiles
+    return {bucket: [] for bucket in DISCOVERY_BUCKETS}
 
 
 def looks_like_role_phrase(text: str) -> bool:
@@ -171,6 +134,7 @@ def normalize_business_hint(text: str) -> str:
     value = re.sub(r"^(focus(?:ed)? on|speciali[sz](?:e|ed|ing) in|work(?:ed|ing)? on|experience in|background in|expertise in|interested in|related to|around)\s+", "", value, flags=re.IGNORECASE)
     value = re.sub(r"^(and|with|for|toward|towards|future|target|desired|adjacent|explor(?:e|ation))\s+", "", value, flags=re.IGNORECASE)
     value = re.sub(r"^(聚焦(?:于)?|专注(?:于)?|从事|擅长|熟悉|研究方向(?:为)?|研究|方向(?:为)?|相关(?:方向|领域)?|主要(?:方向|关注|做)?|涉及|偏向|偏重|以及|还有|并|和|未来(?:方向)?|目标(?:方向)?|邻近(?:方向)?|相邻(?:方向)?|探索(?:方向)?)\s*", "", value)
+    value = re.sub(r"\b(companies|company|employers|employer|careers|career|jobs|job)\b$", "", value, flags=re.IGNORECASE).strip()
     return value.strip(" \t\r\n,;|，；、。.!?：:()[]{}<>\"'`")
 
 
@@ -178,28 +142,19 @@ def looks_like_business_noise(text: str) -> bool:
     value = str(text or "").strip().casefold()
     if not value or len(value) < 3 or len(value.split()) > 10:
         return True
+    if value in TOOL_ONLY_DISCOVERY_TERMS:
+        return True
     return bool(re.search(r"looking for|prefer|seeking|resume|curriculum vitae|\bcv\b|\bjob\b|博士背景|硕士背景|工作经历|专业背景|希望|想找|想做|保留|简历|候选人", value))
 
 
-def collect_business_hint_terms(signals: CandidateSearchSignals) -> list[str]:
+def normalize_discovery_terms(values: Sequence[str], *, limit: int) -> list[str]:
     filtered: list[str] = []
-    for hint in signals.business_hint_terms():
+    for hint in values:
         text = normalize_business_hint(hint)
         if not text or len(text) > 72 or looks_like_role_phrase(text) or looks_like_business_noise(text):
             continue
         filtered.append(text)
-    return dedup_text(filtered, limit=24)
-
-
-def classify_business_hint(hint: str, scope_profile: str) -> str:
-    text = str(hint or "").strip()
-    if not text:
-        return "adjacent"
-    for bucket in DISCOVERY_BUCKETS:
-        for _, pattern in anchor_library(scope_profile).get(bucket, []):
-            if re.search(pattern, text, flags=re.IGNORECASE):
-                return bucket
-    return "adjacent"
+    return dedup_text(filtered, limit=limit)
 
 
 def is_avoided_anchor(anchor: str, avoid_terms: list[str]) -> bool:
@@ -214,28 +169,12 @@ def is_avoided_anchor(anchor: str, avoid_terms: list[str]) -> bool:
             return True
     return False
 
-def build_anchor_source_text(
-    *,
-    signals: CandidateSearchSignals,
-    resume_text: str = "",
-    feedback_keywords: list[str] | None = None,
-) -> str:
-    parts = list(signals.anchor_source_terms())
-    resolved_resume_text = str(resume_text or "").strip()
-    if resolved_resume_text:
-        parts.append(resolved_resume_text)
-    parts.extend(feedback_keywords or [])
-    return "\n".join(part for part in parts if str(part or "").strip())
-
-
 def build_discovery_anchor_plan(
     *,
-    scope_profile: str,
+    scope_profiles: Sequence[str] | None,
     signals: CandidateSearchSignals,
-    resume_text: str = "",
-    feedback_keywords: list[str] | None = None,
 ) -> DiscoveryAnchorPlan:
-    defaults = default_anchor_buckets(scope_profile)
+    defaults = default_anchor_buckets(scope_profiles)
     avoid_terms = dedup_text(
         [
             normalize_business_hint(item)
@@ -243,35 +182,16 @@ def build_discovery_anchor_plan(
         ],
         limit=16,
     )
-    if _has_semantic_anchor_seed(signals):
-        buckets = {
-            "core": [
-                normalize_business_hint(item)
-                for item in signals.semantic_core_anchor_terms()
-            ],
-            "adjacent": [
-                normalize_business_hint(item)
-                for item in signals.semantic.adjacent_business_areas
-            ],
-            "explore": [
-                normalize_business_hint(item)
-                for item in signals.semantic.exploration_business_areas
-            ],
-        }
-    else:
-        buckets = {"core": [], "adjacent": [], "explore": []}
-    source_text = build_anchor_source_text(
-        signals=signals,
-        resume_text=resume_text,
-        feedback_keywords=feedback_keywords,
-    )
-    library = anchor_library(scope_profile)
-    for bucket in DISCOVERY_BUCKETS:
-        for label, pattern in library.get(bucket, []):
-            if re.search(pattern, source_text, flags=re.IGNORECASE):
-                buckets[bucket].append(label)
-    for hint in collect_business_hint_terms(signals):
-        buckets[classify_business_hint(hint, scope_profile)].append(hint)
+    buckets = {
+        "core": normalize_discovery_terms(
+            signals.core_discovery_terms(),
+            limit=_bucket_rule("core", "phrase_limit"),
+        ),
+        "adjacent": normalize_discovery_terms(
+            signals.adjacent_discovery_terms(),
+            limit=_bucket_rule("adjacent", "phrase_limit"),
+        ),
+    }
     normalized = {
         bucket: dedup_text(
             [
@@ -285,6 +205,9 @@ def build_discovery_anchor_plan(
     }
     for bucket in DISCOVERY_BUCKETS:
         values = normalized[bucket]
+        if values:
+            normalized[bucket] = values[: _bucket_rule(bucket, "phrase_limit")]
+            continue
         for default_value in defaults.get(bucket, []):
             if len(values) >= _bucket_rule(bucket, "minimum_anchor_count"):
                 break
@@ -293,7 +216,7 @@ def build_discovery_anchor_plan(
             if default_value.casefold() not in {item.casefold() for item in values}:
                 values.append(default_value)
         normalized[bucket] = values[: _bucket_rule(bucket, "phrase_limit")]
-    return DiscoveryAnchorPlan(core=normalized["core"], adjacent=normalized["adjacent"], explore=normalized["explore"])
+    return DiscoveryAnchorPlan(core=normalized["core"], adjacent=normalized["adjacent"])
 
 def rotate_list(values: list[str], seed: int) -> list[str]:
     if not values:
@@ -332,14 +255,14 @@ def normalize_company_discovery_query(raw: str) -> str:
 def generate_bucket_queries(*, anchors: list[str], templates: list[str], limit: int, seed: int, normalize: Callable[[str], str]) -> list[str]:
     if limit <= 0 or not anchors or not templates:
         return []
-    rotated_anchors = rotate_list(dedup_text(anchors, limit=32), seed)
+    ordered_anchors = dedup_text(anchors, limit=32)
     rotated_templates = rotate_list(list(templates), seed // 7 if seed else 0)
     queries: list[str] = []
     seen: set[str] = set()
-    max_attempts = max(limit * 8, len(rotated_anchors) * len(rotated_templates))
+    max_attempts = max(limit * 8, len(ordered_anchors) * len(rotated_templates))
     for attempt in range(max_attempts):
-        anchor = rotated_anchors[attempt % len(rotated_anchors)]
-        template = rotated_templates[(attempt // max(1, len(rotated_anchors))) % len(rotated_templates)]
+        anchor = ordered_anchors[attempt % len(ordered_anchors)]
+        template = rotated_templates[(attempt // max(1, len(ordered_anchors))) % len(rotated_templates)]
         normalized = normalize(template.format(anchor=anchor))
         if not normalized:
             continue
@@ -353,6 +276,56 @@ def generate_bucket_queries(*, anchors: list[str], templates: list[str], limit: 
     return queries
 
 
+def _discovery_context_tokens(text: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", str(text or "").casefold())
+        if len(token) > 2 and token not in DISCOVERY_CONTEXT_STOPWORDS
+    }
+
+
+def _domain_context_phrase(text: str) -> str:
+    normalized = normalize_business_hint(text)
+    if not normalized:
+        return ""
+    parts = [part for part in re.split(r"\s+", normalized) if part]
+    focused_parts = [
+        part
+        for part in parts
+        if part.casefold() not in DISCOVERY_GENERIC_SUPPORT_TOKENS
+    ]
+    if not focused_parts:
+        return normalized
+    return normalize_business_hint(" ".join(focused_parts))
+
+
+def _contextualize_adjacent_anchor(anchor: str, core_anchors: list[str]) -> str:
+    normalized_anchor = normalize_business_hint(anchor)
+    if not normalized_anchor:
+        return ""
+    anchor_tokens = _discovery_context_tokens(normalized_anchor)
+    if not anchor_tokens or not core_anchors:
+        return normalized_anchor
+    preferred_context = ""
+    for core_anchor in core_anchors:
+        core_tokens = _discovery_context_tokens(core_anchor)
+        overlap = core_tokens & anchor_tokens
+        if not overlap:
+            continue
+        if any(token not in DISCOVERY_GENERIC_SUPPORT_TOKENS for token in overlap):
+            return normalized_anchor
+        if not preferred_context:
+            preferred_context = _domain_context_phrase(core_anchor)
+    context_anchor = preferred_context or next(
+        (_domain_context_phrase(item) for item in core_anchors if _domain_context_phrase(item)),
+        normalize_business_hint(core_anchors[0]),
+    )
+    combined = normalize_business_hint(f"{context_anchor} {normalized_anchor}")
+    if not combined or len(combined) > 72:
+        return normalized_anchor
+    return combined
+
+
 def generate_discovery_query_plan(*, anchor_plan: DiscoveryAnchorPlan, templates: tuple[str, ...], limit: int, seed: int, normalize: Callable[[str], str]) -> list[str]:
     bucket_queries = {
         bucket: generate_bucket_queries(
@@ -364,7 +337,7 @@ def generate_discovery_query_plan(*, anchor_plan: DiscoveryAnchorPlan, templates
         )
         for bucket in DISCOVERY_BUCKETS
     }
-    indices = {"core": 0, "adjacent": 0, "explore": 0}
+    indices = {bucket: 0 for bucket in DISCOVERY_BUCKETS}
     planned: list[str] = []
     seen: set[str] = set()
     bucket_order = discovery_query_bucket_order(discovery_query_limit())
@@ -407,45 +380,40 @@ def build_company_discovery_queries_from_anchor_plan(
     anchor_plan: DiscoveryAnchorPlan,
     rotation_seed: int = 0,
 ) -> list[str]:
+    adjusted_plan = DiscoveryAnchorPlan(
+        core=list(anchor_plan.core),
+        adjacent=[
+            _contextualize_adjacent_anchor(anchor, list(anchor_plan.core))
+            for anchor in anchor_plan.adjacent
+        ],
+    )
     dedup = generate_discovery_query_plan(
-        anchor_plan=anchor_plan,
+        anchor_plan=adjusted_plan,
         templates=BUSINESS_COMPANY_QUERY_TEMPLATES,
         limit=discovery_query_limit(),
         seed=rotation_seed,
         normalize=normalize_company_discovery_query,
     )
     if not dedup:
-        dedup = ["hydrogen systems companies", "systems engineering companies", "industrial technology companies"]
+        dedup = ["relevant companies", "target employers", "industry companies"]
     return dedup[: discovery_query_limit()]
 
 
 __all__ = [
     "DISCOVERY_BUCKET_RULES",
     "DiscoveryAnchorPlan",
-    "anchor_library",
-    "build_anchor_source_text",
     "build_company_discovery_queries_from_anchor_plan",
     "build_discovery_anchor_plan",
     "discovery_query_bucket_order",
     "discovery_query_limit",
-    "classify_business_hint",
-    "collect_business_hint_terms",
     "default_anchor_buckets",
     "generate_bucket_queries",
     "generate_discovery_query_plan",
     "is_avoided_anchor",
     "looks_like_business_noise",
     "looks_like_role_phrase",
+    "normalize_discovery_terms",
     "normalize_business_hint",
     "normalize_company_discovery_query",
     "rotate_list",
 ]
-def _has_semantic_anchor_seed(signals: CandidateSearchSignals) -> bool:
-    return any(
-        (
-            signals.semantic.summary,
-            *signals.semantic_core_anchor_terms(),
-            *signals.semantic.adjacent_business_areas,
-            *signals.semantic.exploration_business_areas,
-        )
-    )

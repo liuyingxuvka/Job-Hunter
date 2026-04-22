@@ -16,199 +16,380 @@ from jobflow_desktop_app.search.companies.selection import (  # noqa: E402
 
 
 class CompanySelectionTests(unittest.TestCase):
-    def _config(self) -> dict:
-        return {
-            "candidate": {
-                "targetRole": "Hydrogen durability engineer",
-                "locationPreference": "Berlin / Remote",
-                "scopeProfile": "hydrogen_mainline",
-            },
-            "companyDiscovery": {
-                "model": "gpt-5-nano",
-                "queries": ["hydrogen companies", "electrolyzer durability companies"],
-            },
-            "sources": {
-                "priorityRegionWeights": {"region:de": 8},
-                "companyRotationIntervalDays": 2,
-                "companyRotationSeed": 0,
-                "maxCompaniesPerRun": 2,
-            },
-        }
-
-    def test_select_companies_for_run_prefers_support_and_lifecycle(self) -> None:
+    def test_select_companies_for_run_prefers_pending_then_ai_fit(self) -> None:
         companies = [
-            {"name": "Beta Storage", "website": "https://beta.example", "tags": ["region:DE"], "snapshotComplete": True},
-            {"name": "Acme Hydrogen", "website": "https://acme.example", "tags": ["hydrogen", "region:DE"], "snapshotPendingAnalysisCount": 2},
-            {"name": "Gamma Labs", "website": "https://gamma.example", "tags": ["battery"]},
+            {
+                "name": "Pending Co",
+                "website": "https://pending.example",
+                "snapshotPendingAnalysisCount": 2,
+                "aiCompanyFitScore": 10,
+            },
+            {
+                "name": "Best Fit",
+                "website": "https://best.example",
+                "aiCompanyFitScore": 92,
+            },
+            {
+                "name": "Lower Fit",
+                "website": "https://lower.example",
+                "aiCompanyFitScore": 40,
+            },
         ]
-        ordered = select_companies_for_run(
-            config=self._config(),
-            companies=companies,
-            max_companies=10,
-            now=datetime(2026, 4, 15, tzinfo=timezone.utc),
-        )
 
-        self.assertEqual(ordered[0]["name"], "Acme Hydrogen")
-        self.assertEqual(ordered[1]["name"], "Beta Storage")
-        self.assertEqual(ordered[2]["name"], "Gamma Labs")
-
-    def test_select_companies_for_run_rotates_tail(self) -> None:
-        companies = [
-            {"name": "Pending Company", "website": "https://pending.example", "snapshotPendingAnalysisCount": 2},
-            {"name": "Incomplete Snapshot", "website": "https://incomplete.example", "snapshotComplete": False},
-            {"name": "Company 2", "website": "https://c2.example"},
-            {"name": "Company 3", "website": "https://c3.example"},
-            {"name": "Company 4", "website": "https://c4.example"},
-        ]
         selection = select_companies_for_run(
-            config=self._config(),
             companies=companies,
             max_companies=3,
-            now=datetime(2026, 4, 15, tzinfo=timezone.utc),
-        )
-        self.assertEqual(len(selection), 3)
-        self.assertEqual(
-            [item["name"] for item in selection[:2]],
-            ["Pending Company", "Incomplete Snapshot"],
+            now=datetime(2026, 4, 19, tzinfo=timezone.utc),
         )
 
-    def test_select_companies_for_run_rotation_can_be_disabled_with_zero_interval(self) -> None:
-        config = self._config()
-        config["sources"]["companyRotationIntervalDays"] = 0
-        companies = [
-            {"name": "Pending Company", "website": "https://pending.example", "snapshotPendingAnalysisCount": 2},
-            {"name": "Incomplete Snapshot", "website": "https://incomplete.example", "snapshotComplete": False},
-            {"name": "Stable Co A", "website": "https://stable-a.example"},
-            {"name": "Stable Co B", "website": "https://stable-b.example"},
-            {"name": "Stable Co C", "website": "https://stable-c.example"},
-        ]
-        selection = select_companies_for_run(
-            config=config,
-            companies=companies,
-            max_companies=3,
-            now=datetime(2026, 4, 15, tzinfo=timezone.utc),
-        )
         self.assertEqual(
             [item["name"] for item in selection],
-            ["Pending Company", "Incomplete Snapshot", "Stable Co A"],
+            ["Pending Co", "Best Fit", "Lower Fit"],
         )
 
-    def test_select_companies_for_run_filters_cooldown_before_prioritizing(self) -> None:
+    def test_select_companies_for_run_filters_cooldown_and_unresolved_ranking(self) -> None:
         companies = [
-            {"name": "Acme Hydrogen", "website": "https://acme.example", "tags": ["hydrogen", "region:DE"]},
-            {"name": "Cooling Storage", "website": "https://beta.example", "tags": ["battery"], "cooldownUntil": "2099-01-01T00:00:00+00:00"},
+            {
+                "name": "Cooling Co",
+                "website": "https://cooling.example",
+                "cooldownUntil": "2099-01-01T00:00:00+00:00",
+                "aiCompanyFitScore": 95,
+            },
+            {
+                "name": "Ranking Unresolved",
+                "website": "https://pending.example",
+            },
+            {
+                "name": "Ready Co",
+                "website": "https://ready.example",
+                "aiCompanyFitScore": 70,
+            },
         ]
 
         selection = select_companies_for_run(
-            config=self._config(),
-            companies=companies,
-            max_companies=2,
-            now=datetime(2026, 4, 15, tzinfo=timezone.utc),
-        )
-
-        self.assertEqual(selection[0]["name"], "Acme Hydrogen")
-        self.assertEqual([item["name"] for item in selection], ["Acme Hydrogen"])
-
-    def test_select_companies_for_run_ignores_source_convenience_noise(self) -> None:
-        companies = [
-            {
-                "name": "Plain Company",
-                "website": "https://plain.example",
-            },
-            {
-                "name": "Noisy Company",
-                "website": "https://noisy.example",
-                "careersUrl": "https://noisy.example/careers",
-                "discoverySources": ["web_search"],
-                "tags": ["hydrogen"],
-            },
-        ]
-
-        ordered = select_companies_for_run(
-            config=self._config(),
-            companies=companies,
-            max_companies=10,
-            now=datetime(2026, 4, 15, tzinfo=timezone.utc),
-        )
-
-        self.assertEqual(
-            [item["name"] for item in ordered],
-            ["Plain Company", "Noisy Company"],
-        )
-
-    def test_select_companies_for_run_prefers_manual_priority_and_region_bonus(self) -> None:
-        companies = [
-            {
-                "name": "Plain Systems",
-                "website": "https://plain.example",
-                "priority": 0,
-                "tags": [],
-            },
-            {
-                "name": "Acme Hydrogen",
-                "website": "https://acme.example",
-                "priority": 3,
-                "tags": ["region:de"],
-            },
-        ]
-        selection = select_companies_for_run(
-            config=self._config(),
-            companies=companies,
-            max_companies=2,
-            now=datetime(2026, 4, 15, tzinfo=timezone.utc),
-        )
-        self.assertEqual([item["name"] for item in selection], ["Acme Hydrogen", "Plain Systems"])
-
-    def test_select_companies_for_run_pins_pending_before_rotating_tail(self) -> None:
-        companies = [
-            {"name": "Pending Co", "website": "https://pending.example", "snapshotPendingAnalysisCount": 2},
-            {"name": "Incomplete Co", "website": "https://incomplete.example", "snapshotComplete": False},
-            {"name": "Stable Co", "website": "https://stable.example", "priority": 2},
-            {"name": "Stable Co 2", "website": "https://stable2.example"},
-        ]
-        selection = select_companies_for_run(
-            config=self._config(),
             companies=companies,
             max_companies=3,
-            now=datetime(2026, 4, 15, tzinfo=timezone.utc),
-        )
-        self.assertEqual(
-            [item["name"] for item in selection[:2]],
-            ["Pending Co", "Incomplete Co"],
+            now=datetime(2026, 4, 19, tzinfo=timezone.utc),
         )
 
-    def test_select_companies_for_run_uses_rotation_seed_within_same_day(self) -> None:
+        self.assertEqual(selection, [])
+
+    def test_select_companies_for_run_waits_for_unscored_companies_before_sources(self) -> None:
         companies = [
-            {"name": "Pending Co", "website": "https://pending.example", "snapshotPendingAnalysisCount": 1},
-            {"name": "Stable Co 1", "website": "https://stable1.example"},
-            {"name": "Stable Co 2", "website": "https://stable2.example"},
-            {"name": "Stable Co 3", "website": "https://stable3.example"},
+            {
+                "name": "Ready Co",
+                "website": "https://ready.example",
+                "aiCompanyFitScore": 70,
+            },
+            {
+                "name": "New Specialist",
+                "website": "https://specialist.example",
+            },
         ]
-        config_a = self._config()
-        config_b = self._config()
-        config_a["sources"]["companyRotationSeed"] = 0
-        config_b["sources"]["companyRotationSeed"] = 2
 
-        selection_a = select_companies_for_run(
-            config=config_a,
+        selection = select_companies_for_run(
             companies=companies,
             max_companies=2,
-            now=datetime(2026, 4, 17, tzinfo=timezone.utc),
-        )
-        selection_b = select_companies_for_run(
-            config=config_b,
-            companies=companies,
-            max_companies=2,
-            now=datetime(2026, 4, 17, tzinfo=timezone.utc),
+            now=datetime(2026, 4, 19, tzinfo=timezone.utc),
         )
 
-        self.assertEqual(selection_a[0]["name"], "Pending Co")
-        self.assertEqual(selection_b[0]["name"], "Pending Co")
-        self.assertNotEqual(
-            selection_a[1]["name"],
-            selection_b[1]["name"],
+        self.assertEqual(selection, [])
+
+    def test_select_companies_for_run_filters_low_ai_fit_without_pending_work(self) -> None:
+        companies = [
+            {
+                "name": "High Score Noise",
+                "website": "https://noise.example",
+                "aiCompanyFitScore": 28,
+            },
+            {
+                "name": "Relevant Employer",
+                "website": "https://relevant.example",
+                "aiCompanyFitScore": 61,
+            },
+        ]
+
+        selection = select_companies_for_run(
+            companies=companies,
+            max_companies=2,
+            now=datetime(2026, 4, 19, tzinfo=timezone.utc),
         )
+
+        self.assertEqual(
+            [item["name"] for item in selection],
+            ["Relevant Employer"],
+        )
+
+    def test_select_companies_for_run_honors_max_companies_without_rotation(self) -> None:
+        companies = [
+            {"name": "Fit A", "website": "https://a.example", "aiCompanyFitScore": 91},
+            {"name": "Fit B", "website": "https://b.example", "aiCompanyFitScore": 70},
+            {"name": "Fit C", "website": "https://c.example", "aiCompanyFitScore": 45},
+        ]
+
+        selection = select_companies_for_run(
+            companies=companies,
+            max_companies=2,
+            now=datetime(2026, 4, 19, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual([item["name"] for item in selection], ["Fit A", "Fit B"])
+
+    def test_select_companies_for_run_does_not_prioritize_transient_source_retry(self) -> None:
+        companies = [
+            {
+                "name": "Transient Retry",
+                "website": "https://retry.example",
+                "aiCompanyFitScore": 95,
+                "snapshotComplete": False,
+                "sourceDiagnostics": {"reason": "transient_fetch_error"},
+                "jobPageCoverage": {"coverageComplete": True, "pendingListingUrls": []},
+                "lastSearchedAt": "2026-04-20T10:00:00+00:00",
+            },
+            {
+                "name": "Roblox",
+                "website": "https://roblox.example",
+                "aiCompanyFitScore": 90,
+            },
+            {
+                "name": "Smartling",
+                "website": "https://smartling.example",
+                "aiCompanyFitScore": 85,
+            },
+        ]
+
+        selection = select_companies_for_run(
+            companies=companies,
+            max_companies=2,
+            now=datetime(2026, 4, 19, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual([item["name"] for item in selection], ["Roblox", "Smartling"])
+
+    def test_select_companies_for_run_prioritizes_listing_frontier_work(self) -> None:
+        companies = [
+            {
+                "name": "Frontier Pending",
+                "website": "https://frontier.example",
+                "aiCompanyFitScore": 55,
+                "snapshotComplete": False,
+                "sourceDiagnostics": {"reason": "listing_frontier_pending"},
+                "jobPageCoverage": {
+                    "coverageComplete": False,
+                    "pendingListingUrls": ["https://frontier.example/jobs?page=2"],
+                },
+            },
+            {
+                "name": "High Fit Fresh",
+                "website": "https://fresh.example",
+                "aiCompanyFitScore": 90,
+            },
+        ]
+
+        selection = select_companies_for_run(
+            companies=companies,
+            max_companies=2,
+            now=datetime(2026, 4, 19, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual([item["name"] for item in selection], ["Frontier Pending", "High Fit Fresh"])
+
+    def test_select_companies_for_run_prioritizes_prerank_retry_before_fresh_company(self) -> None:
+        companies = [
+            {
+                "name": "Prerank Retry",
+                "website": "https://retry.example",
+                "aiCompanyFitScore": 60,
+                "sourceWorkState": {
+                    "technicalFailureCount": 1,
+                    "abandoned": False,
+                    "lastFailureReason": "ai_job_prerank_pending_retry",
+                },
+                "jobPageCoverage": {"coverageComplete": True, "pendingListingUrls": []},
+                "lastSearchedAt": "2026-04-20T10:00:00+00:00",
+            },
+            {
+                "name": "Fresh Employer",
+                "website": "https://fresh.example",
+                "aiCompanyFitScore": 90,
+            },
+        ]
+
+        selection = select_companies_for_run(
+            companies=companies,
+            max_companies=2,
+            now=datetime(2026, 4, 19, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual([item["name"] for item in selection], ["Prerank Retry", "Fresh Employer"])
+
+    def test_select_companies_for_run_prefers_untouched_companies_before_completed_retries(self) -> None:
+        companies = [
+            {
+                "name": "Retried Employer",
+                "website": "https://retried.example",
+                "aiCompanyFitScore": 94,
+                "snapshotComplete": True,
+                "sourceDiagnostics": {"reason": "no_jobs_fetched"},
+                "lastSearchedAt": "2026-04-20T09:00:00+00:00",
+            },
+            {
+                "name": "New Specialized Employer",
+                "website": "https://specialized.example",
+                "aiCompanyFitScore": 82,
+            },
+        ]
+
+        selection = select_companies_for_run(
+            companies=companies,
+            max_companies=2,
+            now=datetime(2026, 4, 19, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(
+            [item["name"] for item in selection],
+            ["New Specialized Employer", "Retried Employer"],
+        )
+
+    def test_select_companies_for_run_prefers_higher_fit_before_jobs_entry_hint(self) -> None:
+        companies = [
+            {
+                "name": "Generic Giant",
+                "website": "https://giant.example",
+                "aiCompanyFitScore": 88,
+            },
+            {
+                "name": "Specialized Employer",
+                "website": "https://specialized.example",
+                "aiCompanyFitScore": 80,
+                "jobsPageUrl": "https://specialized.example/jobs",
+                "jobsPageType": "jobs_listing",
+            },
+        ]
+
+        selection = select_companies_for_run(
+            companies=companies,
+            max_companies=2,
+            now=datetime(2026, 4, 19, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(
+            [item["name"] for item in selection],
+            ["Generic Giant", "Specialized Employer"],
+        )
+
+    def test_select_companies_for_run_skips_abandoned_source_units(self) -> None:
+        companies = [
+            {
+                "name": "Broken Employer",
+                "website": "https://broken.example",
+                "aiCompanyFitScore": 95,
+                "sourceWorkState": {
+                    "technicalFailureCount": 3,
+                    "abandoned": True,
+                },
+            },
+            {
+                "name": "Healthy Employer",
+                "website": "https://healthy.example",
+                "aiCompanyFitScore": 70,
+            },
+        ]
+
+        selection = select_companies_for_run(
+            companies=companies,
+            max_companies=2,
+            now=datetime(2026, 4, 19, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual([item["name"] for item in selection], ["Healthy Employer"])
+
+    def test_select_companies_for_run_skips_companies_suspended_for_current_run(self) -> None:
+        companies = [
+            {
+                "name": "Deferred Employer",
+                "website": "https://deferred.example",
+                "aiCompanyFitScore": 85,
+                "sourceWorkState": {
+                    "technicalFailureCount": 0,
+                    "abandoned": False,
+                    "suspendedRunId": 99,
+                    "lastFailureReason": "source_stage_deferred",
+                },
+            },
+            {
+                "name": "Healthy Employer",
+                "website": "https://healthy.example",
+                "aiCompanyFitScore": 70,
+            },
+        ]
+
+        selection = select_companies_for_run(
+            companies=companies,
+            max_companies=2,
+            now=datetime(2026, 4, 19, tzinfo=timezone.utc),
+            current_run_id=99,
+        )
+
+        self.assertEqual([item["name"] for item in selection], ["Healthy Employer"])
+
+    def test_select_companies_for_run_does_not_block_on_current_run_company_fit_failure(self) -> None:
+        companies = [
+            {
+                "name": "Ranking Failed",
+                "website": "https://failed.example",
+                "rankingWorkState": {
+                    "technicalFailureCount": 1,
+                    "abandoned": False,
+                    "suspendedRunId": 77,
+                    "lastFailureReason": "company_fit_error",
+                },
+            },
+            {
+                "name": "Ready Employer",
+                "website": "https://ready.example",
+                "aiCompanyFitScore": 80,
+            },
+        ]
+
+        selection = select_companies_for_run(
+            companies=companies,
+            max_companies=2,
+            now=datetime(2026, 4, 19, tzinfo=timezone.utc),
+            current_run_id=77,
+        )
+
+        self.assertEqual([item["name"] for item in selection], ["Ready Employer"])
+
+    def test_select_companies_for_run_keeps_cached_score_company_after_refresh_failure(self) -> None:
+        companies = [
+            {
+                "name": "Cached Employer",
+                "website": "https://cached.example",
+                "aiCompanyFitScore": 85,
+                "rankingWorkState": {
+                    "technicalFailureCount": 0,
+                    "abandoned": False,
+                    "suspendedRunId": 77,
+                    "lastFailureReason": "company_fit_refresh_error",
+                },
+            },
+            {
+                "name": "Ready Employer",
+                "website": "https://ready.example",
+                "aiCompanyFitScore": 80,
+            },
+        ]
+
+        selection = select_companies_for_run(
+            companies=companies,
+            max_companies=2,
+            now=datetime(2026, 4, 19, tzinfo=timezone.utc),
+            current_run_id=77,
+        )
+
+        self.assertEqual([item["name"] for item in selection], ["Cached Employer", "Ready Employer"])
+
 
 if __name__ == "__main__":
     unittest.main()
-

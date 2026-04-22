@@ -10,6 +10,11 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-22
+
+### Changed
+
+- Promoted this release line to 0.7.0 to reflect the expanded AI-assisted company-first search workflow, stronger runtime state handling, and the stabilized Windows packaging path.
 ## [0.6.1] - 2026-04-22
 
 ### Added

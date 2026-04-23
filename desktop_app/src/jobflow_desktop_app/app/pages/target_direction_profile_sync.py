@@ -25,6 +25,7 @@ def reload_profiles(
     list_for_candidate: Callable[[int], list[Any]],
     prepare_profile: Callable[[Any], Any],
     display_role_name: Callable[[Any], str],
+    display_scope_label: Callable[[Any], str],
     untitled_label: str,
 ) -> ReloadProfilesResult:
     current_candidate_id = getattr(current_candidate, "candidate_id", None)
@@ -43,6 +44,7 @@ def reload_profiles(
         target_profile_id=target_profile_id,
         prepare_profile=prepare_profile,
         display_role_name=display_role_name,
+        display_scope_label=display_scope_label,
         untitled_label=untitled_label,
     )
     if target_row is None and profile_records:

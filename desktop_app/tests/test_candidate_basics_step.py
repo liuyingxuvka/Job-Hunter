@@ -6,6 +6,7 @@ from unittest.mock import Mock
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QLabel, QWidget
 
 from jobflow_desktop_app.app.pages.candidate_basics import CandidateBasicsStep
 
@@ -111,6 +112,33 @@ class CandidateBasicsStepTests(unittest.TestCase):
             self.assertIsNotNone(record)
             assert record is not None
             self.assertEqual(Path(record.active_resume_path).name, "updated-resume.pdf")
+
+    def test_compact_layout_moves_save_button_below_card_and_hides_meta_info(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context, name="Compact Candidate")
+            page = CandidateBasicsStep(
+                context,
+                ui_language="zh",
+                compact_layout=True,
+                include_email=False,
+            )
+            self.addCleanup(page.deleteLater)
+
+            page.set_candidate(candidate_id)
+            process_events()
+
+            footer_row = page.findChild(QWidget, "CompactBasicsFooterRow")
+            self.assertIsNotNone(footer_row)
+            self.assertIs(page.form.save_button.parentWidget(), footer_row)
+            self.assertIsNone(page.findChild(QWidget, "CompactBasicsActionRow"))
+            self.assertIsNone(page.findChild(QWidget, "CompactBasicsHeaderRow"))
+            self.assertTrue(page.form.meta_label.isHidden())
+            compact_titles = [
+                label.text()
+                for label in page.findChildren(QLabel)
+                if label.objectName() == "SectionTitle"
+            ]
+            self.assertNotIn("基本信息", compact_titles)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QLabel, QMessageBox
 
 from jobflow_desktop_app.app.pages.candidate_directory import CandidateDirectoryPage
 
@@ -46,6 +46,20 @@ class CandidateDirectoryPageTests(unittest.TestCase):
 
             process_events()
             self.assertEqual(page.candidate_list.count(), 0)
+            self.assertEqual(page.directory_title_label.text(), "选择求职者")
+            self.assertEqual(page.directory_subtitle_label.text(), "选择或新建求职者后进入工作台。")
+            page_titles = [
+                label.text()
+                for label in page.findChildren(QLabel)
+                if label.objectName() == "PageTitle"
+            ]
+            section_titles = [
+                label.text()
+                for label in page.findChildren(QLabel)
+                if label.objectName() == "SectionTitle"
+            ]
+            self.assertNotIn("选择求职者", page_titles)
+            self.assertNotIn("操作", section_titles)
 
             with patch(
                 "jobflow_desktop_app.app.pages.candidate_directory.QInputDialog.getText",

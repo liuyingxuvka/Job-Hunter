@@ -169,6 +169,7 @@ class FakeJobSearchRunner:
             stderr_tail="",
             run_dir=DESKTOP_ROOT,
         )
+        self._job_display_i18n_context_provider = None
 
     def set_jobs(self, jobs: list[JobSearchResult], stats: SearchStats | None = None) -> None:
         self.jobs = list(jobs)
@@ -184,6 +185,9 @@ class FakeJobSearchRunner:
     def load_recommended_jobs(self, candidate_id: int) -> list[JobSearchResult]:
         return list(self.jobs)
 
+    def load_live_jobs(self, candidate_id: int) -> list[JobSearchResult]:
+        return list(self.jobs)
+
     def load_search_stats(self, candidate_id: int) -> SearchStats:
         return self.stats
 
@@ -193,6 +197,9 @@ class FakeJobSearchRunner:
     def run_search(self, **kwargs: object) -> SearchRunResult:
         self.run_calls.append(dict(kwargs))
         return self._run_result
+
+    def set_job_display_i18n_context_provider(self, provider) -> None:
+        self._job_display_i18n_context_provider = provider
 
 
 def make_job(
@@ -204,6 +211,10 @@ def make_job(
     date_found: str = "2026-04-14T12:00:00Z",
     match_score: int = 78,
     bound_target_role_name_en: str = "Systems Engineer",
+    title_zh: str = "",
+    title_en: str = "",
+    location_zh: str = "",
+    location_en: str = "",
 ) -> JobSearchResult:
     return JobSearchResult(
         title=title,
@@ -222,6 +233,10 @@ def make_job(
         bound_target_role_text=bound_target_role_name_en,
         final_url=url,
         link_status="final",
+        title_zh=title_zh,
+        title_en=title_en,
+        location_zh=location_zh,
+        location_en=location_en,
     )
 
 

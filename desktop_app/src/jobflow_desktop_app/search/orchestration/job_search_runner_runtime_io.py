@@ -13,6 +13,7 @@ from ..state.runtime_run_locator import (
 from ..state.search_progress_state import SearchProgress, SearchStats
 from . import job_search_runner_records
 from . import job_search_runner_session
+from . import job_result_i18n
 
 
 def _latest_runtime_config(runner, candidate_id: int) -> dict:
@@ -31,7 +32,7 @@ def load_recommended_jobs(runner, candidate_id: int, *, job_result_factory) -> l
     if runner.runtime_mirror is None:
         return []
     config = _latest_runtime_config(runner, candidate_id)
-    jobs = runner.runtime_mirror.load_latest_bucket_jobs(
+    jobs = runner.runtime_mirror.load_candidate_bucket_jobs_merged(
         candidate_id=int(candidate_id),
         job_bucket="recommended",
     )
@@ -45,7 +46,7 @@ def load_recommended_jobs(runner, candidate_id: int, *, job_result_factory) -> l
         config=config,
     )
     if not jobs:
-        all_jobs = runner.runtime_mirror.load_latest_bucket_jobs(
+        all_jobs = runner.runtime_mirror.load_candidate_bucket_jobs_merged(
             candidate_id=int(candidate_id),
             job_bucket="all",
         )
@@ -60,6 +61,7 @@ def load_recommended_jobs(runner, candidate_id: int, *, job_result_factory) -> l
         )
     if not jobs:
         return []
+    jobs = job_result_i18n.enrich_job_display_i18n(runner, candidate_id, jobs)
     return job_search_runner_records.build_job_records(
         jobs,
         job_result_factory=job_result_factory,
@@ -71,7 +73,7 @@ def load_live_jobs(runner, candidate_id: int, *, job_result_factory) -> list:
         return []
     merged_jobs: dict[str, dict] = {}
     for bucket in ("found", "all", "recommended"):
-        bucket_jobs = runner.runtime_mirror.load_latest_bucket_jobs(
+        bucket_jobs = runner.runtime_mirror.load_candidate_bucket_jobs_merged(
             candidate_id=int(candidate_id),
             job_bucket=bucket,
         )
@@ -87,9 +89,14 @@ def load_live_jobs(runner, candidate_id: int, *, job_result_factory) -> list:
             )
     if not merged_jobs:
         return []
+    merged_job_list = job_result_i18n.enrich_job_display_i18n(
+        runner,
+        candidate_id,
+        list(merged_jobs.values()),
+    )
     return job_search_runner_records.build_job_records(
         job_search_runner_records.filter_live_review_jobs(
-            list(merged_jobs.values())
+            merged_job_list
         ),
         job_result_factory=job_result_factory,
     )

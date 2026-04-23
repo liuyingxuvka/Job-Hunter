@@ -25,20 +25,26 @@ def make_scroll_area(content: QWidget) -> QScrollArea:
     return scroll
 
 
-def make_page_title(title: str, subtitle: str) -> QWidget:
+def make_page_title(
+    title: str,
+    subtitle: str,
+    *,
+    title_object_name: str = "PageTitle",
+    subtitle_object_name: str = "PageSubtitle",
+) -> QWidget:
     wrapper = QWidget()
     layout = QVBoxLayout(wrapper)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(4)
 
     title_label = QLabel(title)
-    title_label.setObjectName("PageTitle")
-    subtitle_label = QLabel(subtitle)
-    subtitle_label.setObjectName("PageSubtitle")
-    subtitle_label.setWordWrap(True)
-
+    title_label.setObjectName(title_object_name)
     layout.addWidget(title_label)
-    layout.addWidget(subtitle_label)
+    if str(subtitle or "").strip():
+        subtitle_label = QLabel(subtitle)
+        subtitle_label.setObjectName(subtitle_object_name)
+        subtitle_label.setWordWrap(True)
+        layout.addWidget(subtitle_label)
     return wrapper
 
 

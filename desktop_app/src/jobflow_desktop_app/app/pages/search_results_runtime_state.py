@@ -7,6 +7,7 @@ from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QFrame, QLabel, QProgressDialog, QVBoxLayout, QWidget
 
 from . import search_results_controls_state
+from ..theme import TOAST_LEVEL_COLORS, UI_COLORS
 
 
 @dataclass
@@ -172,29 +173,21 @@ def show_notification_toast(page, text: str, level: str = "info", duration_ms: i
     hide_notification_toast(page)
 
     host = page.window() if isinstance(page.window(), QWidget) else page
-    background = "#102a43"
-    border = "#1f7a8c"
-    if level == "success":
-        background = "#0f5132"
-        border = "#198754"
-    elif level == "warning":
-        background = "#5c3900"
-        border = "#f59f00"
-    elif level == "error":
-        background = "#58151c"
-        border = "#dc3545"
+    color_pack = TOAST_LEVEL_COLORS.get(level, TOAST_LEVEL_COLORS["info"])
+    background = color_pack["background"]
+    border = color_pack["border"]
 
     toast = QFrame(host)
     toast.setFrameShape(QFrame.StyledPanel)
     toast.setStyleSheet(
-        f"background: {background}; border: 1px solid {border}; border-radius: 12px; color: #f8fafc;"
+        f"background: {background}; border: 1px solid {border}; border-radius: 12px; color: {UI_COLORS['text_soft']};"
     )
     layout = QVBoxLayout(toast)
     layout.setContentsMargins(14, 10, 14, 10)
     layout.setSpacing(0)
     label = QLabel(message, toast)
     label.setWordWrap(True)
-    label.setStyleSheet("color: #f8fafc; background: transparent;")
+    label.setStyleSheet(f"color: {UI_COLORS['text_soft']}; background: transparent;")
     layout.addWidget(label)
     toast.setMaximumWidth(420)
     toast.adjustSize()

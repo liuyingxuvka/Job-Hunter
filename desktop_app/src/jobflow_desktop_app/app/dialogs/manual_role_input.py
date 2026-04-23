@@ -58,6 +58,9 @@ from ...common.location_codec import (
 )
 from ...ai.model_catalog import fetch_available_models, filter_response_usable_models
 from ...ai.role_recommendations import (
+    ADJACENT_SCOPE,
+    CORE_SCOPE,
+    EXPLORATORY_SCOPE,
     OpenAIRoleRecommendationService,
     RoleRecommendationError,
     decode_bilingual_role_name,
@@ -87,8 +90,8 @@ class ManualRoleInputDialog(QDialog):
         intro = QLabel(
             _t(
                 self.ui_language,
-                "请输入岗位名称和大致说明。提交后会由 AI 自动补全更详细的岗位说明。",
-                "Enter role name and rough notes. After submit, AI will enrich it into a detailed role description.",
+                "请输入岗位名称、大致说明，并先选择它属于核心、相邻还是探索方向。提交后会由 AI 按这个方向补全更详细的岗位说明。",
+                "Enter role name and rough notes, and choose whether it is a core, adjacent, or exploratory role first. After submit, AI will enrich it in that direction.",
             )
         )
         intro.setObjectName("MutedLabel")
@@ -118,7 +121,25 @@ class ManualRoleInputDialog(QDialog):
                 "For example: Focus on systems integration, test automation, and requirements traceability, aligned with my background.",
             )
         )
+        self.scope_profile_combo = QComboBox()
+        self.scope_profile_combo.addItem(
+            _t(self.ui_language, "请选择岗位类型", "Select role type"),
+            "",
+        )
+        self.scope_profile_combo.addItem(
+            _t(self.ui_language, "核心岗位", "Core role"),
+            CORE_SCOPE,
+        )
+        self.scope_profile_combo.addItem(
+            _t(self.ui_language, "相邻岗位", "Adjacent role"),
+            ADJACENT_SCOPE,
+        )
+        self.scope_profile_combo.addItem(
+            _t(self.ui_language, "探索岗位", "Exploratory role"),
+            EXPLORATORY_SCOPE,
+        )
         form.addRow(_t(self.ui_language, "岗位名称", "Role Name"), self.role_name_input)
+        form.addRow(_t(self.ui_language, "岗位类型", "Role Type"), self.scope_profile_combo)
         form.addRow(_t(self.ui_language, "大致说明（可选）", "Rough Notes (Optional)"), self.rough_description_input)
         layout.addLayout(form)
 
@@ -140,4 +161,7 @@ class ManualRoleInputDialog(QDialog):
             self.role_name_input.text().strip(),
             self.rough_description_input.toPlainText().strip(),
         )
+
+    def selected_scope_profile(self) -> str:
+        return str(self.scope_profile_combo.currentData() or "").strip()
 

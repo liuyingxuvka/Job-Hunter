@@ -1,67 +1,24 @@
 from __future__ import annotations
 
-import os
-import sys
-from pathlib import Path
-from typing import Callable
-
-from PySide6.QtCore import QObject, QThread, Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QThread, QTimer
 from PySide6.QtWidgets import (
-    QApplication,
     QComboBox,
-    QDialog,
-    QFileDialog,
-    QFormLayout,
     QFrame,
     QHeaderView,
-    QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QInputDialog,
-    QListWidget,
-    QListWidgetItem,
     QMessageBox,
-    QPlainTextEdit,
-    QPushButton,
-    QScrollArea,
-    QStackedWidget,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from ...db.repositories.candidates import CandidateRecord, CandidateSummary
+from ...db.repositories.candidates import CandidateRecord
 from ...db.repositories.profiles import SearchProfileRecord
 from ...db.repositories.settings import OpenAISettings
 from ..context import AppContext
 from ...search.orchestration import JobSearchResult, JobSearchRunner
-from ...common.location_codec import (
-    decode_base_location_struct,
-    decode_preferred_locations_struct,
-    dedup_location_entries,
-    encode_base_location_struct,
-    encode_preferred_locations_struct,
-    location_entry_display,
-    location_type_suggestions,
-    normalize_location_entry,
-    preferred_locations_plain_text,
-)
-from ...ai.model_catalog import fetch_available_models, filter_response_usable_models
-from ...ai.role_recommendations import (
-    OpenAIRoleRecommendationService,
-    RoleRecommendationError,
-    decode_bilingual_role_name,
-    decode_bilingual_description,
-    description_for_prompt,
-    encode_bilingual_role_name,
-    encode_bilingual_description,
-    is_generic_role_name,
-    select_bilingual_role_name,
-    select_bilingual_description,
-)
 from ..widgets.async_tasks import run_busy_task
-from ..widgets.common import _t, make_card, make_page_title, make_scroll_area, styled_button
+from ..widgets.common import _t, styled_button
 from . import search_results_links
 from . import search_results_live_runtime
 from . import search_results_live_state
@@ -76,6 +33,8 @@ from . import search_results_review_status
 from . import search_results_status
 
 class SearchResultsStep(QWidget):
+    """Shared search-results behavior and widgets used by the current workspace."""
+
     STATUS_CODES = ("pending", "focus", "applied", "offered", "rejected", "dropped")
     BLOCKED_AI_LEVELS = {"missing", "invalid", "model_unverified", "warning", "error"}
 
@@ -84,6 +43,9 @@ class SearchResultsStep(QWidget):
         self.context = context
         self.ui_language = "en" if ui_language == "en" else "zh"
         self.runner = JobSearchRunner(context.paths.project_root)
+        set_i18n_provider = getattr(self.runner, "set_job_display_i18n_context_provider", None)
+        if callable(set_i18n_provider):
+            set_i18n_provider(self._job_display_i18n_context)
         self._current_candidate: CandidateRecord | None = None
         self.target_role_candidates: list[str] = []
         self.status_by_job_key: dict[str, str] = {}
@@ -108,60 +70,48 @@ class SearchResultsStep(QWidget):
         self._notification_timer.setSingleShot(True)
         self._notification_timer.timeout.connect(self._hide_notification_toast)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(16)
-        layout.addWidget(
-            make_page_title(
-                _t(self.ui_language, "第三步：岗位搜索结果", "Step 3: Search Results"),
-                _t(
-                    self.ui_language,
-                    "点击“开始搜索”后，系统会继续抓取并分析岗位结果。表格支持评分查看、状态维护和删除。",
-                    "Click 'Start Search' to continue discovery and analysis. The table supports score review, status updates, and deletion.",
-                ),
-            )
-        )
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+        self._build_shared_widgets()
+        self.refresh_button.clicked.connect(self._toggle_search)
+        self.delete_button.clicked.connect(self._delete_selected_rows)
+        self._set_search_button_running(False)
+        self._set_search_countdown_seconds(0)
 
-        control_card = make_card()
-        control_layout = QVBoxLayout(control_card)
-        control_layout.setContentsMargins(18, 16, 18, 16)
-        control_layout.setSpacing(12)
+    def _build_shared_widgets(self) -> None:
         self.results_meta_label = QLabel(
             _t(
                 self.ui_language,
                 "请先选择一个求职者，并确认前面的目标岗位方向。",
                 "Select a candidate and confirm target roles first.",
-            )
+            ),
+            self,
         )
         self.results_meta_label.setObjectName("MutedLabel")
         self.results_meta_label.setWordWrap(True)
-        control_layout.addWidget(self.results_meta_label)
 
-        self.results_progress_label = QLabel("")
+        self.results_progress_label = QLabel("", self)
         self.results_progress_label.setObjectName("MutedLabel")
         self.results_progress_label.setWordWrap(True)
         self.results_progress_label.hide()
-        control_layout.addWidget(self.results_progress_label)
 
         self.results_stats_label = QLabel(
             _t(
                 self.ui_language,
                 "内部统计：未选择求职者。",
                 "Internal stats: no candidate selected.",
-            )
+            ),
+            self,
         )
         self.results_stats_label.setObjectName("MutedLabel")
         self.results_stats_label.setWordWrap(True)
-        control_layout.addWidget(self.results_stats_label)
 
-        duration_row = QWidget()
-        duration_row_layout = QHBoxLayout(duration_row)
-        duration_row_layout.setContentsMargins(0, 0, 0, 0)
-        duration_row_layout.setSpacing(10)
         self.search_duration_label = QLabel(
-            _t(self.ui_language, "搜索时长", "Search Duration")
+            _t(self.ui_language, "搜索时长", "Search Duration"),
+            self,
         )
-        self.search_duration_combo = QComboBox()
+        self.search_duration_combo = QComboBox(self)
         self.search_duration_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.search_duration_combo.setMinimumContentsLength(8)
         self.search_duration_combo.setMinimumWidth(170)
@@ -172,34 +122,20 @@ class SearchResultsStep(QWidget):
         self.search_duration_combo.addItem(_t(self.ui_language, "4 小时", "4 hours"), 14400)
         self.search_duration_combo.setCurrentIndex(2)
         self.search_duration_combo.currentIndexChanged.connect(self._refresh_search_countdown)
-        duration_row_layout.addWidget(self.search_duration_label)
-        duration_row_layout.addWidget(self.search_duration_combo)
+
         self.search_countdown_label = QLabel(
-            _t(self.ui_language, "剩余时间", "Remaining Time")
+            _t(self.ui_language, "剩余时间", "Remaining Time"),
+            self,
         )
-        self.search_countdown_value_label = QLabel("00:00:00")
+        self.search_countdown_value_label = QLabel("00:00:00", self)
         self.search_countdown_value_label.setObjectName("MutedLabel")
-        duration_row_layout.addWidget(self.search_countdown_label)
-        duration_row_layout.addWidget(self.search_countdown_value_label)
-        duration_row_layout.addStretch(1)
-        control_layout.addWidget(duration_row)
 
-        button_row = QHBoxLayout()
-        button_row.setContentsMargins(0, 0, 0, 0)
-        button_row.setSpacing(10)
         self.refresh_button = styled_button(_t(self.ui_language, "开始搜索", "Start Search"), "primary")
+        self.refresh_button.setParent(self)
         self.delete_button = styled_button(_t(self.ui_language, "删除所选岗位", "Delete Selected Jobs"), "danger")
-        button_row.addWidget(self.refresh_button)
-        button_row.addWidget(self.delete_button)
-        button_row.addStretch(1)
-        control_layout.addLayout(button_row)
-        layout.addWidget(control_card)
+        self.delete_button.setParent(self)
 
-        table_card = make_card()
-        table_layout = QVBoxLayout(table_card)
-        table_layout.setContentsMargins(14, 14, 14, 14)
-        table_layout.setSpacing(10)
-        self.table = QTableWidget(0, 8)
+        self.table = QTableWidget(0, 8, self)
         self.table.setHorizontalHeaderLabels(
             [
                 _t(self.ui_language, "职位名称", "Job Title"),
@@ -228,13 +164,6 @@ class SearchResultsStep(QWidget):
         self.table.setSelectionMode(QTableWidget.ExtendedSelection)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)
-        table_layout.addWidget(self.table)
-        layout.addWidget(table_card, 1)
-
-        self.refresh_button.clicked.connect(self._toggle_search)
-        self.delete_button.clicked.connect(self._delete_selected_rows)
-        self._set_search_button_running(False)
-        self._set_search_countdown_seconds(0)
 
     @property
     def current_candidate_id(self) -> int | None:
@@ -632,6 +561,12 @@ class SearchResultsStep(QWidget):
         )
         return None
 
+    def _job_display_i18n_context(self) -> tuple[OpenAISettings | None, str]:
+        return (
+            self.context.settings.get_effective_openai_settings(),
+            self.context.settings.get_openai_base_url(),
+        )
+
     def _toggle_search(self) -> None:
         search_results_search_flow.toggle_search(self)
 
@@ -724,6 +659,8 @@ class SearchResultsStep(QWidget):
                 detail_url=detail_url,
                 status_codes=self.STATUS_CODES,
                 status_by_job_key=self.status_by_job_key,
+                display_job_title=self._display_job_title,
+                display_job_location=self._display_job_location,
                 display_target_role=self._display_target_role,
                 format_score=self._format_score,
                 make_link_cell=self._make_link_cell,
@@ -762,6 +699,12 @@ class SearchResultsStep(QWidget):
 
     def _display_target_role(self, job: JobSearchResult) -> str:
         return search_results_rendering.display_target_role(self.ui_language, job)
+
+    def _display_job_title(self, job: JobSearchResult) -> str:
+        return search_results_rendering.display_job_title(self.ui_language, job)
+
+    def _display_job_location(self, job: JobSearchResult) -> str:
+        return search_results_rendering.display_job_location(self.ui_language, job)
 
     def _format_score(self, job: JobSearchResult) -> str:
         return search_results_rendering.format_score(self.ui_language, job)

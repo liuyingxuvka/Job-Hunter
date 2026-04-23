@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPlainTextEdit,
     QProgressDialog,
     QPushButton,
@@ -72,31 +71,32 @@ from ...ai.role_recommendations import (
 )
 from ..widgets.common import _t, make_card, make_page_title, make_scroll_area, styled_button
 from ..widgets.async_tasks import run_busy_task
+from ..widgets.dialog_presenter import QtDialogPresenter
 
 
 class CandidateForm(QWidget):
     BASE_LOCATION_FIXED_TYPE = "city"
     PREFERRED_LOCATION_TYPES = ("global", "remote", "region", "country", "city")
 
-    def __init__(self, save_button_text: str = "保存基础信息", ui_language: str = "zh") -> None:
+    def __init__(
+        self,
+        save_button_text: str = "保存基础信息",
+        ui_language: str = "zh",
+        *,
+        compact_layout: bool = False,
+        include_email: bool = True,
+    ) -> None:
         super().__init__()
         self.ui_language = "en" if ui_language == "en" else "zh"
+        self.compact_layout = bool(compact_layout)
+        self.include_email = bool(include_email)
         self._target_directions_cached = ""
         self._preferred_location_items: list[dict[str, str]] = []
+        self._loaded_email_value = ""
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
-
-        self.meta_label = QLabel(_t(self.ui_language, "请选择或创建一个求职者。", "Select or create a candidate first."))
-        self.meta_label.setObjectName("MutedLabel")
-        layout.addWidget(self.meta_label)
-
-        form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignTop)
-        form.setFormAlignment(Qt.AlignTop)
-        form.setHorizontalSpacing(14)
-        form.setVerticalSpacing(12)
 
         self.name_input = QLineEdit()
         self.email_input = QLineEdit()
@@ -106,15 +106,17 @@ class CandidateForm(QWidget):
         self.base_location_input.setMinimumContentsLength(24)
         self.base_location_input.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         base_location_row = QWidget()
+        self._mark_transparent(base_location_row)
         base_location_row_layout = QHBoxLayout(base_location_row)
         base_location_row_layout.setContentsMargins(0, 0, 0, 0)
         base_location_row_layout.setSpacing(8)
         base_location_row_layout.addWidget(self.base_location_input, 1)
         self.base_location_warning_label = QLabel("")
-        self.base_location_warning_label.setObjectName("MutedLabel")
-        self.base_location_warning_label.setStyleSheet("color: #b45309;")
+        self.base_location_warning_label.setObjectName("InlineWarningLabel")
         self.base_location_warning_label.setWordWrap(True)
+        self.base_location_warning_label.hide()
         base_location_wrapper = QWidget()
+        self._mark_transparent(base_location_wrapper)
         base_location_wrapper_layout = QVBoxLayout(base_location_wrapper)
         base_location_wrapper_layout.setContentsMargins(0, 0, 0, 0)
         base_location_wrapper_layout.setSpacing(4)
@@ -136,6 +138,7 @@ class CandidateForm(QWidget):
             "danger",
         )
         preferred_control_row = QWidget()
+        self._mark_transparent(preferred_control_row)
         preferred_control_row_layout = QHBoxLayout(preferred_control_row)
         preferred_control_row_layout.setContentsMargins(0, 0, 0, 0)
         preferred_control_row_layout.setSpacing(8)
@@ -153,10 +156,12 @@ class CandidateForm(QWidget):
                 "You can add multiple location tags: Global / Region / Country / City / Remote.",
             )
         )
-        self.preferred_locations_warning_label.setObjectName("MutedLabel")
-        self.preferred_locations_warning_label.setStyleSheet("color: #b45309;")
+        self.preferred_locations_warning_label.setObjectName("InlineWarningLabel")
         self.preferred_locations_warning_label.setWordWrap(True)
+        if self.compact_layout:
+            self.preferred_locations_warning_label.hide()
         preferred_wrapper = QWidget()
+        self._mark_transparent(preferred_wrapper)
         preferred_wrapper_layout = QVBoxLayout(preferred_wrapper)
         preferred_wrapper_layout.setContentsMargins(0, 0, 0, 0)
         preferred_wrapper_layout.setSpacing(6)
@@ -170,6 +175,7 @@ class CandidateForm(QWidget):
             "secondary",
         )
         resume_row = QWidget()
+        self._mark_transparent(resume_row)
         resume_row_layout = QHBoxLayout(resume_row)
         resume_row_layout.setContentsMargins(0, 0, 0, 0)
         resume_row_layout.setSpacing(8)
@@ -186,21 +192,92 @@ class CandidateForm(QWidget):
         )
         self.notes_input.setMinimumHeight(110)
 
-        form.addRow(_t(self.ui_language, "姓名", "Name"), self.name_input)
-        form.addRow(_t(self.ui_language, "邮箱", "Email"), self.email_input)
-        form.addRow(_t(self.ui_language, "当前所在地", "Current Location"), base_location_wrapper)
-        form.addRow(_t(self.ui_language, "希望找工作的地点", "Preferred Locations"), preferred_wrapper)
-        form.addRow(_t(self.ui_language, "简历路径", "Resume Path"), resume_row)
-        form.addRow(_t(self.ui_language, "职业背景 / 专业摘要", "Professional Background / Summary"), self.notes_input)
-        layout.addLayout(form)
-
         self.actions_row = QHBoxLayout()
         self.actions_row.setContentsMargins(0, 0, 0, 0)
         self.actions_row.setSpacing(8)
+        self.meta_label = QLabel(_t(self.ui_language, "请选择或创建一个求职者。", "Select or create a candidate first."))
+        self.meta_label.setObjectName("MutedLabel")
         self.save_button = styled_button(save_button_text, "primary")
-        self.actions_row.addWidget(self.save_button)
-        self.actions_row.addStretch(1)
-        layout.addLayout(self.actions_row)
+
+        if self.include_email:
+            self.email_input.show()
+        else:
+            self.email_input.hide()
+
+        if self.compact_layout:
+            self._set_compact_control_heights(
+                self.name_input,
+                self.base_location_input,
+                self.resume_input,
+                self.choose_resume_button,
+                self.preferred_location_type_combo,
+                self.preferred_location_input,
+                self.add_preferred_location_button,
+                self.remove_preferred_location_button,
+            )
+            self.notes_input.setMinimumHeight(300)
+
+            columns_row = QWidget()
+            self._mark_transparent(columns_row)
+            columns_layout = QHBoxLayout(columns_row)
+            columns_layout.setContentsMargins(0, 0, 0, 0)
+            columns_layout.setSpacing(20)
+
+            left_column = QWidget()
+            left_column.setObjectName("CompactBasicsLeftColumn")
+            self._mark_transparent(left_column)
+            left_column_layout = QVBoxLayout(left_column)
+            left_column_layout.setContentsMargins(0, 0, 0, 0)
+            left_column_layout.setSpacing(12)
+            left_column_layout.addWidget(self._build_field_block(_t(self.ui_language, "姓名", "Name"), self.name_input))
+            left_column_layout.addWidget(
+                self._build_field_block(_t(self.ui_language, "当前所在地", "Current Location"), base_location_wrapper)
+            )
+            left_column_layout.addWidget(
+                self._build_field_block(_t(self.ui_language, "希望找工作的地点", "Preferred Locations"), preferred_wrapper)
+            )
+            left_column_layout.addWidget(
+                self._build_field_block(_t(self.ui_language, "简历路径", "Resume Path"), resume_row)
+            )
+            left_column_layout.addStretch(1)
+
+            right_column = QWidget()
+            right_column.setObjectName("CompactBasicsRightColumn")
+            self._mark_transparent(right_column)
+            right_column_layout = QVBoxLayout(right_column)
+            right_column_layout.setContentsMargins(0, 0, 0, 0)
+            right_column_layout.setSpacing(12)
+            right_column_layout.addWidget(
+                self._build_field_block(
+                    _t(self.ui_language, "职业背景 / 专业摘要", "Professional Background / Summary"),
+                    self.notes_input,
+                )
+            , 1)
+
+            columns_layout.addWidget(left_column, 1)
+            columns_layout.addWidget(right_column, 1)
+            layout.addWidget(columns_row)
+        else:
+            layout.addWidget(self.meta_label)
+            form = QFormLayout()
+            form.setLabelAlignment(Qt.AlignLeft | Qt.AlignTop)
+            form.setFormAlignment(Qt.AlignTop)
+            form.setHorizontalSpacing(14)
+            form.setVerticalSpacing(12)
+
+            form.addRow(_t(self.ui_language, "姓名", "Name"), self.name_input)
+            form.addRow(_t(self.ui_language, "邮箱", "Email"), self.email_input)
+            form.addRow(_t(self.ui_language, "当前所在地", "Current Location"), base_location_wrapper)
+            form.addRow(_t(self.ui_language, "希望找工作的地点", "Preferred Locations"), preferred_wrapper)
+            form.addRow(_t(self.ui_language, "简历路径", "Resume Path"), resume_row)
+            form.addRow(
+                _t(self.ui_language, "职业背景 / 专业摘要", "Professional Background / Summary"),
+                self.notes_input,
+            )
+            layout.addLayout(form)
+            self.actions_row.addWidget(self.save_button)
+            self.actions_row.addStretch(1)
+            layout.addLayout(self.actions_row)
 
         self.choose_resume_button.clicked.connect(self._choose_resume)
         self.preferred_location_type_combo.currentIndexChanged.connect(self._on_preferred_location_type_changed)
@@ -208,6 +285,27 @@ class CandidateForm(QWidget):
         self.remove_preferred_location_button.clicked.connect(self._remove_selected_preferred_locations)
         self._set_location_suggestions(self.base_location_input, self.BASE_LOCATION_FIXED_TYPE)
         self._on_preferred_location_type_changed()
+
+    def _mark_transparent(self, widget: QWidget) -> None:
+        widget.setProperty("transparentBg", True)
+        widget.setAttribute(Qt.WA_StyledBackground, True)
+
+    def _set_compact_control_heights(self, *widgets: QWidget) -> None:
+        for widget in widgets:
+            widget.setMinimumHeight(42)
+
+    def _build_field_block(self, label_text: str, field_widget: QWidget) -> QWidget:
+        wrapper = QWidget()
+        self._mark_transparent(wrapper)
+        layout = QVBoxLayout(wrapper)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        label = QLabel(label_text)
+        label.setObjectName("FieldLabel")
+        label.setWordWrap(True)
+        layout.addWidget(label)
+        layout.addWidget(field_widget)
+        return wrapper
 
     def _location_type_label(self, location_type: str) -> str:
         return {
@@ -304,8 +402,10 @@ class CandidateForm(QWidget):
         messages = self._warning_messages(warning_codes)
         if messages:
             self.base_location_warning_label.setText(_t(self.ui_language, "提示：", "Note: ") + "；".join(messages))
+            self.base_location_warning_label.show()
             return
         self.base_location_warning_label.setText("")
+        self.base_location_warning_label.hide()
 
     def _set_preferred_location_warning(self, warning_codes: list[str]) -> None:
         messages = self._warning_messages(warning_codes)
@@ -313,6 +413,11 @@ class CandidateForm(QWidget):
             self.preferred_locations_warning_label.setText(
                 _t(self.ui_language, "提示：", "Note: ") + "；".join(messages)
             )
+            self.preferred_locations_warning_label.show()
+            return
+        if self.compact_layout:
+            self.preferred_locations_warning_label.setText("")
+            self.preferred_locations_warning_label.hide()
             return
         self.preferred_locations_warning_label.setText(
             _t(
@@ -321,6 +426,7 @@ class CandidateForm(QWidget):
                 "You can add multiple location tags: Global / Region / Country / City / Remote.",
             )
         )
+        self.preferred_locations_warning_label.show()
 
     def _on_preferred_location_type_changed(self) -> None:
         location_type = self._selected_location_type(self.preferred_location_type_combo)
@@ -376,6 +482,7 @@ class CandidateForm(QWidget):
 
     def load_record(self, record: CandidateRecord) -> None:
         self.name_input.setText(record.name)
+        self._loaded_email_value = record.email
         self.email_input.setText(record.email)
         self._set_base_location_entry(
             decode_base_location_struct(
@@ -405,6 +512,7 @@ class CandidateForm(QWidget):
 
     def clear(self, message: str | None = None) -> None:
         self.name_input.clear()
+        self._loaded_email_value = ""
         self.email_input.clear()
         self._set_base_location_entry(None)
         self._preferred_location_items = []
@@ -455,7 +563,7 @@ class CandidateForm(QWidget):
         return CandidateRecord(
             candidate_id=candidate_id,
             name=self.name_input.text(),
-            email=self.email_input.text(),
+            email=self.email_input.text() if self.include_email else self._loaded_email_value,
             base_location=base_location_text,
             preferred_locations=preferred_locations_text,
             target_directions=self._target_directions_cached,
@@ -501,27 +609,33 @@ class CandidateBasicsStep(QWidget):
         ui_language: str = "zh",
         on_data_changed: Callable[[], None] | None = None,
         on_candidate_saved: Callable[[int], None] | None = None,
+        *,
+        compact_layout: bool = False,
+        include_email: bool = True,
+        dialogs: Any | None = None,
     ) -> None:
         super().__init__()
         self.context = context
         self.ui_language = "en" if ui_language == "en" else "zh"
         self.on_data_changed = on_data_changed
         self.on_candidate_saved = on_candidate_saved
+        self.dialogs = dialogs or QtDialogPresenter()
         self._current_candidate: CandidateRecord | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
-        layout.addWidget(
-            make_page_title(
-                _t(self.ui_language, "第一步：基本信息", "Step 1: Basics"),
-                _t(
-                    self.ui_language,
-                    "这里维护这个求职者自己的基础信息，比如当前所在地、希望找工作的地点、简历，以及职业背景和专业摘要。",
-                    "Maintain this candidate's core profile here, including location, preferred job locations, resume, and the professional background summary used by AI.",
-                ),
+        if not compact_layout:
+            layout.addWidget(
+                make_page_title(
+                    _t(self.ui_language, "基本信息", "Basics"),
+                    _t(
+                        self.ui_language,
+                        "维护求职者的地点、简历和专业摘要。",
+                        "Maintain the candidate's locations, resume, and profile summary.",
+                    ),
+                )
             )
-        )
 
         card = make_card()
         card_layout = QVBoxLayout(card)
@@ -529,11 +643,26 @@ class CandidateBasicsStep(QWidget):
         card_layout.setSpacing(14)
 
         self.form = CandidateForm(
-            save_button_text=_t(self.ui_language, "保存这个求职者的基础信息", "Save Candidate Basics"),
+            save_button_text=_t(self.ui_language, "保存基础信息", "Save Basics"),
             ui_language=self.ui_language,
+            compact_layout=compact_layout,
+            include_email=include_email,
         )
+        if compact_layout:
+            self.form.meta_label.hide()
         card_layout.addWidget(self.form)
         layout.addWidget(card)
+        if compact_layout:
+            compact_footer_row = QWidget()
+            compact_footer_row.setObjectName("CompactBasicsFooterRow")
+            compact_footer_row.setProperty("transparentBg", True)
+            compact_footer_row.setAttribute(Qt.WA_StyledBackground, True)
+            compact_footer_layout = QHBoxLayout(compact_footer_row)
+            compact_footer_layout.setContentsMargins(0, 0, 18, 0)
+            compact_footer_layout.setSpacing(12)
+            compact_footer_layout.addStretch(1)
+            compact_footer_layout.addWidget(self.form.save_button, 0, Qt.AlignRight)
+            layout.addWidget(compact_footer_row)
         layout.addStretch(1)
 
         self.form.save_button.clicked.connect(self._save_candidate)
@@ -576,7 +705,7 @@ class CandidateBasicsStep(QWidget):
 
     def _save_candidate(self) -> None:
         if self.current_candidate_id is None:
-            QMessageBox.warning(
+            self.dialogs.warning(
                 self,
                 _t(self.ui_language, "保存失败", "Save Failed"),
                 _t(self.ui_language, "请先选择一个求职者。", "Please select a candidate first."),
@@ -585,7 +714,7 @@ class CandidateBasicsStep(QWidget):
         try:
             candidate_id = self.context.candidates.save(self.form.to_record(self.current_candidate_id))
         except ValueError as exc:
-            QMessageBox.warning(self, _t(self.ui_language, "保存失败", "Save Failed"), str(exc))
+            self.dialogs.warning(self, _t(self.ui_language, "保存失败", "Save Failed"), str(exc))
             return
 
         self.set_candidate(candidate_id)
@@ -593,3 +722,13 @@ class CandidateBasicsStep(QWidget):
             self.on_data_changed()
         if self.on_candidate_saved:
             self.on_candidate_saved(candidate_id)
+        if self.form.compact_layout:
+            self.dialogs.information(
+                self,
+                _t(self.ui_language, "已保存", "Saved"),
+                _t(
+                    self.ui_language,
+                    "求职者基础信息已保存。",
+                    "Candidate basics saved.",
+                ),
+            )

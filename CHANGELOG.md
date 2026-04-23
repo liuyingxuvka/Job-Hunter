@@ -10,6 +10,20 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-23
+
+### Added
+
+- Added the compact candidate workspace as the canonical desktop workflow, with denser basics, target-role, and job-search screens optimized for the real work area.
+- Added job-list checkbox deletion with confirmation, recycle-bin restore flow, localized job display fields, and clearer review/status table styling.
+- Added target-role recommendation mix handling for core, adjacent, and exploratory roles, plus manual role-type selection for AI enrichment.
+
+### Changed
+
+- Removed the old workspace UI path and prototype launchers so the application now opens a single current workspace implementation.
+- Simplified search-result UI construction so the compact page builds its layout directly while reusing shared search behavior.
+- Tightened candidate-directory and workspace text, button labels, color usage, table density, and save-action placement for clearer user flow.
+
 ## [0.7.0] - 2026-04-22
 
 ### Changed

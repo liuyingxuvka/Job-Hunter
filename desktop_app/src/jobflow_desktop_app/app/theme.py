@@ -3,6 +3,58 @@ from __future__ import annotations
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
+UI_COLORS = {
+    "bg_app": "#edf2f7",
+    "bg_statusbar": "#e4ebf2",
+    "bg_card": "#ffffff",
+    "bg_subtle": "#f8fafc",
+    "bg_header": "#e9eff5",
+    "border": "#d8e1ea",
+    "border_muted": "#cfd8e3",
+    "border_strong": "#bfd0dd",
+    "text_primary": "#1f2933",
+    "text_heading": "#102a43",
+    "text_muted": "#52606d",
+    "text_soft": "#d9e2ec",
+    "text_inverse": "#ffffff",
+    "accent_primary": "#102a43",
+    "accent_secondary": "#1f7a8c",
+    "accent_success": "#0f7b6c",
+    "accent_success_hover": "#0d6c5f",
+    "accent_warning": "#d97706",
+    "accent_error": "#b42318",
+    "selection_bg": "#e8f1f7",
+}
+
+RUNTIME_STATUS_DOT_COLORS = {
+    "idle": "#94a3b8",
+    "checking": UI_COLORS["accent_secondary"],
+    "ready": UI_COLORS["accent_success"],
+    "switched": UI_COLORS["accent_success"],
+    "missing": UI_COLORS["accent_error"],
+    "warning": UI_COLORS["accent_warning"],
+    "invalid": UI_COLORS["accent_error"],
+    "model_unverified": UI_COLORS["accent_warning"],
+    "success": UI_COLORS["accent_success"],
+    "error": UI_COLORS["accent_error"],
+}
+
+TOAST_LEVEL_COLORS = {
+    "info": {"background": UI_COLORS["accent_primary"], "border": UI_COLORS["accent_secondary"]},
+    "success": {"background": UI_COLORS["accent_success"], "border": UI_COLORS["accent_success_hover"]},
+    "warning": {"background": "#8d5f00", "border": UI_COLORS["accent_warning"]},
+    "error": {"background": "#7a1f1f", "border": UI_COLORS["accent_error"]},
+}
+
+REVIEW_STATUS_COLORS = {
+    "pending": {"fg": "#334155", "bg": "#FFFFFF", "border": "#94A3B8"},
+    "focus": {"fg": "#1D4ED8", "bg": "#DBEAFE", "border": "#2563EB"},
+    "applied": {"fg": "#166534", "bg": "#D1FAE5", "border": UI_COLORS["accent_success"]},
+    "offered": {"fg": "#92400E", "bg": "#FEF3C7", "border": UI_COLORS["accent_warning"]},
+    "rejected": {"fg": "#991B1B", "bg": "#FEE2E2", "border": "#DC2626"},
+    "dropped": {"fg": "#334155", "bg": "#E5E7EB", "border": "#64748B"},
+}
+
 
 APP_STYLESHEET = """
 QWidget {
@@ -10,6 +62,10 @@ QWidget {
   color: #1f2933;
   font-family: "Segoe UI", "Microsoft YaHei";
   font-size: 13px;
+}
+
+QWidget[transparentBg="true"] {
+  background: transparent;
 }
 
 QLabel {
@@ -67,23 +123,20 @@ QListWidget#EntityList::item {
   min-height: 46px;
 }
 
+QListWidget#TargetRoleList {
+  padding: 2px;
+}
+
 QListWidget#TargetRoleList::item {
-  min-height: 46px;
+  min-height: 24px;
+  padding: 2px 8px;
+  margin: 1px 0;
+  border-radius: 8px;
 }
 
-QListWidget#TargetRoleList::indicator {
-  width: 14px;
-  height: 14px;
-}
-
-QListWidget#TargetRoleList::indicator:unchecked,
-QListWidget#TargetRoleList::indicator:unchecked:selected {
-  image: url(assets/icons/checkbox_unchecked.svg);
-}
-
-QListWidget#TargetRoleList::indicator:checked,
-QListWidget#TargetRoleList::indicator:checked:selected {
-  image: url(assets/icons/checkbox_checked_black.svg);
+QListWidget#TargetRoleList::item:selected {
+  background: transparent;
+  color: transparent;
 }
 
 QFrame[card="true"] {
@@ -106,6 +159,45 @@ QLabel#PageTitle {
   font-size: 20px;
   font-weight: 700;
   color: #102a43;
+}
+
+QLabel#SectionTitle {
+  font-size: 18px;
+  font-weight: 700;
+  color: #102a43;
+}
+
+QLabel#SectionSubtitle {
+  color: #52606d;
+}
+
+QLabel#FieldLabel {
+  font-weight: 600;
+  color: #102a43;
+}
+
+QLabel#InlineStatusLabel {
+  color: #102a43;
+  font-weight: 600;
+}
+
+QLabel#InlineMetaLabel {
+  color: #52606d;
+}
+
+QLabel#InlineSuccessLabel {
+  color: #0f7b6c;
+  font-weight: 600;
+}
+
+QLabel#InlineWarningLabel {
+  color: #d97706;
+  font-weight: 600;
+}
+
+QLabel#InlineErrorLabel {
+  color: #b42318;
+  font-weight: 600;
 }
 
 QLabel#PageSubtitle, QLabel#MutedLabel {
@@ -270,3 +362,13 @@ def apply_theme(app: QApplication) -> None:
     palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
     app.setPalette(palette)
     app.setStyleSheet(APP_STYLESHEET)
+
+
+__all__ = [
+    "APP_STYLESHEET",
+    "REVIEW_STATUS_COLORS",
+    "RUNTIME_STATUS_DOT_COLORS",
+    "TOAST_LEVEL_COLORS",
+    "UI_COLORS",
+    "apply_theme",
+]

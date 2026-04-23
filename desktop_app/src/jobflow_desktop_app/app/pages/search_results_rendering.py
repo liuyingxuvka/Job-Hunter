@@ -3,6 +3,25 @@ from __future__ import annotations
 from typing import Any
 
 from ..widgets.common import _t
+from ...search.orchestration.job_result_i18n import select_display_text
+
+
+def display_job_title(ui_language: str, job: Any) -> str:
+    return select_display_text(
+        ui_language=ui_language,
+        raw_text=str(getattr(job, "title", "") or "").strip(),
+        zh_text=str(getattr(job, "title_zh", "") or "").strip(),
+        en_text=str(getattr(job, "title_en", "") or "").strip(),
+    )
+
+
+def display_job_location(ui_language: str, job: Any) -> str:
+    return select_display_text(
+        ui_language=ui_language,
+        raw_text=str(getattr(job, "location", "") or "").strip(),
+        zh_text=str(getattr(job, "location_zh", "") or "").strip(),
+        en_text=str(getattr(job, "location_en", "") or "").strip(),
+    )
 
 
 def display_target_role(ui_language: str, job: Any) -> str:
@@ -42,6 +61,8 @@ def format_score(ui_language: str, job: Any) -> str:
 
 
 __all__ = [
+    "display_job_location",
+    "display_job_title",
     "display_target_role",
     "format_score",
 ]

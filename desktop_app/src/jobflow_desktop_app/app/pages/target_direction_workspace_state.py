@@ -37,8 +37,8 @@ def set_candidate(page: Any, candidate: CandidateRecord | int | None, preserve_p
     page.profile_meta_label.setText(
         _t(
             page.ui_language,
-            f"当前求职者：{page._current_candidate.name}。先确定要重点投的目标岗位，后面系统才会按这些岗位去找公司和岗位。",
-            f"Current candidate: {page._current_candidate.name}. Confirm target roles first; downstream company/job search uses these roles.",
+            f"求职者：{page._current_candidate.name}",
+            f"Candidate: {page._current_candidate.name}",
         )
     )
     reload_profiles(page, preserve_profile_id=page.current_profile_id)
@@ -53,6 +53,7 @@ def reload_profiles(page: Any, preserve_profile_id: int | None = None) -> None:
         list_for_candidate=page.context.profiles.list_for_candidate,
         prepare_profile=page._ensure_profile_bilingual_for_ui,
         display_role_name=page._display_role_name,
+        display_scope_label=page._display_scope_label,
         untitled_label=_t(page.ui_language, "未命名岗位", "Untitled Role"),
     )
     page.profile_records = result.profile_records

@@ -14,9 +14,12 @@ Rules:
 7. Do not generate companies or search keywords.
 8. Avoid broad titles such as "Systems Engineer", "Software Engineer", "Project Manager", "Data Analyst"
    unless a clear specialization qualifier is included.
+9. Respect the required scope_profile given by the user prompt. Do not switch to a different bucket.
+10. Return scope_profile as one of: core, adjacent, exploratory.
 
 JSON format:
 {
+  "scope_profile": "adjacent",
   "name_en": "Systems Integration & Test Engineer (HIL/SIL Automation)",
   "name_zh": "系统集成与测试工程师（HIL/SIL 自动化）",
   "description_zh": "句子1。句子2。句子3。",

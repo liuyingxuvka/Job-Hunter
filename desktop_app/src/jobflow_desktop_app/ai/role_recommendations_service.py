@@ -15,6 +15,7 @@ from .client import (
 )
 from .role_recommendations_models import (
     CandidateSemanticProfile,
+    RoleRecommendationMixPlan,
     RoleRecommendationError,
     TargetRoleSuggestion,
 )
@@ -31,18 +32,18 @@ from .role_recommendations_profile import (
 )
 from .role_recommendations_prompts import (
     CANDIDATE_SEMANTIC_PROFILE_PROMPT,
+    JOB_DISPLAY_I18N_PROMPT,
     MANUAL_ROLE_ENRICH_PROMPT,
     ROLE_NAME_TRANSLATE_PROMPT,
     SYSTEM_PROMPT,
     TRANSLATE_PROMPT,
     build_candidate_semantic_profile_prompt,
+    build_manual_role_enrich_prompt,
     build_role_recommendation_prompt,
-    compact_role_recommendation_semantic_profile_lines,
 )
 from .role_recommendations_resume import (
     build_missing_background_error,
     load_resume_excerpt_result,
-    manual_background_summary,
 )
 
 
@@ -178,6 +179,7 @@ class OpenAIRoleRecommendationService:
         api_base_url: str = "",
         max_items: int = 3,
         existing_roles: list[tuple[str, str]] | None = None,
+        mix_plan: RoleRecommendationMixPlan | None = None,
     ) -> list[TargetRoleSuggestion]:
         if not settings.api_key.strip():
             raise RoleRecommendationError("OpenAI API Key is required.")
@@ -228,6 +230,7 @@ class OpenAIRoleRecommendationService:
                                 existing_roles=existing_roles,
                                 resume_result=resume_result,
                                 semantic_profile=semantic_profile,
+                                mix_plan=mix_plan,
                             ),
                         }
                     ],
@@ -263,6 +266,7 @@ class OpenAIRoleRecommendationService:
         settings: OpenAISettings,
         role_name: str,
         rough_description: str = "",
+        desired_scope_profile: str = "",
         api_base_url: str = "",
     ) -> TargetRoleSuggestion:
         if not settings.api_key.strip():
@@ -279,8 +283,6 @@ class OpenAIRoleRecommendationService:
         )
         if background_error:
             raise RoleRecommendationError(background_error)
-        resume_excerpt = resume_result.text
-        background_summary = manual_background_summary(candidate)
         semantic_profile: CandidateSemanticProfile | None = None
         try:
             semantic_profile = self.extract_candidate_semantic_profile(
@@ -290,39 +292,14 @@ class OpenAIRoleRecommendationService:
             )
         except RoleRecommendationError:
             semantic_profile = None
-        user_prompt_parts = [
-            f"Candidate name: {candidate.name}",
-            f"Current location: {candidate.base_location or 'N/A'}",
-            "Preferred locations:",
-            candidate.preferred_locations.strip() or "N/A",
-            "Current target directions:",
-            candidate.target_directions.strip() or "N/A",
-            "Professional background summary (manual):",
-            background_summary or "N/A",
-            "User provided role intent:",
-            f"- Role name: {intent_name}",
-            f"- Rough description: {str(rough_description or '').strip() or 'N/A'}",
-            "Keep the refined role close to the candidate's demonstrated main domain instead of over-weighting isolated tool keywords.",
-        ]
-        user_prompt_parts.extend(compact_role_recommendation_semantic_profile_lines(semantic_profile))
-        if candidate.active_resume_path.strip() and resume_excerpt:
-            user_prompt_parts.extend(
-                [
-                    f"Resume path: {candidate.active_resume_path.strip()}",
-                    "Resume excerpt:",
-                    resume_excerpt,
-                ]
-            )
-        elif candidate.active_resume_path.strip() and resume_result.error:
-            user_prompt_parts.extend(
-                [
-                    f"Resume path: {candidate.active_resume_path.strip()}",
-                    "Resume read status:",
-                    "Resume text is unavailable. Use the manual professional background summary and the other candidate context as the primary source of truth.",
-                ]
-            )
-        user_prompt_parts.append("Return strict JSON only.")
-        user_prompt = "\n".join(user_prompt_parts)
+        user_prompt = build_manual_role_enrich_prompt(
+            candidate,
+            role_name=intent_name,
+            rough_description=str(rough_description or ""),
+            desired_scope_profile=desired_scope_profile,
+            resume_result=resume_result,
+            semantic_profile=semantic_profile,
+        )
 
         payload = {
             "model": settings.model.strip() or "gpt-5",
@@ -522,6 +499,106 @@ class OpenAIRoleRecommendationService:
             settings=settings,
             api_base_url=api_base_url,
         )
+
+    def translate_job_display_bundle(
+        self,
+        jobs: list[dict[str, str]],
+        *,
+        settings: OpenAISettings,
+        api_base_url: str = "",
+    ) -> dict[str, dict[str, dict[str, str]]]:
+        if not settings.api_key.strip():
+            raise RoleRecommendationError("OpenAI API Key is required.")
+
+        normalized_jobs: list[dict[str, str]] = []
+        seen_keys: set[str] = set()
+        for item in jobs:
+            if not isinstance(item, dict):
+                continue
+            job_key = str(item.get("job_key") or "").strip()
+            if not job_key or job_key in seen_keys:
+                continue
+            seen_keys.add(job_key)
+            normalized_jobs.append(
+                {
+                    "job_key": job_key,
+                    "title_raw": str(item.get("title_raw") or "").strip(),
+                    "location_raw": str(item.get("location_raw") or "").strip(),
+                }
+            )
+        if not normalized_jobs:
+            return {}
+
+        user_prompt = "\n".join(
+            [
+                "Translate these job display fields for a bilingual UI.",
+                "Input JSON:",
+                json.dumps({"jobs": normalized_jobs}, ensure_ascii=False),
+            ]
+        )
+        payload = {
+            "model": settings.model.strip() or "gpt-5",
+            "input": [
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": JOB_DISPLAY_I18N_PROMPT,
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": user_prompt,
+                        }
+                    ],
+                },
+            ],
+        }
+        response_payload = _post_responses_request(
+            api_url=self.resolve_api_url(api_base_url),
+            api_key=settings.api_key,
+            payload=payload,
+            timeout=60,
+        )
+        output_text = _extract_output_text(response_payload)
+        payload_json = _parse_response_object(
+            output_text,
+            parse_error_message="AI job display translation response is not parseable JSON.",
+            invalid_format_message="AI job display translation response has invalid format.",
+        )
+        translations_raw = payload_json.get("translations")
+        if not isinstance(translations_raw, list):
+            raise RoleRecommendationError(
+                "AI job display translation response did not include a translations list."
+            )
+
+        results: dict[str, dict[str, dict[str, str]]] = {}
+        for row in translations_raw:
+            if not isinstance(row, dict):
+                continue
+            job_key = str(row.get("job_key") or "").strip()
+            if not job_key:
+                continue
+            results[job_key] = {
+                "zh": {
+                    "title": str(row.get("title_zh") or "").strip(),
+                    "location": str(row.get("location_zh") or "").strip(),
+                },
+                "en": {
+                    "title": str(row.get("title_en") or "").strip(),
+                    "location": str(row.get("location_en") or "").strip(),
+                },
+            }
+        if not results:
+            raise RoleRecommendationError(
+                "AI job display translation response did not include usable translations."
+            )
+        return results
 
 
 __all__ = ["OpenAIRoleRecommendationService"]

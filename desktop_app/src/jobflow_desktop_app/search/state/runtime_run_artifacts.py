@@ -37,6 +37,26 @@ class SearchRunArtifactsStore:
             job_bucket=job_bucket,
         )
 
+    def load_candidate_bucket_jobs_merged(
+        self,
+        *,
+        candidate_id: int,
+        job_bucket: str,
+    ) -> list[dict[str, Any]]:
+        runs = self.search_runs.all_for_candidate(candidate_id)
+        if not runs:
+            return []
+        merged = merge_runtime_jobs(
+            [
+                self.run_jobs.load_bucket_jobs(
+                    search_run_id=run.search_run_id,
+                    job_bucket=job_bucket,
+                )
+                for run in runs
+            ]
+        )
+        return list(merged.values())
+
     def load_run_bucket_jobs(
         self,
         *,
@@ -114,6 +134,17 @@ class SearchRunArtifactsStore:
             jobs_found_count=counts.jobs_found_count,
             jobs_scored_count=counts.jobs_scored_count,
             jobs_recommended_count=counts.jobs_recommended_count,
+        )
+
+    def persist_job_display_i18n(
+        self,
+        *,
+        candidate_id: int,
+        updates: dict[str, dict[str, Any]],
+    ) -> None:
+        self.run_jobs.persist_job_display_i18n(
+            candidate_id=candidate_id,
+            updates=updates,
         )
 
 

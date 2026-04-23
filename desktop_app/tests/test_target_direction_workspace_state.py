@@ -39,6 +39,9 @@ class _FakeTargetDirectionPage:
     def _display_role_name(self, profile) -> str:
         return profile.name
 
+    def _display_scope_label(self, profile) -> str:
+        return str(getattr(profile, "scope_profile", "") or "")
+
     def _find_profile(self, profile_id: int | None):
         for profile in self.profile_records:
             if profile.profile_id == profile_id:

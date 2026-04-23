@@ -5,7 +5,7 @@ import re
 
 from .client import extract_json_object_text as shared_extract_json_object_text
 from .role_recommendations_models import TargetRoleSuggestion
-from .role_recommendations_text import infer_scope_profile, is_generic_role_name
+from .role_recommendations_text import infer_scope_profile, is_generic_role_name, normalize_scope_profile
 
 
 def extract_json_object_text(raw_text: str) -> str:
@@ -41,6 +41,9 @@ def parse_role_suggestions(payload_text: str, max_items: int = 3) -> list[Target
         fallback_description = str(raw_role.get("description", "")).strip()
         description_zh = str(raw_role.get("description_zh", "")).strip() or fallback_description
         description_en = str(raw_role.get("description_en", "")).strip() or fallback_description
+        scope_profile = normalize_scope_profile(
+            str(raw_role.get("scope_profile") or raw_role.get("category") or "")
+        )
         if not name:
             continue
         if is_generic_role_name(name):
@@ -57,7 +60,7 @@ def parse_role_suggestions(payload_text: str, max_items: int = 3) -> list[Target
                 name=name,
                 description_zh=description_zh,
                 description_en=description_en,
-                scope_profile=infer_scope_profile(name, summary_for_scope),
+                scope_profile=scope_profile or infer_scope_profile(name, summary_for_scope),
                 name_zh=name_zh,
                 name_en=name_en or name,
             )
@@ -103,11 +106,14 @@ def parse_refined_manual_role(
     if name_en and is_generic_role_name(name_en):
         return None
     summary = f"{description_zh}\n{description_en}".strip()
+    scope_profile = normalize_scope_profile(
+        str(payload.get("scope_profile") or payload.get("category") or "")
+    )
     return TargetRoleSuggestion(
         name=name,
         description_zh=description_zh,
         description_en=description_en,
-        scope_profile=infer_scope_profile(name, summary),
+        scope_profile=scope_profile or infer_scope_profile(name, summary),
         name_zh=name_zh,
         name_en=name_en or name,
     )

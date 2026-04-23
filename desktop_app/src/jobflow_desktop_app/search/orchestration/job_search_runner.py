@@ -4,6 +4,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from ...db.repositories.candidates import CandidateRecord
 from ...db.repositories.profiles import SearchProfileRecord
@@ -61,6 +62,10 @@ class JobSearchResult:
     source_url: str = ""
     final_url: str = ""
     link_status: str = "source"
+    title_zh: str = ""
+    title_en: str = ""
+    location_zh: str = ""
+    location_en: str = ""
 
 
 @dataclass(frozen=True)
@@ -78,6 +83,8 @@ class JobSearchRunner:
         self.project_root = Path(project_root)
         self.runtime_root = self._ensure_runtime_root(self.project_root / "runtime")
         self.runtime_mirror = build_search_runtime_mirror(self.project_root)
+        self._job_display_i18n_context_provider: Callable[[], tuple[OpenAISettings | None, str]] | None = None
+        self._job_display_i18n_failed_keys: set[str] = set()
 
     @staticmethod
     def _ensure_runtime_root(runtime_dir: Path) -> Path:
@@ -128,6 +135,12 @@ class JobSearchRunner:
 
     def load_search_progress(self, candidate_id: int) -> SearchProgress:
         return job_search_runner_runtime_io.load_search_progress(self, candidate_id)
+
+    def set_job_display_i18n_context_provider(
+        self,
+        provider: Callable[[], tuple[OpenAISettings | None, str]] | None,
+    ) -> None:
+        self._job_display_i18n_context_provider = provider
 
     def _refresh_python_recommended_output_json(
         self,

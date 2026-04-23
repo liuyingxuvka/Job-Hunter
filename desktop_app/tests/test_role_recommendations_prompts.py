@@ -6,6 +6,7 @@ from jobflow_desktop_app.ai.role_recommendations_models import CandidateSemantic
 from jobflow_desktop_app.ai.role_recommendations_prompts import (
     CANDIDATE_SEMANTIC_PROFILE_PROMPT,
     build_candidate_semantic_profile_prompt,
+    build_manual_role_enrich_prompt,
     build_role_recommendation_prompt,
     compact_role_recommendation_semantic_profile_lines,
 )
@@ -59,6 +60,18 @@ class RoleRecommendationsPromptsTests(unittest.TestCase):
         self.assertIn("existing roles (must not repeat):", prompt)
         self.assertIn("Fuel Cell Systems Engineer", prompt)
         self.assertIn("hydrogen systems", prompt)
+
+    def test_build_manual_role_enrich_prompt_includes_required_scope_profile(self) -> None:
+        prompt = build_manual_role_enrich_prompt(
+            self._candidate(),
+            role_name="Localization Strategy Manager",
+            rough_description="Supports vendor strategy.",
+            desired_scope_profile="exploratory",
+            resume_result=ResumeReadResult(text="resume excerpt", source_type=".txt"),
+        )
+
+        self.assertIn("Required scope_profile: exploratory", prompt)
+        self.assertIn("must stay inside that requested scope_profile", prompt)
 
 
 if __name__ == "__main__":  # pragma: no cover

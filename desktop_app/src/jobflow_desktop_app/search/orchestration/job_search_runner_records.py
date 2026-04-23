@@ -5,6 +5,7 @@ from typing import Any, Callable
 from ..output.final_output import is_output_eligible
 from ..run_state import extract_overall_score as state_extract_overall_score
 from . import runtime_config_builder
+from .job_result_i18n import normalize_display_i18n
 
 
 def extract_overall_score(analysis: object) -> int | None:
@@ -158,6 +159,7 @@ def build_job_records(
         ).strip()
         source_url, final_url, link_status = resolve_job_links(item)
         canonical_url = str(item.get("canonicalUrl") or "").strip()
+        display_i18n = normalize_display_i18n(item.get("displayI18n"))
 
         records.append(
             job_result_factory(
@@ -182,6 +184,10 @@ def build_job_records(
                 source_url=source_url,
                 final_url=final_url,
                 link_status=link_status,
+                title_zh=display_i18n["zh"]["title"],
+                title_en=display_i18n["en"]["title"],
+                location_zh=display_i18n["zh"]["location"],
+                location_en=display_i18n["en"]["location"],
             )
         )
     return records

@@ -164,7 +164,10 @@ def build_target_role_candidates(profiles: list[SearchProfileRecord]) -> list[st
 
 
 def reload_existing_results(page, candidate_id: int) -> None:
-    jobs = page.runner.load_recommended_jobs(candidate_id)
+    load_live_jobs = getattr(page.runner, "load_live_jobs", None)
+    jobs = load_live_jobs(candidate_id) if callable(load_live_jobs) else []
+    if not jobs:
+        jobs = page.runner.load_recommended_jobs(candidate_id)
     visible_count = page._render_jobs(jobs)
     try:
         stats = page.runner.load_search_stats(candidate_id)

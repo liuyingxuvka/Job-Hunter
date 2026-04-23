@@ -353,6 +353,47 @@ class SearchRunRepository:
             for row in rows
         ]
 
+    def all_for_candidate(self, candidate_id: int) -> list[SearchRunSnapshot]:
+        with self.database.session() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                  id,
+                  candidate_id,
+                  run_dir,
+                  status,
+                  current_stage,
+                  last_message,
+                  last_event,
+                  started_at,
+                  updated_at,
+                  jobs_found_count,
+                  jobs_scored_count,
+                  jobs_recommended_count
+                FROM search_runs
+                WHERE candidate_id = ?
+                ORDER BY id ASC
+                """,
+                (int(candidate_id),),
+            ).fetchall()
+        return [
+            SearchRunSnapshot(
+                search_run_id=int(row["id"]),
+                candidate_id=int(row["candidate_id"]),
+                run_dir=_text(row["run_dir"]),
+                status=_text(row["status"]),
+                current_stage=_text(row["current_stage"]),
+                last_message=_text(row["last_message"]),
+                last_event=_text(row["last_event"]),
+                started_at=_text(row["started_at"]),
+                updated_at=_text(row["updated_at"]),
+                jobs_found_count=int(row["jobs_found_count"] or 0),
+                jobs_scored_count=int(row["jobs_scored_count"] or 0),
+                jobs_recommended_count=int(row["jobs_recommended_count"] or 0),
+            )
+            for row in rows
+        ]
+
     def running_runs(self, *, candidate_id: int | None = None) -> list[SearchRunSnapshot]:
         query = """
             SELECT
@@ -1172,6 +1213,61 @@ class SearchRunJobRepository:
             if isinstance(payload, dict):
                 jobs.append(payload)
         return jobs
+
+    def persist_job_display_i18n(
+        self,
+        *,
+        candidate_id: int,
+        updates: dict[str, dict[str, Any]],
+    ) -> None:
+        if not updates:
+            return
+        normalized_updates = {
+            _text(job_key): payload
+            for job_key, payload in updates.items()
+            if _text(job_key) and isinstance(payload, dict)
+        }
+        if not normalized_updates:
+            return
+        changed_rows: list[tuple[str, int]] = []
+        with self.database.session() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, job_key, job_json
+                FROM search_run_jobs
+                WHERE candidate_id = ?
+                """,
+                (int(candidate_id),),
+            ).fetchall()
+            for row in rows:
+                job_key = _text(row["job_key"])
+                payload_update = normalized_updates.get(job_key)
+                if payload_update is None:
+                    continue
+                try:
+                    payload = json.loads(_text(row["job_json"]))
+                except Exception:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                payload["displayI18n"] = payload_update
+                changed_rows.append(
+                    (
+                        json.dumps(payload, ensure_ascii=False),
+                        int(row["id"]),
+                    )
+                )
+            if not changed_rows:
+                return
+            connection.executemany(
+                """
+                UPDATE search_run_jobs
+                SET job_json = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                changed_rows,
+            )
 
     def summarize_bucket_counts(self, *, search_run_id: int) -> SearchRunJobBucketCounts:
         with self.database.session() as connection:

@@ -105,6 +105,9 @@ class SearchRuntimeMirror:
     def recent_runs(self, candidate_id: int, *, limit: int = 5) -> list[Any]:
         return self.run_state.recent_runs(candidate_id, limit=limit)
 
+    def all_runs(self, candidate_id: int) -> list[Any]:
+        return self.run_state.all_runs(candidate_id)
+
     def load_latest_bucket_jobs(
         self,
         *,
@@ -112,6 +115,17 @@ class SearchRuntimeMirror:
         job_bucket: str,
     ) -> list[dict[str, Any]]:
         return self.artifacts.load_latest_bucket_jobs(
+            candidate_id=candidate_id,
+            job_bucket=job_bucket,
+        )
+
+    def load_candidate_bucket_jobs_merged(
+        self,
+        *,
+        candidate_id: int,
+        job_bucket: str,
+    ) -> list[dict[str, Any]]:
+        return self.artifacts.load_candidate_bucket_jobs_merged(
             candidate_id=candidate_id,
             job_bucket=job_bucket,
         )
@@ -196,6 +210,17 @@ class SearchRuntimeMirror:
 
     def refresh_counts(self, *, search_run_id: int) -> None:
         self.artifacts.refresh_counts(search_run_id=search_run_id)
+
+    def persist_job_display_i18n(
+        self,
+        *,
+        candidate_id: int,
+        updates: dict[str, dict[str, Any]],
+    ) -> None:
+        self.artifacts.persist_job_display_i18n(
+            candidate_id=candidate_id,
+            updates=updates,
+        )
 
 
 def build_search_runtime_mirror(project_root: Path) -> SearchRuntimeMirror | None:

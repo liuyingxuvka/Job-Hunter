@@ -22,7 +22,7 @@ from ..ai.client import (
 from ..ai.model_catalog import fetch_available_models
 from .theme import apply_theme
 from .pages.candidate_directory import CandidateDirectoryPage
-from .pages.workspace import CandidateWorkspacePage
+from .pages.workspace_compact import CandidateWorkspaceCompactPage
 
 
 def _t(language: str, zh: str, en: str) -> str:
@@ -199,8 +199,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         try:
-            if isinstance(getattr(self, "workspace_page", None), CandidateWorkspacePage):
-                self.workspace_page.shutdown_background_work(wait_ms=8000)
+            if isinstance(getattr(self, "workspace_compact_page", None), CandidateWorkspaceCompactPage):
+                self.workspace_compact_page.shutdown_background_work(wait_ms=8000)
             # Validation can spend up to ~16 seconds across model list fetch and
             # a structured JSON smoke request, so give shutdown enough headroom
             # to avoid tearing
@@ -218,7 +218,7 @@ class MainWindow(QMainWindow):
             on_open_workspace=self._open_workspace,
             on_ui_language_changed=self._on_ui_language_changed,
         )
-        self.workspace_page = CandidateWorkspacePage(
+        self.workspace_compact_page = CandidateWorkspaceCompactPage(
             self.context,
             ui_language=self.ui_language,
             on_data_changed=self.refresh,
@@ -227,7 +227,7 @@ class MainWindow(QMainWindow):
             on_ai_settings_changed=self._start_ai_health_check,
         )
         self.stack.addWidget(self.candidate_directory_page)
-        self.stack.addWidget(self.workspace_page)
+        self.stack.addWidget(self.workspace_compact_page)
         self._apply_ai_status()
 
     def refresh(self) -> None:
@@ -242,14 +242,14 @@ class MainWindow(QMainWindow):
                 emit_selection=False,
             )
         self.current_candidate_id = candidate_id
-        self.workspace_page.set_candidate(candidate_id)
+        self.workspace_compact_page.set_candidate(candidate_id)
         self._update_status_bar()
 
     def _set_current_candidate(self, candidate_id: int | None) -> None:
         self.current_candidate_id = candidate_id
-        self.workspace_page.set_candidate(candidate_id)
+        self.workspace_compact_page.set_candidate(candidate_id)
         self._update_status_bar()
-        if self.stack.currentWidget() is self.workspace_page:
+        if self.stack.currentWidget() is self.workspace_compact_page:
             self._start_ai_health_check()
 
     def _open_workspace(self, candidate_id: int | None = None) -> None:
@@ -260,8 +260,8 @@ class MainWindow(QMainWindow):
         if candidate_id != self.current_candidate_id:
             self._set_current_candidate(candidate_id)
         else:
-            self.workspace_page.set_candidate(candidate_id)
-        self.stack.setCurrentWidget(self.workspace_page)
+            self.workspace_compact_page.set_candidate(candidate_id)
+        self.stack.setCurrentWidget(self.workspace_compact_page)
         self._start_ai_health_check()
 
     def _show_candidates_page(self) -> None:
@@ -271,31 +271,34 @@ class MainWindow(QMainWindow):
         normalized = "en" if language == "en" else "zh"
         if normalized == self.ui_language:
             return
-        keep_workspace = self.stack.currentWidget() is self.workspace_page
+        keep_compact_workspace = self.stack.currentWidget() is self.workspace_compact_page
         QTimer.singleShot(
             0,
-            lambda lang=normalized, workspace=keep_workspace: self._apply_ui_language(lang, workspace),
+            lambda lang=normalized, compact=keep_compact_workspace: self._apply_ui_language(lang, compact),
         )
 
-    def _apply_ui_language(self, language: str, keep_workspace: bool) -> None:
+    def _apply_ui_language(self, language: str, keep_compact_workspace: bool) -> None:
         normalized = "en" if language == "en" else "zh"
         self.ui_language = normalized
         self.context.settings.save_ui_language(normalized)
         self.setWindowTitle(_t(self.ui_language, "求职工作台", "Jobflow Desktop App"))
 
         old_candidate_page = self.candidate_directory_page
-        old_workspace_page = self.workspace_page
-        old_workspace_page.shutdown_background_work(wait_ms=8000)
+        old_workspace_compact_page = self.workspace_compact_page
+        old_workspace_compact_page.shutdown_background_work(wait_ms=8000)
         self.stack.removeWidget(old_candidate_page)
-        self.stack.removeWidget(old_workspace_page)
+        self.stack.removeWidget(old_workspace_compact_page)
         old_candidate_page.deleteLater()
-        old_workspace_page.deleteLater()
+        old_workspace_compact_page.deleteLater()
 
         self._build_pages()
-        self.stack.setCurrentWidget(self.workspace_page if keep_workspace else self.candidate_directory_page)
+        if keep_compact_workspace:
+            self.stack.setCurrentWidget(self.workspace_compact_page)
+        else:
+            self.stack.setCurrentWidget(self.candidate_directory_page)
         self.refresh()
         self._apply_ai_status()
-        if keep_workspace:
+        if keep_compact_workspace:
             self._start_ai_health_check()
 
     def _build_ai_status_texts(self) -> tuple[str, str]:
@@ -370,7 +373,7 @@ class MainWindow(QMainWindow):
 
     def _apply_ai_status(self) -> None:
         _summary, detail = self._build_ai_status_texts()
-        self.workspace_page.set_ai_validation_status(detail, self._ai_status_level)
+        self.workspace_compact_page.set_ai_validation_status(detail, self._ai_status_level)
         self._update_status_bar()
 
     def _set_ai_status(

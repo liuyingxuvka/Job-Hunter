@@ -42,6 +42,7 @@ class TargetDirectionStepTests(unittest.TestCase):
                 "系统集成与验证工程师",
                 "聚焦系统集成、验证和需求追溯",
             )
+            fake_dialog.selected_scope_profile.return_value = "adjacent"
 
             with patch(
                 "jobflow_desktop_app.app.pages.target_direction.ManualRoleInputDialog",
@@ -55,6 +56,7 @@ class TargetDirectionStepTests(unittest.TestCase):
             self.assertEqual(len(saved_profiles), 1)
             saved_profile = saved_profiles[0]
             self.assertEqual(saved_profile.name, "系统集成与验证工程师")
+            self.assertEqual(saved_profile.scope_profile, "adjacent")
             self.assertEqual(saved_profile.target_role, "系统集成与验证工程师")
             self.assertIn("验证", saved_profile.keyword_focus)
 

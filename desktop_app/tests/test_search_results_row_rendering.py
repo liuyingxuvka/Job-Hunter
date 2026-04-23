@@ -5,6 +5,7 @@ import unittest
 from PySide6.QtWidgets import QComboBox, QLabel, QTableWidget
 
 from jobflow_desktop_app.app.pages import search_results_row_rendering
+from jobflow_desktop_app.app.pages import search_results_review_status
 
 try:
     from ._helpers import get_qapp, make_job
@@ -38,6 +39,8 @@ class SearchResultsRowRenderingTests(unittest.TestCase):
             detail_url="https://example.com/jobs/1",
             status_codes=("pending", "focus"),
             status_by_job_key={"job-1": "focus"},
+            display_job_title=lambda current_job: "系统工程师",
+            display_job_location=lambda current_job: "德国慕尼黑",
             display_target_role=lambda current_job: "Systems Engineer",
             format_score=lambda current_job: "88 / 100（高推荐）",
             make_link_cell=_make_link_cell,
@@ -48,9 +51,10 @@ class SearchResultsRowRenderingTests(unittest.TestCase):
         )
 
         self.assertEqual(table.rowCount(), 1)
-        self.assertEqual(table.item(0, 0).text(), "Systems Engineer")
+        self.assertEqual(table.item(0, 0).text(), "系统工程师")
         self.assertEqual(table.item(0, 0).data(0x0100), "job-1")
         self.assertEqual(table.item(0, 2).text(), "Acme Robotics")
+        self.assertEqual(table.item(0, 3).text(), "德国慕尼黑")
         self.assertEqual(table.item(0, 6).text(), "88 / 100（高推荐）")
         self.assertIsInstance(table.cellWidget(0, 4), QLabel)
         status_combo = table.cellWidget(0, 7)
@@ -59,6 +63,41 @@ class SearchResultsRowRenderingTests(unittest.TestCase):
         self.assertEqual(status_combo.property("statusCode"), "focus")
         status_combo.setCurrentIndex(0)
         self.assertIn(("job-1", "待定"), changed)
+
+    def test_status_palette_uses_white_pending_and_more_distinct_terminal_states(self) -> None:
+        pending = search_results_review_status.status_palette("pending")
+        rejected = search_results_review_status.status_palette("rejected")
+        dropped = search_results_review_status.status_palette("dropped")
+
+        self.assertEqual(pending["bg"], "#FFFFFF")
+        self.assertEqual(pending["fg"], "#334155")
+        self.assertNotEqual(rejected["bg"], dropped["bg"])
+        self.assertNotEqual(rejected["border"], dropped["border"])
+
+    def test_display_helpers_prefer_localized_job_fields_with_raw_fallback(self) -> None:
+        from jobflow_desktop_app.app.pages import search_results_rendering
+
+        job = make_job(
+            title="Senior CRM Process Owner",
+            location="Berlin, Germany",
+            title_zh="高级 CRM 流程负责人",
+            title_en="Senior CRM Process Owner",
+            location_zh="德国柏林",
+            location_en="Berlin, Germany",
+        )
+
+        self.assertEqual(
+            search_results_rendering.display_job_title("zh", job),
+            "高级 CRM 流程负责人",
+        )
+        self.assertEqual(
+            search_results_rendering.display_job_location("zh", job),
+            "德国柏林",
+        )
+        self.assertEqual(
+            search_results_rendering.display_job_title("en", job),
+            "Senior CRM Process Owner",
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover

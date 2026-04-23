@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 try:
-    from ._helpers import create_candidate, create_profile, make_temp_context
+    from ._helpers import create_candidate, create_profile, make_temp_context, save_openai_settings
 except ImportError:  # pragma: no cover - unittest discover from tests dir
-    from _helpers import create_candidate, create_profile, make_temp_context  # type: ignore
+    from _helpers import create_candidate, create_profile, make_temp_context, save_openai_settings  # type: ignore
 
 from jobflow_desktop_app.search.orchestration.job_search_runner import JobSearchRunner
 
@@ -157,6 +158,242 @@ class JobSearchRunnerDbReadsTests(unittest.TestCase):
             self.assertEqual(stats.main_scored_job_count, 1)
             self.assertEqual(stats.main_pending_analysis_count, 1)
             self.assertEqual(stats.displayable_result_count, 1)
+
+    def test_load_results_accumulate_across_multiple_runs_for_same_candidate(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context, name="Accumulated Candidate")
+            profile_id = create_profile(
+                context,
+                candidate_id,
+                name="Localization Manager",
+                scope_profile="localization_ops",
+                is_active=True,
+            )
+            runner, first_run_id = self._seed_run(context, candidate_id)
+            second_run_id = runner.runtime_mirror.create_run(
+                candidate_id=candidate_id,
+                run_dir=context.paths.runtime_dir / "search_runs" / f"candidate_{candidate_id}",
+                status="success",
+                current_stage="done",
+                started_at="2026-04-16T11:00:00+00:00",
+            )
+            runner.runtime_mirror.update_configs(
+                second_run_id,
+                runtime_config=self._default_runtime_config(),
+            )
+
+            first_job = {
+                "title": "Localization Program Manager",
+                "company": "Lingo Corp",
+                "location": "Berlin",
+                "url": "https://lingo.example/jobs/1",
+                "canonicalUrl": "https://lingo.example/jobs/1",
+                "dateFound": "2026-04-16T10:00:00Z",
+                "jd": {"applyUrl": "https://lingo.example/jobs/1/apply"},
+                "analysis": {
+                    "overallScore": 74,
+                    "fitLevelCn": "中推荐",
+                    "fitTrack": "localization_ops",
+                    "recommend": True,
+                    "boundTargetRole": {
+                        "profileId": profile_id,
+                        "roleId": f"profile:{profile_id}",
+                        "nameEn": "Localization Program Manager",
+                        "displayName": "Localization Program Manager",
+                        "targetRoleText": "Localization Program Manager",
+                        "score": 74,
+                    },
+                },
+            }
+            second_job = {
+                "title": "Senior Localization Operations Manager",
+                "company": "Translate Co",
+                "location": "Munich",
+                "url": "https://translate.example/jobs/2",
+                "canonicalUrl": "https://translate.example/jobs/2",
+                "dateFound": "2026-04-16T11:00:00Z",
+                "jd": {"applyUrl": "https://translate.example/jobs/2/apply"},
+                "analysis": {
+                    "overallScore": 82,
+                    "fitLevelCn": "高推荐",
+                    "fitTrack": "localization_ops",
+                    "recommend": True,
+                    "boundTargetRole": {
+                        "profileId": profile_id,
+                        "roleId": f"profile:{profile_id}",
+                        "nameEn": "Localization Program Manager",
+                        "displayName": "Localization Program Manager",
+                        "targetRoleText": "Localization Program Manager",
+                        "score": 82,
+                    },
+                },
+            }
+
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=first_run_id,
+                candidate_id=candidate_id,
+                job_bucket="recommended",
+                jobs=[first_job],
+            )
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=first_run_id,
+                candidate_id=candidate_id,
+                job_bucket="all",
+                jobs=[first_job],
+            )
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=second_run_id,
+                candidate_id=candidate_id,
+                job_bucket="recommended",
+                jobs=[second_job],
+            )
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=second_run_id,
+                candidate_id=candidate_id,
+                job_bucket="all",
+                jobs=[second_job],
+            )
+
+            recommended_jobs = runner.load_recommended_jobs(candidate_id)
+            live_jobs = runner.load_live_jobs(candidate_id)
+
+            self.assertEqual(
+                {job.title for job in recommended_jobs},
+                {
+                    "Localization Program Manager",
+                    "Senior Localization Operations Manager",
+                },
+            )
+            self.assertEqual(
+                {job.title for job in live_jobs},
+                {
+                    "Localization Program Manager",
+                    "Senior Localization Operations Manager",
+                },
+            )
+
+    def test_load_live_jobs_generates_and_persists_display_i18n_fields(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context, name="Display I18N Candidate")
+            create_profile(context, candidate_id, name="Localization Manager", is_active=True)
+            save_openai_settings(context)
+            runner, search_run_id = self._seed_run(context, candidate_id)
+
+            raw_job = {
+                "title": "Lokalisierungsmanager",
+                "company": "Lingo Corp",
+                "location": "Berlin, Deutschland",
+                "url": "https://lingo.example/jobs/1",
+                "canonicalUrl": "https://lingo.example/jobs/1",
+                "dateFound": "2026-04-16T10:00:00Z",
+                "analysis": {
+                    "overallScore": 74,
+                    "fitLevelCn": "中推荐",
+                    "fitTrack": "localization_ops",
+                    "recommend": True,
+                },
+            }
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=search_run_id,
+                candidate_id=candidate_id,
+                job_bucket="all",
+                jobs=[raw_job],
+            )
+            runner.set_job_display_i18n_context_provider(
+                lambda: (context.settings.get_effective_openai_settings(), context.settings.get_openai_base_url())
+            )
+
+            translated_payload = {
+                "https://lingo.example/jobs/1": {
+                    "zh": {"title": "本地化经理", "location": "德国柏林"},
+                    "en": {"title": "Localization Manager", "location": "Berlin, Germany"},
+                }
+            }
+            with patch(
+                "jobflow_desktop_app.search.orchestration.job_result_i18n.OpenAIRoleRecommendationService.translate_job_display_bundle",
+                return_value=translated_payload,
+            ) as mocked_translate:
+                live_jobs = runner.load_live_jobs(candidate_id)
+
+            self.assertEqual(len(live_jobs), 1)
+            self.assertEqual(live_jobs[0].title, "Lokalisierungsmanager")
+            self.assertEqual(live_jobs[0].title_zh, "本地化经理")
+            self.assertEqual(live_jobs[0].title_en, "Localization Manager")
+            self.assertEqual(live_jobs[0].location_zh, "德国柏林")
+            self.assertEqual(live_jobs[0].location_en, "Berlin, Germany")
+            mocked_translate.assert_called_once()
+
+            persisted = runner.runtime_mirror.load_run_bucket_jobs(
+                search_run_id=search_run_id,
+                job_bucket="all",
+            )
+            self.assertEqual(
+                persisted[0]["displayI18n"]["zh"]["title"],
+                "本地化经理",
+            )
+            self.assertEqual(
+                persisted[0]["displayI18n"]["en"]["location"],
+                "Berlin, Germany",
+            )
+
+    def test_load_live_jobs_persists_title_i18n_when_location_is_blank(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context, name="Display I18N Blank Location")
+            create_profile(context, candidate_id, name="Localization Manager", is_active=True)
+            save_openai_settings(context)
+            runner, search_run_id = self._seed_run(context, candidate_id)
+
+            raw_job = {
+                "title": "Lokalisierungsmanager",
+                "company": "Lingo Corp",
+                "location": "",
+                "url": "https://lingo.example/jobs/no-location",
+                "canonicalUrl": "https://lingo.example/jobs/no-location",
+                "dateFound": "2026-04-16T10:00:00Z",
+                "analysis": {
+                    "overallScore": 74,
+                    "fitLevelCn": "中推荐",
+                    "fitTrack": "localization_ops",
+                    "recommend": True,
+                },
+            }
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=search_run_id,
+                candidate_id=candidate_id,
+                job_bucket="all",
+                jobs=[raw_job],
+            )
+            runner.set_job_display_i18n_context_provider(
+                lambda: (context.settings.get_effective_openai_settings(), context.settings.get_openai_base_url())
+            )
+
+            translated_payload = {
+                "https://lingo.example/jobs/no-location": {
+                    "zh": {"title": "本地化经理", "location": ""},
+                    "en": {"title": "Localization Manager", "location": ""},
+                }
+            }
+            with patch(
+                "jobflow_desktop_app.search.orchestration.job_result_i18n.OpenAIRoleRecommendationService.translate_job_display_bundle",
+                return_value=translated_payload,
+            ):
+                live_jobs = runner.load_live_jobs(candidate_id)
+
+            self.assertEqual(live_jobs[0].title_zh, "本地化经理")
+            self.assertEqual(live_jobs[0].title_en, "Localization Manager")
+
+            persisted = runner.runtime_mirror.load_run_bucket_jobs(
+                search_run_id=search_run_id,
+                job_bucket="all",
+            )
+            self.assertEqual(
+                persisted[0]["displayI18n"]["zh"]["title"],
+                "本地化经理",
+            )
+            self.assertEqual(
+                persisted[0]["displayI18n"]["en"]["title"],
+                "Localization Manager",
+            )
 
 
 if __name__ == "__main__":

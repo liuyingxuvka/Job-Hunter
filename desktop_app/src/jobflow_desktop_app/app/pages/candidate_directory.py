@@ -1,77 +1,24 @@
 from __future__ import annotations
 
-import json
-import os
-import re
-import sys
-import threading
-import time
-from datetime import datetime
-from html import escape
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlparse
 
-from PySide6.QtCore import QObject, QThread, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QApplication,
     QComboBox,
-    QDialog,
-    QFileDialog,
-    QFormLayout,
-    QFrame,
-    QHeaderView,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QInputDialog,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
-    QPlainTextEdit,
-    QProgressDialog,
-    QPushButton,
-    QScrollArea,
-    QStackedWidget,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from ...db.repositories.candidates import CandidateRecord, CandidateSummary
-from ...db.repositories.profiles import SearchProfileRecord
-from ...db.repositories.settings import OpenAISettings
 from ..context import AppContext
-from ...search.orchestration import JobSearchResult, JobSearchRunner
-from ...common.location_codec import (
-    decode_base_location_struct,
-    decode_preferred_locations_struct,
-    dedup_location_entries,
-    encode_base_location_struct,
-    encode_preferred_locations_struct,
-    location_entry_display,
-    location_type_suggestions,
-    normalize_location_entry,
-    preferred_locations_plain_text,
-)
-from ...ai.model_catalog import fetch_available_models, filter_response_usable_models
-from ...ai.role_recommendations import (
-    OpenAIRoleRecommendationService,
-    RoleRecommendationError,
-    decode_bilingual_role_name,
-    decode_bilingual_description,
-    description_for_prompt,
-    encode_bilingual_role_name,
-    encode_bilingual_description,
-    is_generic_role_name,
-    role_name_query_lines,
-    select_bilingual_role_name,
-    select_bilingual_description,
-)
-from ..widgets.common import _t, make_card, make_page_title, make_scroll_area, styled_button
-from ..widgets.async_tasks import run_busy_task
+from ..widgets.common import _t, make_card, styled_button
+from ..widgets.dialog_presenter import QtDialogPresenter
 
 class CandidateDirectoryPage(QWidget):
     def __init__(
@@ -82,6 +29,7 @@ class CandidateDirectoryPage(QWidget):
         on_candidate_selected: Callable[[int | None], None] | None = None,
         on_open_workspace: Callable[[int], None] | None = None,
         on_ui_language_changed: Callable[[str], None] | None = None,
+        dialogs: Any | None = None,
     ) -> None:
         super().__init__()
         self.context = context
@@ -90,38 +38,18 @@ class CandidateDirectoryPage(QWidget):
         self.on_candidate_selected = on_candidate_selected
         self.on_open_workspace = on_open_workspace
         self.on_ui_language_changed = on_ui_language_changed
+        self.dialogs = dialogs or QtDialogPresenter()
         self.records: list[CandidateRecord] = []
         self.summaries_by_id: dict[int, CandidateSummary] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(16)
-        layout.addWidget(
-            make_page_title(
-                _t(self.ui_language, "选择求职者", "Select Candidate"),
-                _t(
-                    self.ui_language,
-                    "先选择一个已有求职者，或者新建一个人。进入之后就是这个人的专属工作台。",
-                    "Select an existing candidate or create a new one, then enter the dedicated workspace.",
-                ),
-            )
-        )
 
         left_card = make_card()
         left_layout = QVBoxLayout(left_card)
         left_layout.setContentsMargins(14, 14, 14, 14)
         left_layout.setSpacing(12)
-
-        list_hint = QLabel(
-            _t(
-                self.ui_language,
-                "选择一个求职者，然后进入这个人的工作台。",
-                "Pick a candidate, then open this candidate's workspace.",
-            )
-        )
-        list_hint.setObjectName("MutedLabel")
-        list_hint.setWordWrap(True)
-        left_layout.addWidget(list_hint)
 
         self.candidate_list = QListWidget()
         self.candidate_list.setObjectName("EntityList")
@@ -132,20 +60,19 @@ class CandidateDirectoryPage(QWidget):
         right_layout.setContentsMargins(22, 22, 22, 22)
         right_layout.setSpacing(12)
 
-        action_title = QLabel(_t(self.ui_language, "操作", "Actions"))
-        action_title.setObjectName("PageTitle")
-        action_title.setStyleSheet("font-size: 18px;")
-        action_note = QLabel(
+        self.directory_title_label = QLabel(_t(self.ui_language, "选择求职者", "Select Candidate"))
+        self.directory_title_label.setObjectName("SectionTitle")
+        self.directory_subtitle_label = QLabel(
             _t(
                 self.ui_language,
-                "启动页只负责选人。详细信息和简历编辑，都放到进入工作台之后的第一步里。",
-                "This page is only for candidate selection. Details and resume editing are in step 1.",
+                "选择或新建求职者后进入工作台。",
+                "Select or create a candidate, then open the workspace.",
             )
         )
-        action_note.setObjectName("PageSubtitle")
-        action_note.setWordWrap(True)
-        right_layout.addWidget(action_title)
-        right_layout.addWidget(action_note)
+        self.directory_subtitle_label.setObjectName("SectionSubtitle")
+        self.directory_subtitle_label.setWordWrap(True)
+        right_layout.addWidget(self.directory_title_label)
+        right_layout.addWidget(self.directory_subtitle_label)
 
         language_row = QHBoxLayout()
         language_row.setContentsMargins(0, 0, 0, 0)
@@ -171,7 +98,7 @@ class CandidateDirectoryPage(QWidget):
         right_layout.addLayout(language_row)
 
         self.open_workspace_button = styled_button(
-            _t(self.ui_language, "进入这个人的工作台", "Open Candidate Workspace"),
+            _t(self.ui_language, "进入工作台", "Open Workspace"),
             "primary",
         )
         self.new_button = styled_button(_t(self.ui_language, "新建求职者", "New Candidate"), "secondary")
@@ -190,10 +117,10 @@ class CandidateDirectoryPage(QWidget):
 
         self.new_button.clicked.connect(self._new_candidate)
         self.delete_button.clicked.connect(self._delete_candidate)
-        self.open_workspace_button.clicked.connect(self._open_workspace)
+        self.open_workspace_button.clicked.connect(self._open_default_workspace)
         self.language_combo.currentIndexChanged.connect(self._on_language_changed)
         self.candidate_list.currentItemChanged.connect(self._on_candidate_selected)
-        self.candidate_list.itemDoubleClicked.connect(lambda _: self._open_workspace())
+        self.candidate_list.itemDoubleClicked.connect(lambda _: self._open_default_workspace())
         self._update_action_state()
 
     def selected_candidate_id(self) -> int | None:
@@ -305,7 +232,7 @@ class CandidateDirectoryPage(QWidget):
         if not ok:
             return
         if not name.strip():
-            QMessageBox.warning(
+            self.dialogs.warning(
                 self,
                 _t(self.ui_language, "新建求职者", "New Candidate"),
                 _t(self.ui_language, "名称不能为空。", "Name cannot be empty."),
@@ -336,13 +263,13 @@ class CandidateDirectoryPage(QWidget):
     def _delete_candidate(self) -> None:
         candidate_id = self.selected_candidate_id()
         if candidate_id is None:
-            QMessageBox.information(
+            self.dialogs.information(
                 self,
                 _t(self.ui_language, "删除求职者", "Delete Candidate"),
                 _t(self.ui_language, "请先选择一个求职者。", "Please select a candidate first."),
             )
             return
-        answer = QMessageBox.question(
+        confirmed = self.dialogs.confirm(
             self,
             _t(self.ui_language, "删除求职者", "Delete Candidate"),
             _t(
@@ -351,7 +278,7 @@ class CandidateDirectoryPage(QWidget):
                 "Deleting this candidate will also remove resume, target roles, and related states. Continue?",
             ),
         )
-        if answer != QMessageBox.Yes:
+        if not confirmed:
             return
 
         self.context.candidates.delete(candidate_id)
@@ -363,10 +290,10 @@ class CandidateDirectoryPage(QWidget):
         if self.on_data_changed:
             self.on_data_changed()
 
-    def _open_workspace(self) -> None:
+    def _open_default_workspace(self) -> None:
         candidate_id = self.selected_candidate_id()
         if candidate_id is None:
-            QMessageBox.information(
+            self.dialogs.information(
                 self,
                 _t(self.ui_language, "进入工作台", "Open Workspace"),
                 _t(self.ui_language, "请先选择一个求职者。", "Please select a candidate first."),

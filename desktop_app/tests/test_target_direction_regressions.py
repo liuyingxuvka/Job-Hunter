@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QDialog
 
 from jobflow_desktop_app.app.pages.target_direction import TargetDirectionStep
-from jobflow_desktop_app.app.pages.workspace import CandidateWorkspacePage
+from jobflow_desktop_app.app.pages.workspace_compact import CandidateWorkspaceCompactPage
 
 try:
     from ._helpers import (
@@ -36,19 +38,25 @@ class TargetDirectionRegressionTests(unittest.TestCase):
         self.app = get_qapp()
 
     def _make_target_step(self, context) -> TargetDirectionStep:
+        dialogs = SimpleNamespace(
+            information=Mock(),
+            warning=Mock(),
+            confirm=Mock(return_value=True),
+        )
         with patch(
                 "jobflow_desktop_app.app.pages.target_direction.OpenAIRoleRecommendationService",
             return_value=Mock(),
         ):
-            step = TargetDirectionStep(context, ui_language="zh")
+            step = TargetDirectionStep(context, ui_language="zh", dialogs=dialogs)
+        step._test_dialogs = dialogs  # type: ignore[attr-defined]
         self.addCleanup(step.deleteLater)
         return step
 
-    def _make_workspace_page(self, context) -> CandidateWorkspacePage:
+    def _make_workspace_page(self, context) -> CandidateWorkspaceCompactPage:
         fake_runner = FakeJobSearchRunner()
         fake_runner.set_jobs([])
         with patch("jobflow_desktop_app.app.pages.search_results.JobSearchRunner", return_value=fake_runner):
-            page = CandidateWorkspacePage(context, ui_language="zh", on_data_changed=Mock())
+            page = CandidateWorkspaceCompactPage(context, ui_language="zh", on_data_changed=Mock())
         self.addCleanup(page.deleteLater)
         return page
 
@@ -92,7 +100,7 @@ class TargetDirectionRegressionTests(unittest.TestCase):
             self.assertEqual(step.current_profile_id, profile_id)
             self.assertEqual(step.direction_list.currentItem().data(Qt.UserRole), profile_id)
 
-    def test_async_save_preserves_current_selection_when_user_switches_profiles_before_callback(self) -> None:
+    def test_save_profile_persists_directly_and_shows_confirmation_without_ai_completion(self) -> None:
         with make_temp_context() as context:
             save_openai_settings(context, api_key="test-key", model="gpt-5-nano")
             candidate_id = create_candidate(context, name="Async Save Candidate")
@@ -113,12 +121,6 @@ class TargetDirectionRegressionTests(unittest.TestCase):
                 is_active=True,
             )
 
-            captured: dict[str, object] = {}
-
-            def fake_run_busy_task(_owner, **kwargs):
-                captured.update(kwargs)
-                return True
-
             step = self._make_target_step(context)
             step.set_candidate(candidate_id)
             step.set_ai_validation_state("Validation passed", "ready")
@@ -126,30 +128,19 @@ class TargetDirectionRegressionTests(unittest.TestCase):
             self._select_profile(step, profile_a_id)
             self.assertEqual(step.current_profile_id, profile_a_id)
 
-            with (
-                patch("jobflow_desktop_app.app.pages.target_direction.run_busy_task", side_effect=fake_run_busy_task),
-                patch.object(step, "_complete_role_name_pair", return_value=("Alpha Validation Lead", "Alpha Validation Lead")),
-                patch.object(step, "_complete_description_pair", return_value=("alpha validation", "alpha validation")),
-            ):
-                step.direction_name_input.setText("Alpha Validation Lead")
-                step.direction_reason_input.setPlainText("alpha validation")
-                QTest.mouseClick(step.save_direction_button, Qt.LeftButton)
-                process_events()
+            step.direction_name_input.setText("Alpha Validation Lead")
+            step.direction_reason_input.setPlainText("alpha validation")
+            QTest.mouseClick(step.save_direction_button, Qt.LeftButton)
+            process_events()
 
-                self.assertIn("task", captured)
-                self.assertIn("on_success", captured)
-                self.assertIn("on_finally", captured)
-
-                self._select_profile(step, profile_b_id)
-                self.assertEqual(step.current_profile_id, profile_b_id)
-
-                result = captured["task"]()
-                captured["on_success"](result)
-                captured["on_finally"]()
-                process_events()
-
-            self.assertEqual(step.current_profile_id, profile_b_id)
-            self.assertEqual(step.direction_list.currentItem().data(Qt.UserRole), profile_b_id)
+            step._test_dialogs.information.assert_called_once()  # type: ignore[attr-defined]
+            self.assertEqual(step.current_profile_id, profile_a_id)
+            self.assertEqual(step.direction_list.currentItem().data(Qt.UserRole), profile_a_id)
+            saved_profile = context.profiles.get(profile_a_id)
+            self.assertIsNotNone(saved_profile)
+            assert saved_profile is not None
+            self.assertEqual(saved_profile.name, "Alpha Validation Lead")
+            self.assertIn("alpha validation", saved_profile.keyword_focus)
             self.assertIsNotNone(context.profiles.get(profile_a_id))
             self.assertIsNotNone(context.profiles.get(profile_b_id))
 
@@ -195,6 +186,53 @@ class TargetDirectionRegressionTests(unittest.TestCase):
             self.assertTrue(step.generate_directions_button.isEnabled())
             self.assertTrue(step.generate_issue_label.isHidden())
 
+    def test_generate_role_suggestions_reports_inline_success_without_information_dialog(self) -> None:
+        with make_temp_context() as context:
+            save_openai_settings(context, api_key="test-key", model="gpt-5-nano")
+            candidate_id = create_candidate(context, name="Suggestion Candidate")
+            create_profile(context, candidate_id, name="Core A", scope_profile="core", is_active=True)
+            create_profile(context, candidate_id, name="Core B", scope_profile="core", is_active=True)
+
+            captured: dict[str, object] = {}
+
+            def fake_run_busy_task(_owner, **kwargs):
+                captured.update(kwargs)
+                return True
+
+            step = self._make_target_step(context)
+            step.set_candidate(candidate_id)
+            step.set_ai_validation_state("Validation passed", "ready")
+            step.role_recommender.recommend_roles.return_value = []  # type: ignore[attr-defined]
+            process_events()
+
+            with (
+                patch("jobflow_desktop_app.app.pages.target_direction.run_busy_task", side_effect=fake_run_busy_task),
+                patch(
+                    "jobflow_desktop_app.app.pages.target_direction_role_suggestion_flow.target_direction_recommendations.apply_role_suggestions",
+                    return_value=SimpleNamespace(added_names=["Role A", "Role B"], last_profile_id=None),
+                ),
+            ):
+                QTest.mouseClick(step.generate_directions_button, Qt.LeftButton)
+                process_events()
+
+                self.assertIn("task", captured)
+                self.assertIn("on_success", captured)
+                self.assertIn("on_finally", captured)
+
+                result = captured["task"]()
+                step.role_recommender.recommend_roles.assert_called_once()  # type: ignore[attr-defined]
+                recommend_kwargs = step.role_recommender.recommend_roles.call_args.kwargs  # type: ignore[attr-defined]
+                self.assertEqual(recommend_kwargs["max_items"], 4)
+                mix_plan = recommend_kwargs["mix_plan"]
+                self.assertEqual((mix_plan.request_core, mix_plan.request_adjacent, mix_plan.request_exploratory), (1, 2, 1))
+                captured["on_success"](result)
+                captured["on_finally"]()
+                process_events()
+
+            step._test_dialogs.information.assert_not_called()  # type: ignore[attr-defined]
+            self.assertFalse(step.generate_feedback_label.isHidden())
+            self.assertEqual(step.generate_feedback_label.text(), "AI 推荐已新增 2 个岗位。")
+
             step._set_ai_busy_state(True, "Step 2 busy right now", candidate_id=candidate_id)
             process_events()
 
@@ -208,6 +246,34 @@ class TargetDirectionRegressionTests(unittest.TestCase):
 
             self.assertTrue(step.generate_directions_button.isEnabled())
             self.assertTrue(step.generate_issue_label.isHidden())
+
+    def test_generate_role_suggestions_stops_at_role_cap_with_inline_feedback(self) -> None:
+        with make_temp_context() as context:
+            save_openai_settings(context, api_key="test-key", model="gpt-5-nano")
+            candidate_id = create_candidate(context, name="Capped Candidate")
+            for index in range(1, 13):
+                create_profile(
+                    context,
+                    candidate_id,
+                    name=f"Role {index}",
+                    scope_profile="core",
+                    is_active=True,
+                )
+
+            fake_run_busy_task = Mock(return_value=True)
+            step = self._make_target_step(context)
+            step.set_candidate(candidate_id)
+            step.set_ai_validation_state("Validation passed", "ready")
+            process_events()
+
+            with patch("jobflow_desktop_app.app.pages.target_direction.run_busy_task", side_effect=fake_run_busy_task):
+                QTest.mouseClick(step.generate_directions_button, Qt.LeftButton)
+                process_events()
+
+            fake_run_busy_task.assert_not_called()
+            step.role_recommender.recommend_roles.assert_not_called()  # type: ignore[attr-defined]
+            self.assertFalse(step.generate_feedback_label.isHidden())
+            self.assertIn("12", step.generate_feedback_label.text())
 
     def test_candidate_switch_preserves_selection_only_for_same_candidate(self) -> None:
         with make_temp_context() as context:
@@ -239,6 +305,74 @@ class TargetDirectionRegressionTests(unittest.TestCase):
             self.assertEqual(page.target_direction_step.direction_list.currentItem().data(Qt.UserRole), profile_b_id)
             self.assertNotEqual(page.target_direction_step.current_profile_id, profile_a1_id)
             self.assertNotEqual(page.target_direction_step.current_profile_id, profile_a2_id)
+
+    def test_manual_add_requires_scope_profile_selection(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context, name="Manual Scope Candidate")
+            step = self._make_target_step(context)
+            step.set_candidate(candidate_id)
+            process_events()
+
+            fake_dialog = Mock()
+            fake_dialog.exec.return_value = QDialog.Accepted
+            fake_dialog.values.return_value = ("Localization Strategy Manager", "supports vendor strategy")
+            fake_dialog.selected_scope_profile.return_value = ""
+
+            with patch(
+                "jobflow_desktop_app.app.pages.target_direction.ManualRoleInputDialog",
+                return_value=fake_dialog,
+            ):
+                QTest.mouseClick(step.add_direction_button, Qt.LeftButton)
+                process_events()
+
+            step._test_dialogs.warning.assert_called()  # type: ignore[attr-defined]
+            self.assertEqual(context.profiles.list_for_candidate(candidate_id), [])
+
+    def test_manual_add_ai_enrichment_uses_selected_scope_and_persists_it(self) -> None:
+        with make_temp_context() as context:
+            save_openai_settings(context, api_key="test-key", model="gpt-5-nano")
+            candidate_id = create_candidate(context, name="Manual Enrich Candidate")
+            step = self._make_target_step(context)
+            step.set_candidate(candidate_id)
+            step.set_ai_validation_state("Validation passed", "ready")
+            process_events()
+
+            fake_dialog = Mock()
+            fake_dialog.exec.return_value = QDialog.Accepted
+            fake_dialog.values.return_value = ("Localization Strategy Manager", "supports vendor strategy")
+            fake_dialog.selected_scope_profile.return_value = "exploratory"
+
+            step.role_recommender.enrich_manual_role.return_value = SimpleNamespace(  # type: ignore[attr-defined]
+                name="Localization Strategy Manager",
+                name_zh="本地化战略经理",
+                name_en="Localization Strategy Manager",
+                description_zh="负责本地化战略和供应商协同。",
+                description_en="Owns localization strategy and vendor coordination.",
+                scope_profile="core",
+            )
+
+            def fake_run_busy_task(_owner, **kwargs):
+                result = kwargs["task"]()
+                kwargs["on_success"](result)
+                kwargs["on_finally"]()
+                return True
+
+            with (
+                patch(
+                    "jobflow_desktop_app.app.pages.target_direction.ManualRoleInputDialog",
+                    return_value=fake_dialog,
+                ),
+                patch("jobflow_desktop_app.app.pages.target_direction.run_busy_task", side_effect=fake_run_busy_task),
+            ):
+                QTest.mouseClick(step.add_direction_button, Qt.LeftButton)
+                process_events()
+
+            step.role_recommender.enrich_manual_role.assert_called_once()  # type: ignore[attr-defined]
+            enrich_kwargs = step.role_recommender.enrich_manual_role.call_args.kwargs  # type: ignore[attr-defined]
+            self.assertEqual(enrich_kwargs["desired_scope_profile"], "exploratory")
+            saved_profiles = context.profiles.list_for_candidate(candidate_id)
+            self.assertEqual(len(saved_profiles), 1)
+            self.assertEqual(saved_profiles[0].scope_profile, "exploratory")
 
 
 if __name__ == "__main__":  # pragma: no cover

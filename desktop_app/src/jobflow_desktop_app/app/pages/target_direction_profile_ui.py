@@ -22,6 +22,7 @@ def populate_direction_list(
     target_profile_id: int | None,
     prepare_profile: Callable[[Any], Any],
     display_role_name: Callable[[Any], str],
+    display_scope_label: Callable[[Any], str],
     untitled_label: str,
 ) -> tuple[list[Any], int | None]:
     prepared_profiles: list[Any] = []
@@ -33,6 +34,9 @@ def populate_direction_list(
         profile = prepare_profile(raw_profile)
         prepared_profiles.append(profile)
         display_name = display_role_name(profile) or untitled_label
+        scope_label = str(display_scope_label(profile) or "").strip()
+        if scope_label:
+            display_name = f"[{scope_label}] {display_name}"
         item = QListWidgetItem(display_name)
         item.setData(Qt.UserRole, getattr(profile, "profile_id", None))
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
@@ -58,8 +62,8 @@ def load_profile_form(
     profile_meta_label.setText(
         _t(
             ui_language,
-            f"当前岗位：{display_name}",
-            f"Current role: {display_name}",
+            f"当前岗位 · {display_name}",
+            f"Role · {display_name}",
         )
     )
 
@@ -78,8 +82,8 @@ def clear_profile_form(
         profile_meta_label.setText(
             _t(
                 ui_language,
-                "当前还没有目标岗位。你可以点击“AI 推荐岗位”，或者手动添加一个岗位。",
-                "No target role yet. Click AI recommendation or add one manually.",
+                "暂无目标岗位，可用 AI 推荐或手动添加。",
+                "No target roles yet. Use AI recommend or add one manually.",
             )
         )
 

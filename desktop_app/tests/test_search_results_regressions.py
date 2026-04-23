@@ -10,6 +10,7 @@ from PySide6.QtTest import QTest
 
 from jobflow_desktop_app.app.pages.search_results import SearchResultsStep
 from jobflow_desktop_app.db.repositories.search_runtime import JobReviewStateRepository
+from jobflow_desktop_app.search.orchestration.job_search_runner import JobSearchRunner
 from jobflow_desktop_app.search.state.search_progress_state import (
     SearchProgress,
     SearchStats,
@@ -358,6 +359,190 @@ class SearchResultsRegressionTests(unittest.TestCase):
                     self.assertIn(expected_text, detail_text)
                     self.assertIn(expected_text, dialog_text or detail_text)
                     self.assertNotIn("已运行", detail_text)
+
+    def test_reloading_after_new_run_keeps_old_rows_and_status_marks(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = self._make_candidate_bundle(
+                context,
+                candidate_name="Demo Candidate",
+                profile_name="Localization Manager",
+                scope_profile="localization_ops",
+            )
+            runner = JobSearchRunner(context.paths.runtime_dir.parent)
+            run_dir = context.paths.runtime_dir / "search_runs" / f"candidate_{candidate_id}"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            runtime_config = {
+                "search": {"allowPlatformListings": False, "platformListingDomains": ["linkedin.com"]},
+                "filters": {
+                    "excludeUnavailableLinks": True,
+                    "excludeAggregatorLinks": True,
+                    "preferDirectEmployerSite": True,
+                },
+                "analysis": {
+                    "postVerifyEnabled": False,
+                    "postVerifyRequireChecked": True,
+                    "recommendScoreThreshold": 50,
+                },
+                "output": {"recommendedMode": "replace"},
+            }
+            run1 = runner.runtime_mirror.create_run(
+                candidate_id=candidate_id,
+                run_dir=run_dir,
+                status="success",
+                current_stage="done",
+                started_at="2026-04-16T10:00:00+00:00",
+            )
+            run2 = runner.runtime_mirror.create_run(
+                candidate_id=candidate_id,
+                run_dir=run_dir,
+                status="success",
+                current_stage="done",
+                started_at="2026-04-16T11:00:00+00:00",
+            )
+            runner.runtime_mirror.update_configs(run1, runtime_config=runtime_config)
+            runner.runtime_mirror.update_configs(run2, runtime_config=runtime_config)
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=run1,
+                candidate_id=candidate_id,
+                job_bucket="all",
+                jobs=[
+                    {
+                        "title": "Localization Program Manager",
+                        "company": "Lingo Corp",
+                        "location": "Berlin",
+                        "url": "https://lingo.example/jobs/1",
+                        "canonicalUrl": "https://lingo.example/jobs/1",
+                        "dateFound": "2026-04-16T10:00:00Z",
+                        "jd": {"applyUrl": "https://lingo.example/jobs/1/apply"},
+                        "analysis": {
+                            "overallScore": 74,
+                            "fitLevelCn": "中推荐",
+                            "recommend": True,
+                            "boundTargetRole": {
+                                "profileId": 1,
+                                "roleId": "profile:1",
+                                "nameZh": "本地化项目经理",
+                                "nameEn": "Localization Program Manager",
+                                "displayName": "Localization Program Manager",
+                                "targetRoleText": "Localization Program Manager",
+                                "score": 74,
+                            },
+                        },
+                    }
+                ],
+            )
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=run1,
+                candidate_id=candidate_id,
+                job_bucket="recommended",
+                jobs=[
+                    {
+                        "title": "Localization Program Manager",
+                        "company": "Lingo Corp",
+                        "location": "Berlin",
+                        "url": "https://lingo.example/jobs/1",
+                        "canonicalUrl": "https://lingo.example/jobs/1",
+                        "dateFound": "2026-04-16T10:00:00Z",
+                        "jd": {"applyUrl": "https://lingo.example/jobs/1/apply"},
+                        "analysis": {
+                            "overallScore": 74,
+                            "fitLevelCn": "中推荐",
+                            "recommend": True,
+                            "boundTargetRole": {
+                                "roleId": "profile:1",
+                                "nameZh": "本地化项目经理",
+                                "nameEn": "Localization Program Manager",
+                                "displayName": "Localization Program Manager",
+                                "targetRoleText": "Localization Program Manager",
+                                "score": 74,
+                            },
+                        },
+                    }
+                ],
+            )
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=run2,
+                candidate_id=candidate_id,
+                job_bucket="all",
+                jobs=[
+                    {
+                        "title": "Senior Localization Operations Manager",
+                        "company": "Translate Co",
+                        "location": "Munich",
+                        "url": "https://translate.example/jobs/2",
+                        "canonicalUrl": "https://translate.example/jobs/2",
+                        "dateFound": "2026-04-16T11:00:00Z",
+                        "jd": {"applyUrl": "https://translate.example/jobs/2/apply"},
+                        "analysis": {
+                            "overallScore": 82,
+                            "fitLevelCn": "高推荐",
+                            "recommend": True,
+                            "boundTargetRole": {
+                                "profileId": 1,
+                                "roleId": "profile:1",
+                                "nameZh": "本地化项目经理",
+                                "nameEn": "Localization Program Manager",
+                                "displayName": "Localization Program Manager",
+                                "targetRoleText": "Localization Program Manager",
+                                "score": 82,
+                            },
+                        },
+                    }
+                ],
+            )
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=run2,
+                candidate_id=candidate_id,
+                job_bucket="recommended",
+                jobs=[
+                    {
+                        "title": "Senior Localization Operations Manager",
+                        "company": "Translate Co",
+                        "location": "Munich",
+                        "url": "https://translate.example/jobs/2",
+                        "canonicalUrl": "https://translate.example/jobs/2",
+                        "dateFound": "2026-04-16T11:00:00Z",
+                        "jd": {"applyUrl": "https://translate.example/jobs/2/apply"},
+                        "analysis": {
+                            "overallScore": 82,
+                            "fitLevelCn": "高推荐",
+                            "recommend": True,
+                            "boundTargetRole": {
+                                "profileId": 1,
+                                "roleId": "profile:1",
+                                "nameZh": "本地化项目经理",
+                                "nameEn": "Localization Program Manager",
+                                "displayName": "Localization Program Manager",
+                                "targetRoleText": "Localization Program Manager",
+                                "score": 82,
+                            },
+                        },
+                    }
+                ],
+            )
+            JobReviewStateRepository(context.database).replace_candidate_review_state(
+                candidate_id=candidate_id,
+                status_by_job_key={"https://lingo.example/jobs/1": "focus"},
+                hidden_job_keys=set(),
+            )
+
+            step = self._make_step(context, runner)
+            step.set_candidate(context.candidates.get(candidate_id))
+            process_events()
+
+            self.assertEqual(step.table.rowCount(), 2)
+            titles = {step.table.item(row, 0).text() for row in range(step.table.rowCount())}
+            self.assertEqual(
+                titles,
+                {"Localization Program Manager", "Senior Localization Operations Manager"},
+            )
+            focus_row = next(
+                row
+                for row in range(step.table.rowCount())
+                if step.table.item(row, 0).text() == "Localization Program Manager"
+            )
+            focus_combo = step.table.cellWidget(focus_row, 7)
+            self.assertEqual(focus_combo.currentText(), "重点")
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -46,6 +46,26 @@ class TargetRoleSuggestion:
         return self.description_zh or self.description_en
 
 
+@dataclass(frozen=True)
+class RoleRecommendationMixPlan:
+    total_cap: int = 12
+    current_total: int = 0
+    current_core: int = 0
+    current_adjacent: int = 0
+    current_exploratory: int = 0
+    request_core: int = 0
+    request_adjacent: int = 0
+    request_exploratory: int = 0
+
+    @property
+    def request_total(self) -> int:
+        return self.request_core + self.request_adjacent + self.request_exploratory
+
+    @property
+    def remaining_capacity(self) -> int:
+        return max(0, self.total_cap - self.current_total)
+
+
 class RoleRecommendationError(RuntimeError):
     pass
 
@@ -110,6 +130,7 @@ class CandidateSemanticProfile:
 
 __all__ = [
     "CandidateSemanticProfile",
+    "RoleRecommendationMixPlan",
     "ResumeReadResult",
     "RoleRecommendationError",
     "TargetRoleSuggestion",

@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from PySide6.QtWidgets import QDialog, QMessageBox, QWidget
+from PySide6.QtWidgets import QDialog, QWidget
 
 from ...db.repositories.candidates import CandidateRecord
-from ...ai.role_recommendations import OpenAIRoleRecommendationService, RoleRecommendationError
+from ...ai.role_recommendations import (
+    OpenAIRoleRecommendationService,
+    RoleRecommendationError,
+    normalize_scope_profile,
+)
 from ..context import AppContext
 from ..widgets.common import _t
 from . import target_direction_profile_completion
@@ -28,13 +32,14 @@ def start_manual_add_flow(
     canonical_role_name: Callable[[str, str], str],
     is_generic_role_name: Callable[[str], bool],
     dialog_factory: Callable[..., Any],
+    show_information: Callable[[str, str], None],
+    show_warning: Callable[[str, str], None],
     candidate_still_current: Callable[[], bool],
     allow_ai_actions: Callable[[], bool],
     run_busy_task_fn: Callable[..., bool],
 ) -> None:
     if current_candidate is None or current_candidate.candidate_id is None:
-        QMessageBox.information(
-            owner,
+        show_information(
             _t(ui_language, "手动添加岗位", "Add Role Manually"),
             _t(ui_language, "请先选择一个求职者。", "Please select a candidate first."),
         )
@@ -45,11 +50,23 @@ def start_manual_add_flow(
         return
 
     direction_name, rough_description = dialog.values()
+    selected_scope_profile = normalize_scope_profile(
+        dialog.selected_scope_profile() if hasattr(dialog, "selected_scope_profile") else ""
+    )
     if not direction_name:
-        QMessageBox.warning(
-            owner,
+        show_warning(
             _t(ui_language, "手动添加岗位", "Add Role Manually"),
             _t(ui_language, "岗位名称不能为空。", "Role name cannot be empty."),
+        )
+        return
+    if not selected_scope_profile:
+        show_warning(
+            _t(ui_language, "手动添加岗位", "Add Role Manually"),
+            _t(
+                ui_language,
+                "请先选择这个岗位属于核心、相邻还是探索方向。",
+                "Please choose whether this role is core, adjacent, or exploratory first.",
+            ),
         )
         return
 
@@ -69,6 +86,7 @@ def start_manual_add_flow(
                     settings=settings,
                     role_name=direction_name,
                     rough_description=rough_description,
+                    desired_scope_profile=selected_scope_profile,
                     api_base_url=api_base_url,
                 )
             except RoleRecommendationError as exc:
@@ -79,13 +97,13 @@ def start_manual_add_flow(
             role_name_en = (suggestion.name_en or suggestion.name).strip()
             description_zh = suggestion.description_zh.strip()
             description_en = suggestion.description_en.strip()
-            scope_profile = suggestion.scope_profile or ""
+            scope_profile = selected_scope_profile
         else:
             role_name_zh = direction_name if ui_language != "en" else ""
             role_name_en = direction_name if ui_language == "en" else ""
             description_zh = rough_description if ui_language != "en" else ""
             description_en = rough_description if ui_language == "en" else ""
-            scope_profile = ""
+            scope_profile = selected_scope_profile
 
         completed = target_direction_profile_completion.complete_profile_text(
             role_name_zh=role_name_zh,
@@ -127,8 +145,7 @@ def start_manual_add_flow(
             is_generic_role_name=is_generic_role_name,
         )
         if prepared.is_generic:
-            QMessageBox.warning(
-                owner,
+            show_warning(
                 dialog_title,
                 _t(
                     ui_language,
@@ -152,8 +169,7 @@ def start_manual_add_flow(
             on_data_changed()
 
         if enrich_error:
-            QMessageBox.information(
-                owner,
+            show_information(
                 dialog_title,
                 _t(
                     ui_language,
@@ -192,8 +208,7 @@ def start_manual_add_flow(
         if not candidate_still_current():
             return
         if not isinstance(result, dict):
-            QMessageBox.warning(
-                owner,
+            show_warning(
                 dialog_title,
                 _t(ui_language, "返回结果格式异常。", "Unexpected result payload."),
             )
@@ -201,8 +216,7 @@ def start_manual_add_flow(
         _persist_payload(result)
 
     def _on_error(exc: Exception) -> None:
-        QMessageBox.warning(
-            owner,
+        show_warning(
             dialog_title,
             _t(
                 ui_language,

@@ -39,6 +39,8 @@ def populate_job_row(
     detail_url: str,
     status_codes: tuple[str, ...],
     status_by_job_key: dict[str, str],
+    display_job_title: Callable[[Any], str],
+    display_job_location: Callable[[Any], str],
     display_target_role: Callable[[Any], str],
     format_score: Callable[[Any], str],
     make_link_cell: Callable[[str, bool], QWidget],
@@ -48,12 +50,12 @@ def populate_job_row(
     on_status_changed: Callable[[str, str, QComboBox | None], None],
 ) -> None:
     table.insertRow(row_index)
-    title_item = QTableWidgetItem(str(getattr(job, "title", "") or ""))
+    title_item = QTableWidgetItem(display_job_title(job))
     title_item.setData(Qt.UserRole, job_key)
     table.setItem(row_index, 0, title_item)
     table.setItem(row_index, 1, QTableWidgetItem(display_target_role(job)))
     table.setItem(row_index, 2, QTableWidgetItem(str(getattr(job, "company", "") or "")))
-    table.setItem(row_index, 3, QTableWidgetItem(str(getattr(job, "location", "") or "")))
+    table.setItem(row_index, 3, QTableWidgetItem(display_job_location(job)))
     table.setCellWidget(row_index, 4, make_link_cell(detail_url, True))
     table.setItem(row_index, 5, QTableWidgetItem(str(getattr(job, "date_found", "") or "")))
     table.setItem(row_index, 6, QTableWidgetItem(format_score(job)))

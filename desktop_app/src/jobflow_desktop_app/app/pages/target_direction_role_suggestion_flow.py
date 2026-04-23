@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from PySide6.QtWidgets import QMessageBox, QWidget
+from PySide6.QtWidgets import QWidget
 
 from ...db.repositories.candidates import CandidateRecord
 from ...ai.role_recommendations import OpenAIRoleRecommendationService, RoleRecommendationError
@@ -22,14 +22,16 @@ def start_role_suggestion_flow(
     reload_profiles: Callable[[int | None], None],
     on_data_changed: Callable[[], None] | None,
     set_ai_busy_state: Callable[[bool, str, int | None], None],
+    set_generation_feedback: Callable[[str], None],
     canonical_role_name: Callable[[str, str], str],
     ai_validation_issue: Callable[[], str],
     candidate_still_current: Callable[[], bool],
     run_busy_task_fn: Callable[..., bool],
+    show_information: Callable[[str, str], None],
+    show_warning: Callable[[str, str], None],
 ) -> None:
     if current_candidate is None or current_candidate.candidate_id is None:
-        QMessageBox.information(
-            owner,
+        show_information(
             _t(ui_language, "AI 推荐岗位", "AI Recommend Roles"),
             _t(ui_language, "请先选择一个求职者。", "Please select a candidate first."),
         )
@@ -37,8 +39,7 @@ def start_role_suggestion_flow(
 
     settings = context.settings.get_effective_openai_settings()
     if not settings.api_key.strip():
-        QMessageBox.warning(
-            owner,
+        show_warning(
             _t(ui_language, "AI 推荐岗位", "AI Recommend Roles"),
             _t(
                 ui_language,
@@ -50,8 +51,7 @@ def start_role_suggestion_flow(
 
     ai_issue = str(ai_validation_issue() or "").strip()
     if ai_issue:
-        QMessageBox.warning(
-            owner,
+        show_warning(
             _t(ui_language, "AI 推荐岗位", "AI Recommend Roles"),
             ai_issue,
         )
@@ -63,6 +63,16 @@ def start_role_suggestion_flow(
         existing_profiles,
         canonical_role_name=canonical_role_name,
     )
+    mix_plan = target_direction_recommendations.build_role_recommendation_mix_plan(existing_profiles)
+    if mix_plan.request_total <= 0:
+        set_generation_feedback(
+            _t(
+                ui_language,
+                f"当前目标岗位已达到建议上限 {mix_plan.total_cap} 个，请先删除一些岗位再继续推荐。",
+                f"Target roles already reached the suggested cap of {mix_plan.total_cap}. Delete some roles before asking for more.",
+            )
+        )
+        return
 
     generate_button.setEnabled(False)
     dialog_title = _t(ui_language, "AI 推荐岗位", "AI Recommend Roles")
@@ -71,6 +81,7 @@ def start_role_suggestion_flow(
         "AI 正在生成岗位推荐，请稍候...",
         "AI is generating role recommendations, please wait...",
     )
+    set_generation_feedback("")
     set_ai_busy_state(
         True,
         _t(
@@ -86,8 +97,9 @@ def start_role_suggestion_flow(
             current_candidate,
             settings,
             api_base_url=context.settings.get_openai_base_url(),
-            max_items=2 if existing_role_context else 3,
+            max_items=mix_plan.request_total,
             existing_roles=existing_role_context,
+            mix_plan=mix_plan,
         )
 
     def _on_success(result: Any) -> None:
@@ -108,30 +120,28 @@ def start_role_suggestion_flow(
             on_data_changed()
 
         if applied.added_names:
-            QMessageBox.information(
-                owner,
-                dialog_title,
-                _t(ui_language, "这次已新增这些岗位：\n- ", "Added these roles this time:\n- ")
-                + "\n- ".join(applied.added_names),
+            set_generation_feedback(
+                _t(
+                    ui_language,
+                    f"AI 推荐已新增 {len(applied.added_names)} 个岗位。",
+                    f"AI recommendation added {len(applied.added_names)} roles.",
+                )
             )
             return
 
-        QMessageBox.information(
-            owner,
-            dialog_title,
+        set_generation_feedback(
             _t(
                 ui_language,
-                "这次返回的岗位和现有列表重复，没有新增内容。你可以再点一次，或者手动补一个岗位。",
+                "这次返回的岗位和现有列表重复，没有新增内容。",
                 "Returned roles duplicate existing ones, so nothing new was added. Try again or add one manually.",
-            ),
+            )
         )
 
     def _on_error(exc: Exception) -> None:
         if isinstance(exc, RoleRecommendationError):
-            QMessageBox.warning(owner, dialog_title, str(exc))
+            show_warning(dialog_title, str(exc))
             return
-        QMessageBox.warning(
-            owner,
+        show_warning(
             dialog_title,
             _t(
                 ui_language,

@@ -1,87 +1,39 @@
 from __future__ import annotations
 
-import json
 import os
-import re
-import sys
-import threading
-import time
-from datetime import datetime
 from html import escape
 from pathlib import Path
-from typing import Any, Callable
-from urllib.parse import urlparse
+from typing import Callable
 
-from PySide6.QtCore import QObject, QThread, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
-    QComboBox,
     QDialog,
-    QFileDialog,
-    QFormLayout,
-    QFrame,
-    QHeaderView,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QInputDialog,
-    QListWidget,
-    QListWidgetItem,
     QMessageBox,
-    QPlainTextEdit,
-    QProgressDialog,
-    QPushButton,
-    QScrollArea,
     QStackedWidget,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from ...db.repositories.candidates import CandidateRecord, CandidateSummary
-from ...db.repositories.profiles import SearchProfileRecord
-from ...db.repositories.settings import OpenAISettings
+from ...db.repositories.candidates import CandidateRecord
+from ..theme import RUNTIME_STATUS_DOT_COLORS, UI_COLORS
 from ..context import AppContext
-from ...search.orchestration import JobSearchResult, JobSearchRunner
-from ...common.location_codec import (
-    decode_base_location_struct,
-    decode_preferred_locations_struct,
-    dedup_location_entries,
-    encode_base_location_struct,
-    encode_preferred_locations_struct,
-    location_entry_display,
-    location_type_suggestions,
-    normalize_location_entry,
-    preferred_locations_plain_text,
-)
-from ...ai.model_catalog import fetch_available_models, filter_response_usable_models
-from ...ai.role_recommendations import (
-    OpenAIRoleRecommendationService,
-    RoleRecommendationError,
-    decode_bilingual_role_name,
-    decode_bilingual_description,
-    description_for_prompt,
-    encode_bilingual_role_name,
-    encode_bilingual_description,
-    is_generic_role_name,
-    role_name_query_lines,
-    select_bilingual_role_name,
-    select_bilingual_description,
-)
-from ..widgets.common import _t, make_card, make_page_title, make_scroll_area, styled_button
-from ..widgets.async_tasks import run_busy_task
+from ..widgets.common import _t, make_card, make_scroll_area, styled_button
 from ..dialogs.ai_settings import AISettingsDialog
 from .candidate_basics import CandidateBasicsStep
-from .search_results import SearchResultsStep
+from .search_results_compact import SearchResultsCompactStep
 from .target_direction import TargetDirectionStep
 
 SUPPORT_PAYPAL_EMAIL_ENV = "JOBFLOW_SUPPORT_PAYPAL_EMAIL"
 SUPPORT_PAYPAL_EMAIL_SETTING_KEY = "support_paypal_email"
 SUPPORT_PAYPAL_EMAIL_DEFAULT = "liu.yingxu.vka@gmail.com"
 
-class CandidateWorkspacePage(QWidget):
+
+class CandidateWorkspaceCompactPage(QWidget):
+    """Current candidate workspace UI."""
+
     def __init__(
         self,
         context: AppContext,
@@ -99,125 +51,32 @@ class CandidateWorkspacePage(QWidget):
         self.on_ui_language_changed = on_ui_language_changed
         self.on_ai_settings_changed = on_ai_settings_changed
         self._current_candidate: CandidateRecord | None = None
-        self.step_buttons: list[QPushButton] = []
+        self.step_buttons: list[QWidget] = []
         self.step_titles = [
             _t(self.ui_language, "基础信息", "Basics"),
-            _t(self.ui_language, "目标岗位设立", "Target Roles"),
-            _t(self.ui_language, "岗位搜索结果", "Search Results"),
+            _t(self.ui_language, "目标岗位", "Target Roles"),
+            _t(self.ui_language, "岗位搜索", "Job Search"),
         ]
 
         outer_layout = QVBoxLayout(self)
-        outer_layout.setContentsMargins(20, 20, 20, 20)
-        outer_layout.setSpacing(16)
-        outer_layout.addWidget(
-            make_page_title(
-                _t(self.ui_language, "求职者工作台", "Candidate Workspace"),
-                _t(
-                    self.ui_language,
-                    "进入之后就是这个人的单独工作台。先填基础信息，再设定目标岗位方向，然后直接查看岗位搜索结果。",
-                    "This is the candidate-specific workspace. Fill basics, set target roles, then review search results.",
-                ),
-            )
-        )
+        outer_layout.setContentsMargins(16, 8, 16, 12)
+        outer_layout.setSpacing(10)
 
         self.body_stack = QStackedWidget()
         outer_layout.addWidget(self.body_stack, 1)
 
-        self.empty_page = make_card()
-        empty_layout = QVBoxLayout(self.empty_page)
-        empty_layout.setContentsMargins(24, 24, 24, 24)
-        empty_layout.setSpacing(12)
-        empty_title = QLabel(_t(self.ui_language, "还没有选中求职者", "No Candidate Selected"))
-        empty_title.setObjectName("PageTitle")
-        empty_subtitle = QLabel(
-            _t(
-                self.ui_language,
-                "请先在启动页选择一个求职者，然后再进入这个工作台。",
-                "Select a candidate first, then enter this workspace.",
-            )
-        )
-        empty_subtitle.setObjectName("PageSubtitle")
-        empty_subtitle.setWordWrap(True)
-        self.go_candidates_button = styled_button(
-            _t(self.ui_language, "返回求职者选择", "Back to Candidates"),
-            "primary",
-        )
-        empty_layout.addWidget(empty_title)
-        empty_layout.addWidget(empty_subtitle)
-        empty_layout.addWidget(self.go_candidates_button, 0, Qt.AlignLeft)
-        empty_layout.addStretch(1)
-
+        self.empty_page = self._build_empty_page()
         self.content_page = QWidget()
+        self.content_page.setObjectName("CompactWorkspaceContent")
         content_layout = QVBoxLayout(self.content_page)
         content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(16)
+        content_layout.setSpacing(10)
 
-        self.hero_card = make_card()
-        self.hero_card.setObjectName("WorkspaceHero")
-        hero_layout = QHBoxLayout(self.hero_card)
-        hero_layout.setContentsMargins(22, 20, 22, 20)
-        hero_layout.setSpacing(18)
-
-        hero_text = QWidget()
-        hero_text_layout = QVBoxLayout(hero_text)
-        hero_text_layout.setContentsMargins(0, 0, 0, 0)
-        hero_text_layout.setSpacing(6)
-        self.hero_eyebrow = QLabel(_t(self.ui_language, "当前求职者", "Current Candidate"))
-        self.hero_eyebrow.setObjectName("HeroEyebrow")
-        self.hero_title = QLabel(_t(self.ui_language, "未选择求职者", "No Candidate Selected"))
-        self.hero_title.setObjectName("HeroTitle")
-        self.hero_meta = QLabel("")
-        self.hero_meta.setObjectName("HeroMeta")
-        self.hero_meta.setWordWrap(True)
-        self.ai_validation_status_label = QLabel("")
-        self.ai_validation_status_label.setObjectName("HeroAiStatus")
-        self.ai_validation_status_label.setWordWrap(True)
-        hero_text_layout.addWidget(self.hero_eyebrow)
-        hero_text_layout.addWidget(self.hero_title)
-        hero_text_layout.addWidget(self.hero_meta)
-        hero_text_layout.addWidget(self.ai_validation_status_label)
-        hero_layout.addWidget(hero_text, 1)
-
-        self.switch_candidate_button = styled_button(
-            _t(self.ui_language, "更换求职者", "Switch Candidate"),
-            "hero",
-        )
-        self.workspace_settings_button = styled_button(
-            _t(self.ui_language, "设置 / Settings", "Settings / 设置"),
-            "hero",
-        )
-        self.support_button = styled_button(
-            _t(self.ui_language, "☕ 支持开发", "☕ Support Dev"),
-            "hero",
-        )
-        self.support_button.setToolTip(
-            _t(
-                self.ui_language,
-                "如果这个工具帮到了你，可以给开发者买杯咖啡。",
-                "If this tool helps you, you can buy the developer a coffee.",
-            )
-        )
-        hero_actions = QWidget()
-        hero_actions_layout = QVBoxLayout(hero_actions)
-        hero_actions_layout.setContentsMargins(0, 0, 0, 0)
-        hero_actions_layout.setSpacing(8)
-        hero_actions_layout.addWidget(self.support_button)
-        hero_actions_layout.addWidget(self.workspace_settings_button)
-        hero_actions_layout.addWidget(self.switch_candidate_button)
-        hero_actions_layout.addStretch(1)
-        hero_layout.addWidget(hero_actions, 0, Qt.AlignTop)
+        self.hero_card = self._build_candidate_strip()
         content_layout.addWidget(self.hero_card)
 
-        step_card = make_card()
-        step_layout = QHBoxLayout(step_card)
-        step_layout.setContentsMargins(14, 14, 14, 14)
-        step_layout.setSpacing(10)
-        for index, title in enumerate(self.step_titles):
-            button = styled_button(f"{index + 1}. {title}", "step")
-            button.clicked.connect(lambda _checked=False, step_index=index: self._set_step(step_index))
-            self.step_buttons.append(button)
-            step_layout.addWidget(button)
-        content_layout.addWidget(step_card)
+        self.step_bar = self._build_step_bar()
+        content_layout.addWidget(self.step_bar)
 
         self.step_stack = QStackedWidget()
         self.basics_step = CandidateBasicsStep(
@@ -225,14 +84,17 @@ class CandidateWorkspacePage(QWidget):
             ui_language=self.ui_language,
             on_data_changed=on_data_changed,
             on_candidate_saved=self._on_candidate_saved,
+            compact_layout=True,
+            include_email=False,
         )
         self.target_direction_step = TargetDirectionStep(
             context,
             ui_language=self.ui_language,
             on_data_changed=on_data_changed,
             on_busy_state_changed=self._on_target_ai_busy_state_changed,
+            show_page_title=False,
         )
-        self.results_step = SearchResultsStep(context, ui_language=self.ui_language)
+        self.results_step = SearchResultsCompactStep(context, ui_language=self.ui_language)
         self.step_stack.addWidget(make_scroll_area(self.basics_step))
         self.step_stack.addWidget(make_scroll_area(self.target_direction_step))
         self.step_stack.addWidget(make_scroll_area(self.results_step))
@@ -245,7 +107,55 @@ class CandidateWorkspacePage(QWidget):
         self.switch_candidate_button.clicked.connect(self._go_back_to_candidates)
         self.workspace_settings_button.clicked.connect(self._open_ai_settings)
         self.support_button.clicked.connect(self._show_support_dialog)
-        self._set_step(0)
+
+        self.setStyleSheet(
+            f"""
+            QFrame#CompactWorkspaceHero {{
+              background: qlineargradient(
+                x1:0, y1:0, x2:1, y2:1,
+                stop:0 {UI_COLORS["accent_primary"]},
+                stop:1 {UI_COLORS["accent_secondary"]}
+              );
+              border-radius: 16px;
+              border: none;
+            }}
+            QFrame#CompactWorkspaceHero QLabel,
+            QFrame#CompactWorkspaceHero QWidget {{
+              background: transparent;
+            }}
+            QLabel#CompactWorkspaceName {{
+              color: {UI_COLORS["text_inverse"]};
+              font-size: 18px;
+              font-weight: 700;
+            }}
+            QLabel#CompactWorkspaceMeta {{
+              color: {UI_COLORS["text_soft"]};
+              font-size: 12px;
+            }}
+            QPushButton#CompactStepButton {{
+              min-height: 30px;
+              padding: 2px 10px;
+              border-radius: 8px;
+              border: 1px solid {UI_COLORS["border"]};
+              background: {UI_COLORS["bg_card"]};
+              color: {UI_COLORS["text_muted"]};
+              font-size: 12px;
+              font-weight: 700;
+            }}
+            QPushButton#CompactStepButton[activeStep="true"] {{
+              background: {UI_COLORS["accent_primary"]};
+              color: {UI_COLORS["text_inverse"]};
+              border: 1px solid {UI_COLORS["accent_primary"]};
+            }}
+            QPushButton#CompactToolbarButton {{
+              min-height: 30px;
+              padding: 2px 10px;
+              border-radius: 8px;
+            }}
+            """
+        )
+
+        self._set_step(2)
         self.set_ai_validation_status(
             _t(self.ui_language, "AI 状态：等待验证", "AI status: waiting for validation"),
             "idle",
@@ -259,33 +169,106 @@ class CandidateWorkspacePage(QWidget):
             return None
         return int(candidate.candidate_id)
 
+    def _build_empty_page(self) -> QWidget:
+        page = make_card()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(10)
+
+        title = QLabel(_t(self.ui_language, "还没有选中求职者", "No Candidate Selected"))
+        title.setObjectName("PageTitle")
+        subtitle = QLabel(
+            _t(
+                self.ui_language,
+                "请先在启动页选择求职者。",
+                "Select a candidate on the landing page first.",
+            )
+        )
+        subtitle.setObjectName("PageSubtitle")
+        subtitle.setWordWrap(True)
+        self.go_candidates_button = styled_button(
+            _t(self.ui_language, "返回求职者选择", "Back to Candidates"),
+            "primary",
+        )
+
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+        layout.addWidget(self.go_candidates_button, 0, Qt.AlignLeft)
+        layout.addStretch(1)
+        return page
+
+    def _build_candidate_strip(self) -> QWidget:
+        hero = make_card()
+        hero.setObjectName("CompactWorkspaceHero")
+        layout = QHBoxLayout(hero)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(12)
+
+        left = QVBoxLayout()
+        left.setContentsMargins(0, 0, 0, 0)
+        left.setSpacing(4)
+        self.hero_title = QLabel(_t(self.ui_language, "未选择求职者", "No Candidate Selected"))
+        self.hero_title.setObjectName("CompactWorkspaceName")
+        self.hero_meta = QLabel("")
+        self.hero_meta.setObjectName("CompactWorkspaceMeta")
+        self.hero_meta.setWordWrap(True)
+        self.ai_validation_status_label = QLabel("")
+        self.ai_validation_status_label.setObjectName("CompactWorkspaceMeta")
+        self.ai_validation_status_label.setWordWrap(True)
+        left.addWidget(self.hero_title)
+        left.addWidget(self.hero_meta)
+        left.addWidget(self.ai_validation_status_label)
+        layout.addLayout(left, 1)
+
+        actions = QHBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setSpacing(6)
+        self.workspace_settings_button = styled_button(
+            _t(self.ui_language, "设置 / Settings", "Settings / 设置"),
+            "hero",
+        )
+        self.switch_candidate_button = styled_button(
+            _t(self.ui_language, "更换求职者", "Switch Candidate"),
+            "hero",
+        )
+        self.support_button = styled_button(
+            _t(self.ui_language, "☕ 支持开发", "☕ Support Dev"),
+            "hero",
+        )
+        for button in (self.workspace_settings_button, self.switch_candidate_button, self.support_button):
+            button.setObjectName("CompactToolbarButton")
+            actions.addWidget(button)
+        layout.addLayout(actions)
+        return hero
+
+    def _build_step_bar(self) -> QWidget:
+        card = make_card()
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(6)
+        for index, title in enumerate(self.step_titles):
+            button = styled_button(f"{index + 1}. {title}", "step")
+            button.setObjectName("CompactStepButton")
+            button.clicked.connect(lambda _checked=False, step_index=index: self._set_step(step_index))
+            self.step_buttons.append(button)
+            layout.addWidget(button, 1)
+        return card
+
     def shutdown_background_work(self, wait_ms: int = 8000) -> None:
         if hasattr(self, "target_direction_step") and isinstance(self.target_direction_step, TargetDirectionStep):
             self.target_direction_step.shutdown_background_work(wait_ms=wait_ms)
-        if hasattr(self, "results_step") and isinstance(self.results_step, SearchResultsStep):
+        if hasattr(self, "results_step") and isinstance(self.results_step, SearchResultsCompactStep):
             self.results_step.shutdown_background_work(wait_ms=wait_ms)
 
     def set_ai_validation_status(self, message: str, level: str = "idle") -> None:
-        dot_palette = {
-            "idle": "#94a3b8",
-            "checking": "#2563eb",
-            "ready": "#15803d",
-            "switched": "#15803d",
-            "missing": "#b91c1c",
-            "warning": "#b91c1c",
-            "invalid": "#b91c1c",
-            "model_unverified": "#b91c1c",
-            "success": "#15803d",
-            "error": "#b91c1c",
-        }
-        dot_color = dot_palette.get(level, dot_palette["idle"])
+        dot_color = RUNTIME_STATUS_DOT_COLORS.get(level, RUNTIME_STATUS_DOT_COLORS["idle"])
         safe_message = escape(str(message or "").strip())
         self.ai_validation_status_label.setText(
             f'<span style="color: {dot_color}; font-size: 15px;">●</span> '
             f'<span style="color: #ffffff;">{safe_message}</span>'
         )
         self.ai_validation_status_label.setStyleSheet("color: #ffffff;")
-        if hasattr(self, "results_step") and isinstance(self.results_step, SearchResultsStep):
+        if hasattr(self, "results_step") and isinstance(self.results_step, SearchResultsCompactStep):
             self.results_step.set_ai_validation_state(str(message or ""), level)
         if hasattr(self, "target_direction_step") and isinstance(self.target_direction_step, TargetDirectionStep):
             self.target_direction_step.set_ai_validation_state(str(message or ""), level)
@@ -326,11 +309,11 @@ class CandidateWorkspacePage(QWidget):
         self.hero_title.setText(current_candidate.name)
         if self.ui_language == "en":
             self.hero_meta.setText(
-                f"Location: {base_location}    ·    Resume: {resume_name}    ·    Roles: {profile_count}"
+                f"{base_location} · {resume_name} · Roles {profile_count}"
             )
         else:
             self.hero_meta.setText(
-                f"当前所在地：{base_location}    ·    简历：{resume_name}    ·    当前岗位数：{profile_count}"
+                f"{base_location} · {resume_name} · 岗位数 {profile_count}"
             )
 
         self.basics_step.set_candidate(current_candidate)
@@ -350,14 +333,14 @@ class CandidateWorkspacePage(QWidget):
         for button_index, button in enumerate(self.step_buttons):
             active = button_index == index
             button.setProperty("activeStep", active)
-            button.style().unpolish(button)
-            button.style().polish(button)
+            QApplication.style().unpolish(button)
+            QApplication.style().polish(button)
 
     def _on_candidate_saved(self, candidate_id: int) -> None:
         self.set_candidate(candidate_id)
 
     def _on_target_ai_busy_state_changed(self, busy: bool, message: str) -> None:
-        if hasattr(self, "results_step") and isinstance(self.results_step, SearchResultsStep):
+        if hasattr(self, "results_step") and isinstance(self.results_step, SearchResultsCompactStep):
             candidate_id = self.current_candidate_id
             self.results_step.set_target_ai_busy_state(
                 self.target_direction_step.is_ai_busy_for(candidate_id),
@@ -385,10 +368,7 @@ class CandidateWorkspacePage(QWidget):
             "这个工具的开发和维护用了大量 Codex 与本地调试成本。如果它真的帮到了你，欢迎给开发者买杯咖啡。",
             "Building and maintaining this tool takes substantial Codex usage and local debugging cost. If it genuinely helps you, you are welcome to buy the developer a coffee.",
         )
-        info_lines = [
-            message,
-            "",
-        ]
+        info_lines = [message, ""]
         if paypal_email:
             info_lines.extend(
                 [
@@ -448,4 +428,3 @@ class CandidateWorkspacePage(QWidget):
         latest_language = self.context.settings.get_ui_language()
         if latest_language != previous_language and self.on_ui_language_changed:
             self.on_ui_language_changed(latest_language)
-

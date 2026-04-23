@@ -107,6 +107,10 @@ CHINESE_BROAD_ROLE_QUALIFIERS = {
     "嵌入式",
 }
 
+CORE_SCOPE = "core"
+ADJACENT_SCOPE = "adjacent"
+EXPLORATORY_SCOPE = "exploratory"
+
 
 def decode_bilingual_description(raw_text: str) -> tuple[str, str]:
     text = str(raw_text or "").strip()
@@ -238,6 +242,25 @@ def infer_scope_profile(name: str, description: str) -> str:
     return ""
 
 
+def normalize_scope_profile(value: str) -> str:
+    text = str(value or "").strip().casefold()
+    if not text:
+        return ""
+    if text in {CORE_SCOPE, "核心"}:
+        return CORE_SCOPE
+    if text in {ADJACENT_SCOPE, "相邻"}:
+        return ADJACENT_SCOPE
+    if text in {EXPLORATORY_SCOPE, "explore", "探索"}:
+        return EXPLORATORY_SCOPE
+    if "explor" in text or "探索" in text:
+        return EXPLORATORY_SCOPE
+    if "adjacent" in text or "相邻" in text:
+        return ADJACENT_SCOPE
+    if text.startswith("core") or "核心" in text or "mainline" in text:
+        return CORE_SCOPE
+    return ""
+
+
 def is_generic_role_name(name: str) -> bool:
     text = str(name or "").strip()
     if not text:
@@ -293,6 +316,9 @@ def is_generic_role_name(name: str) -> bool:
 
 
 __all__ = [
+    "ADJACENT_SCOPE",
+    "CORE_SCOPE",
+    "EXPLORATORY_SCOPE",
     "decode_bilingual_description",
     "decode_bilingual_role_name",
     "description_for_prompt",
@@ -301,6 +327,7 @@ __all__ = [
     "encode_bilingual_role_name",
     "infer_scope_profile",
     "is_generic_role_name",
+    "normalize_scope_profile",
     "role_name_query_lines",
     "select_bilingual_description",
     "select_bilingual_role_name",

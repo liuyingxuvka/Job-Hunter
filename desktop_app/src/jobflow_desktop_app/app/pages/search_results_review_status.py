@@ -4,17 +4,11 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import QComboBox
 
+from ..theme import REVIEW_STATUS_COLORS, UI_COLORS
+
 
 def status_palette(status_code: str) -> dict[str, str]:
-    palette = {
-        "pending": {"fg": "#4B5563", "bg": "#F3F4F6", "border": "#9CA3AF"},
-        "focus": {"fg": "#1D4ED8", "bg": "#DBEAFE", "border": "#3B82F6"},
-        "applied": {"fg": "#166534", "bg": "#DCFCE7", "border": "#22C55E"},
-        "offered": {"fg": "#92400E", "bg": "#FEF3C7", "border": "#F59E0B"},
-        "rejected": {"fg": "#991B1B", "bg": "#FEE2E2", "border": "#EF4444"},
-        "dropped": {"fg": "#334155", "bg": "#E2E8F0", "border": "#94A3B8"},
-    }
-    return palette.get(status_code, palette["pending"])
+    return REVIEW_STATUS_COLORS.get(status_code, REVIEW_STATUS_COLORS["pending"])
 
 
 def decorate_status_combo_items(combo: QComboBox, status_codes: tuple[str, ...]) -> None:
@@ -41,8 +35,8 @@ def apply_status_combo_style(combo: QComboBox, status_code: str) -> None:
             min-height: 24px;
         }}
         QComboBox QAbstractItemView {{
-            color: #0F172A;
-            background: #FFFFFF;
+            color: {UI_COLORS["text_primary"]};
+            background: {UI_COLORS["bg_card"]};
             border: 1px solid {color_pack["border"]};
             selection-background-color: {color_pack["bg"]};
             selection-color: {color_pack["fg"]};

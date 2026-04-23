@@ -58,7 +58,7 @@ class MainWindowLifecycleTests(unittest.TestCase):
                 self.assertIsNone(window.candidate_directory_page.current_candidate_id)
                 self.assertIsNone(window.current_candidate_id)
                 self.assertEqual(window.stack.currentWidget(), window.candidate_directory_page)
-                self.assertEqual(window.workspace_page.body_stack.currentWidget(), window.workspace_page.empty_page)
+                self.assertEqual(window.workspace_compact_page.body_stack.currentWidget(), window.workspace_compact_page.empty_page)
 
                 with patch(
                 "jobflow_desktop_app.app.pages.candidate_directory.QInputDialog.getText",
@@ -78,16 +78,17 @@ class MainWindowLifecycleTests(unittest.TestCase):
                     QTest.mouseClick(window.candidate_directory_page.open_workspace_button, Qt.LeftButton)
                     process_events()
 
-                self.assertEqual(window.stack.currentWidget(), window.workspace_page)
-                self.assertEqual(window.workspace_page.body_stack.currentWidget(), window.workspace_page.content_page)
-                self.assertEqual(window.workspace_page.current_candidate_id, recreated_candidate.candidate_id)
-                self.assertEqual(window.workspace_page.hero_title.text(), "Recreated Candidate")
+                self.assertEqual(window.stack.currentWidget(), window.workspace_compact_page)
+                self.assertEqual(window.workspace_compact_page.body_stack.currentWidget(), window.workspace_compact_page.content_page)
+                self.assertEqual(window.workspace_compact_page.current_candidate_id, recreated_candidate.candidate_id)
+                self.assertEqual(window.workspace_compact_page.current_candidate_id, recreated_candidate.candidate_id)
+                self.assertEqual(window.workspace_compact_page.hero_title.text(), "Recreated Candidate")
                 self.assertFalse(
                     any("Please select a candidate first" in str(call.args) for call in info_spy.call_args_list)
                 )
-                self.assertIn("Recreated Candidate", window.workspace_page.hero_title.text())
-                self.assertEqual(window.workspace_page.results_step.current_candidate_id, recreated_candidate.candidate_id)
-                self.assertEqual(window.workspace_page.results_step.current_candidate_name, "Recreated Candidate")
+                self.assertIn("Recreated Candidate", window.workspace_compact_page.hero_title.text())
+                self.assertEqual(window.workspace_compact_page.results_step.current_candidate_id, recreated_candidate.candidate_id)
+                self.assertEqual(window.workspace_compact_page.results_step.current_candidate_name, "Recreated Candidate")
 
     def test_delete_current_candidate_keeps_remaining_selection_in_sync(self) -> None:
         with make_temp_context() as context:
@@ -125,8 +126,8 @@ class MainWindowLifecycleTests(unittest.TestCase):
             self.assertEqual(remaining_candidate_id, initial_candidate_id)
             self.assertEqual(window.candidate_directory_page.current_candidate_id, remaining_candidate_id)
             self.assertEqual(window.current_candidate_id, remaining_candidate_id)
-            self.assertEqual(window.workspace_page.current_candidate_id, remaining_candidate_id)
-            self.assertEqual(window.workspace_page.body_stack.currentWidget(), window.workspace_page.content_page)
+            self.assertEqual(window.workspace_compact_page.current_candidate_id, remaining_candidate_id)
+            self.assertEqual(window.workspace_compact_page.body_stack.currentWidget(), window.workspace_compact_page.content_page)
 
     def test_close_event_waits_for_ai_validation_shutdown_budget(self) -> None:
         with make_temp_context() as context:
@@ -139,12 +140,12 @@ class MainWindowLifecycleTests(unittest.TestCase):
             self.addCleanup(window.close)
 
             with (
-                patch.object(window.workspace_page, "shutdown_background_work", autospec=True) as shutdown_mock,
+                patch.object(window.workspace_compact_page, "shutdown_background_work", autospec=True) as shutdown_compact_mock,
                 patch.object(window, "_shutdown_ai_validation", autospec=True) as shutdown_ai_mock,
             ):
                 window.closeEvent(QCloseEvent())
 
-            shutdown_mock.assert_called_once_with(wait_ms=8000)
+            shutdown_compact_mock.assert_called_once_with(wait_ms=8000)
             shutdown_ai_mock.assert_called_once_with(wait_ms=20000)
 
     def test_ai_validation_worker_only_validates_saved_model_without_auto_switch(self) -> None:

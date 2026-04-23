@@ -39,6 +39,7 @@ class TargetDirectionProfileSyncTests(unittest.TestCase):
                 list_for_candidate=context.profiles.list_for_candidate,
                 prepare_profile=lambda profile: profile,
                 display_role_name=lambda profile: profile.name,
+                display_scope_label=lambda profile: "",
                 untitled_label="Untitled Role",
             )
 
@@ -63,6 +64,7 @@ class TargetDirectionProfileSyncTests(unittest.TestCase):
             list_for_candidate=lambda _candidate_id: [],
             prepare_profile=lambda profile: profile,
             display_role_name=lambda profile: getattr(profile, "name", ""),
+            display_scope_label=lambda profile: "",
             untitled_label="Untitled Role",
         )
 

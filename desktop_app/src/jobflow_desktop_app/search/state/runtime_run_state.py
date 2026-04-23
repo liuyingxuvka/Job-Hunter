@@ -75,6 +75,9 @@ class SearchRunStateStore:
     def recent_runs(self, candidate_id: int, *, limit: int = 5):
         return self.search_runs.recent_for_candidate(candidate_id, limit=limit)
 
+    def all_runs(self, candidate_id: int):
+        return self.search_runs.all_for_candidate(candidate_id)
+
     def load_latest_progress_payload(self, candidate_id: int) -> dict[str, Any] | None:
         latest_run = self.latest_run(candidate_id)
         if latest_run is None:

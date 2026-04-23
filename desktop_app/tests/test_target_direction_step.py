@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QDialog
+from PySide6.QtWidgets import QDialog, QWidget
 
 from jobflow_desktop_app.app.pages.target_direction import TargetDirectionStep
 
@@ -18,6 +18,27 @@ except ImportError:  # pragma: no cover - unittest discover from tests dir
 class TargetDirectionStepTests(unittest.TestCase):
     def setUp(self) -> None:
         self.app = get_qapp()
+
+    def test_compact_actions_live_inside_their_cards(self) -> None:
+        with make_temp_context() as context:
+            with patch(
+                "jobflow_desktop_app.app.pages.target_direction.OpenAIRoleRecommendationService",
+                return_value=Mock(),
+            ):
+                page = TargetDirectionStep(context, ui_language="zh", show_page_title=False)
+            self.addCleanup(page.deleteLater)
+
+            left_action_row = page.findChild(QWidget, "TargetDirectionLeftActionRow")
+            right_action_row = page.findChild(QWidget, "TargetDirectionRightActionRow")
+
+            self.assertIsNotNone(left_action_row)
+            self.assertIsNotNone(right_action_row)
+            assert left_action_row is not None
+            assert right_action_row is not None
+            self.assertTrue(left_action_row.isAncestorOf(page.generate_directions_button))
+            self.assertTrue(left_action_row.isAncestorOf(page.add_direction_button))
+            self.assertTrue(left_action_row.isAncestorOf(page.delete_direction_button))
+            self.assertTrue(right_action_row.isAncestorOf(page.save_direction_button))
 
     def test_manual_add_save_without_api_and_reload_does_not_write_back_bilingual_rows(self) -> None:
         with make_temp_context() as context:

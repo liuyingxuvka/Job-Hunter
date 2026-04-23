@@ -71,6 +71,7 @@ class CandidateDirectoryPageTests(unittest.TestCase):
             self.assertEqual(page.candidate_list.count(), 1)
             self.assertEqual(page.current_candidate_id, context.candidates.list_records()[0].candidate_id)
             self.assertTrue(page.open_workspace_button.isEnabled())
+            self.assertTrue(page.rename_button.isEnabled())
             self.assertTrue(page.delete_button.isEnabled())
             on_data_changed.assert_called()
             on_candidate_selected.assert_called_with(page.current_candidate_id)
@@ -91,9 +92,52 @@ class CandidateDirectoryPageTests(unittest.TestCase):
             self.assertEqual(page.candidate_list.count(), 0)
             self.assertIsNone(page.current_candidate_id)
             self.assertFalse(page.open_workspace_button.isEnabled())
+            self.assertFalse(page.rename_button.isEnabled())
             self.assertFalse(page.delete_button.isEnabled())
             self.assertEqual(context.candidates.list_records(), [])
             on_candidate_selected.assert_called_with(None)
+
+    def test_rename_selected_candidate_updates_only_name_and_refreshes_list(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(
+                context,
+                name="Old Name",
+                base_location="Berlin, Germany",
+                preferred_locations="Remote",
+                notes="Keep these notes",
+            )
+            on_data_changed = Mock()
+            on_candidate_selected = Mock()
+            page = CandidateDirectoryPage(
+                context,
+                on_data_changed=on_data_changed,
+                on_candidate_selected=on_candidate_selected,
+            )
+            self.addCleanup(page.deleteLater)
+
+            page.reload(select_candidate_id=candidate_id, emit_selection=False)
+            process_events()
+            on_data_changed.reset_mock()
+            on_candidate_selected.reset_mock()
+
+            with patch(
+                "jobflow_desktop_app.app.pages.candidate_directory.QInputDialog.getText",
+                return_value=("New Name", True),
+            ):
+                QTest.mouseClick(page.rename_button, Qt.LeftButton)
+            process_events()
+
+            renamed = context.candidates.get(candidate_id)
+            self.assertIsNotNone(renamed)
+            assert renamed is not None
+            self.assertEqual(renamed.name, "New Name")
+            self.assertEqual(renamed.base_location, "Berlin, Germany")
+            self.assertEqual(renamed.preferred_locations, "Remote")
+            self.assertEqual(renamed.notes, "Keep these notes")
+            self.assertEqual(page.current_candidate_id, candidate_id)
+            self.assertTrue(page.candidate_list.currentItem().text().startswith("New Name"))
+            on_candidate_selected.assert_called_once_with(candidate_id)
+            on_data_changed.assert_called_once()
 
     def test_set_selected_candidate_id_only_syncs_ui_selection(self) -> None:
         with make_temp_context() as context:

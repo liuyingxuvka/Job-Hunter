@@ -10,6 +10,18 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-04-24
+
+### Added
+
+- Added a candidate rename action on the candidate selection page, preserving all existing candidate data while refreshing the selected list item.
+
+### Changed
+
+- Refined the compact candidate workspace layout so basics and target-role action buttons live inside their related white cards instead of detached footer areas.
+- Tightened the basics page by removing the redundant visible name field, compressing preferred-location display, and aligning the left/right edit regions more consistently.
+- Polished the candidate directory, compact workspace, target-role, and search-result styling for denser spacing, clearer selection states, and more consistent color usage.
+
 ## [0.8.0] - 2026-04-23
 
 ### Added

@@ -4,14 +4,14 @@ from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
 UI_COLORS = {
-    "bg_app": "#edf2f7",
-    "bg_statusbar": "#e4ebf2",
+    "bg_app": "#f3f6f8",
+    "bg_statusbar": "#e8eef4",
     "bg_card": "#ffffff",
-    "bg_subtle": "#f8fafc",
-    "bg_header": "#e9eff5",
-    "border": "#d8e1ea",
-    "border_muted": "#cfd8e3",
-    "border_strong": "#bfd0dd",
+    "bg_subtle": "#f7f9fb",
+    "bg_header": "#eef3f7",
+    "border": "#dbe3eb",
+    "border_muted": "#d1dbe5",
+    "border_strong": "#bdcbd8",
     "text_primary": "#1f2933",
     "text_heading": "#102a43",
     "text_muted": "#52606d",
@@ -58,7 +58,7 @@ REVIEW_STATUS_COLORS = {
 
 APP_STYLESHEET = """
 QWidget {
-  background: #edf2f7;
+  background: #f3f6f8;
   color: #1f2933;
   font-family: "Segoe UI", "Microsoft YaHei";
   font-size: 13px;
@@ -73,26 +73,30 @@ QLabel {
 }
 
 QMainWindow {
-  background: #edf2f7;
+  background: #f3f6f8;
 }
 
 QStatusBar {
-  background: #e4ebf2;
+  background: #e8eef4;
   color: #52606d;
   border-top: 1px solid #d3dbe3;
 }
 
+QScrollArea, QScrollArea > QWidget, QScrollArea > QWidget > QWidget {
+  background: transparent;
+}
+
 QListWidget {
   background: #ffffff;
-  border: 1px solid #d8e1ea;
-  border-radius: 12px;
+  border: 1px solid #dbe3eb;
+  border-radius: 14px;
   outline: none;
   padding: 6px;
 }
 
 QListWidget::item {
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 7px 10px;
   margin: 2px 0;
 }
 
@@ -120,7 +124,14 @@ QListWidget#SidebarList::item:selected {
 }
 
 QListWidget#EntityList::item {
-  min-height: 46px;
+  min-height: 44px;
+  border: 1px solid transparent;
+}
+
+QListWidget#EntityList::item:selected {
+  background: #0f7b6c;
+  color: #ffffff;
+  border: 1px solid #0f7b6c;
 }
 
 QListWidget#TargetRoleList {
@@ -139,10 +150,29 @@ QListWidget#TargetRoleList::item:selected {
   color: transparent;
 }
 
+QListWidget#CompactLocationList {
+  padding: 4px;
+  border-radius: 12px;
+}
+
+QListWidget#CompactLocationList::item {
+  min-height: 22px;
+  padding: 3px 8px;
+  margin: 1px 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+QListWidget#CompactLocationList::item:selected {
+  background: #e8f1f7;
+  color: #102a43;
+  border: 1px solid #1f7a8c;
+}
+
 QFrame[card="true"] {
   background: #ffffff;
-  border: 1px solid #d8e1ea;
-  border-radius: 16px;
+  border: 1px solid #dbe3eb;
+  border-radius: 14px;
 }
 
 QFrame#WorkspaceHero {
@@ -156,13 +186,13 @@ QFrame#WorkspaceHero QLabel {
 }
 
 QLabel#PageTitle {
-  font-size: 20px;
+  font-size: 19px;
   font-weight: 700;
   color: #102a43;
 }
 
 QLabel#SectionTitle {
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 700;
   color: #102a43;
 }
@@ -235,10 +265,10 @@ QLabel#StatValue {
 }
 
 QLineEdit, QPlainTextEdit, QComboBox, QTableWidget {
-  background: #f8fafc;
-  border: 1px solid #cfd8e3;
+  background: #f7f9fb;
+  border: 1px solid #d1dbe5;
   border-radius: 10px;
-  padding: 8px 10px;
+  padding: 6px 9px;
 }
 
 QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QTableWidget:focus {
@@ -251,16 +281,21 @@ QComboBox::drop-down {
 }
 
 QPushButton {
-  border-radius: 10px;
-  padding: 8px 12px;
-  border: 1px solid #bfd0dd;
+  border-radius: 9px;
+  padding: 6px 11px;
+  border: 1px solid #bdcbd8;
   background: #ffffff;
   color: #102a43;
   font-weight: 600;
+  min-height: 28px;
 }
 
 QPushButton:hover {
   background: #f3f7fb;
+}
+
+QPushButton:focus {
+  border: 1px solid #1f7a8c;
 }
 
 QPushButton:disabled {
@@ -302,10 +337,11 @@ QPushButton[variant="danger"]:disabled {
 }
 
 QPushButton[variant="step"] {
-  background: #f8fafc;
+  background: #f7f9fb;
   color: #334e68;
-  border: 1px solid #d8e1ea;
-  padding: 8px 12px;
+  border: 1px solid #dbe3eb;
+  padding: 5px 10px;
+  min-height: 28px;
 }
 
 QPushButton[variant="step"][activeStep="true"] {
@@ -330,12 +366,12 @@ QTableWidget {
 }
 
 QHeaderView::section {
-  background: #e9eff5;
+  background: #eef3f7;
   color: #334e68;
   border: none;
-  border-right: 1px solid #d8e1ea;
-  border-bottom: 1px solid #d8e1ea;
-  padding: 8px;
+  border-right: 1px solid #dbe3eb;
+  border-bottom: 1px solid #dbe3eb;
+  padding: 7px;
   font-weight: 600;
 }
 
@@ -349,10 +385,10 @@ def apply_theme(app: QApplication) -> None:
     app.setStyle("Fusion")
 
     palette = QPalette()
-    palette.setColor(QPalette.Window, QColor("#edf2f7"))
+    palette.setColor(QPalette.Window, QColor("#f3f6f8"))
     palette.setColor(QPalette.WindowText, QColor("#1f2933"))
     palette.setColor(QPalette.Base, QColor("#ffffff"))
-    palette.setColor(QPalette.AlternateBase, QColor("#f8fafc"))
+    palette.setColor(QPalette.AlternateBase, QColor("#f7f9fb"))
     palette.setColor(QPalette.ToolTipBase, QColor("#ffffff"))
     palette.setColor(QPalette.ToolTipText, QColor("#102a43"))
     palette.setColor(QPalette.Text, QColor("#1f2933"))

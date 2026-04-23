@@ -88,12 +88,12 @@ class TargetDirectionStep(QWidget):
 
         content_row = QHBoxLayout()
         content_row.setContentsMargins(0, 0, 0, 0)
-        content_row.setSpacing(16)
+        content_row.setSpacing(12)
 
         left_card = make_card()
         left_layout = QVBoxLayout(left_card)
-        left_layout.setContentsMargins(14, 14, 14, 14)
-        left_layout.setSpacing(10)
+        left_layout.setContentsMargins(12, 12, 12, 12)
+        left_layout.setSpacing(8)
 
         self.direction_list = TargetRoleListWidget()
         self.direction_list.setObjectName("TargetRoleList")
@@ -112,23 +112,28 @@ class TargetDirectionStep(QWidget):
         self.generate_feedback_label.hide()
         left_layout.addWidget(self.generate_feedback_label)
 
-        action_row = QHBoxLayout()
-        action_row.setContentsMargins(0, 0, 0, 0)
-        action_row.setSpacing(10)
         self.generate_directions_button = styled_button(_t(self.ui_language, "AI 推荐", "AI Recommend"), "primary")
         self.add_direction_button = styled_button(_t(self.ui_language, "手动添加", "Add Manually"), "secondary")
         self.delete_direction_button = styled_button(_t(self.ui_language, "删除岗位", "Delete Role"), "danger")
-        action_row.addWidget(self.generate_directions_button)
-        action_row.addWidget(self.add_direction_button)
-        action_row.addWidget(self.delete_direction_button)
+        left_action_row = QWidget()
+        left_action_row.setObjectName("TargetDirectionLeftActionRow")
+        left_action_row.setProperty("transparentBg", True)
+        left_action_layout = QHBoxLayout(left_action_row)
+        left_action_layout.setContentsMargins(0, 4, 0, 0)
+        left_action_layout.setSpacing(8)
+        left_action_layout.addWidget(self.generate_directions_button)
+        left_action_layout.addWidget(self.add_direction_button)
+        left_action_layout.addWidget(self.delete_direction_button)
+        left_action_layout.addStretch(1)
+        left_layout.addWidget(left_action_row)
 
         right_card = make_card()
         right_layout = QVBoxLayout(right_card)
-        right_layout.setContentsMargins(18, 18, 18, 18)
-        right_layout.setSpacing(12)
+        right_layout.setContentsMargins(14, 14, 14, 14)
+        right_layout.setSpacing(10)
 
         self.direction_name_input = QLineEdit()
-        self.direction_name_input.setMinimumHeight(42)
+        self.direction_name_input.setMinimumHeight(38)
         self.direction_reason_input = QPlainTextEdit()
         self.direction_reason_input.setPlaceholderText(
             _t(
@@ -137,7 +142,7 @@ class TargetDirectionStep(QWidget):
                 "What this role mainly does, and why it fits this candidate.",
             )
         )
-        self.direction_reason_input.setMinimumHeight(170)
+        self.direction_reason_input.setMinimumHeight(150)
 
         right_layout.addWidget(
             self._build_editor_field(
@@ -152,22 +157,20 @@ class TargetDirectionStep(QWidget):
             ),
             1,
         )
-        right_layout.addStretch(1)
         self.save_direction_button = styled_button(_t(self.ui_language, "保存岗位信息", "Save Role Info"), "primary")
+        right_action_row = QWidget()
+        right_action_row.setObjectName("TargetDirectionRightActionRow")
+        right_action_row.setProperty("transparentBg", True)
+        right_action_layout = QHBoxLayout(right_action_row)
+        right_action_layout.setContentsMargins(0, 4, 0, 0)
+        right_action_layout.setSpacing(8)
+        right_action_layout.addStretch(1)
+        right_action_layout.addWidget(self.save_direction_button, 0, Qt.AlignRight)
+        right_layout.addWidget(right_action_row)
 
         content_row.addWidget(left_card, 1)
         content_row.addWidget(right_card, 2)
         layout.addLayout(content_row, 1)
-
-        footer_row = QHBoxLayout()
-        footer_row.setContentsMargins(0, 0, 0, 0)
-        footer_row.setSpacing(10)
-        footer_row.addWidget(self.generate_directions_button)
-        footer_row.addWidget(self.add_direction_button)
-        footer_row.addWidget(self.delete_direction_button)
-        footer_row.addStretch(1)
-        footer_row.addWidget(self.save_direction_button, 0, Qt.AlignRight)
-        layout.addLayout(footer_row)
 
         self.generate_directions_button.clicked.connect(self._generate_role_suggestions)
         self.save_direction_button.clicked.connect(self._save_profile)

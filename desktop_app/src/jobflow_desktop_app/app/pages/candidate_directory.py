@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -9,6 +10,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QInputDialog,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QVBoxLayout,
@@ -43,22 +45,23 @@ class CandidateDirectoryPage(QWidget):
         self.summaries_by_id: dict[int, CandidateSummary] = {}
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
+        layout.setContentsMargins(16, 14, 16, 16)
+        layout.setSpacing(12)
 
         left_card = make_card()
         left_layout = QVBoxLayout(left_card)
-        left_layout.setContentsMargins(14, 14, 14, 14)
-        left_layout.setSpacing(12)
+        left_layout.setContentsMargins(12, 12, 12, 12)
+        left_layout.setSpacing(8)
 
         self.candidate_list = QListWidget()
         self.candidate_list.setObjectName("EntityList")
+        self.candidate_list.setSpacing(4)
         left_layout.addWidget(self.candidate_list, 1)
 
         right_card = make_card()
         right_layout = QVBoxLayout(right_card)
-        right_layout.setContentsMargins(22, 22, 22, 22)
-        right_layout.setSpacing(12)
+        right_layout.setContentsMargins(18, 18, 18, 18)
+        right_layout.setSpacing(10)
 
         self.directory_title_label = QLabel(_t(self.ui_language, "选择求职者", "Select Candidate"))
         self.directory_title_label.setObjectName("SectionTitle")
@@ -76,7 +79,7 @@ class CandidateDirectoryPage(QWidget):
 
         language_row = QHBoxLayout()
         language_row.setContentsMargins(0, 0, 0, 0)
-        language_row.setSpacing(8)
+        language_row.setSpacing(6)
         self.language_label = QLabel(_t(self.ui_language, "🌐 语言 / Language", "🌐 Language / 语言"))
         self.language_label.setObjectName("MutedLabel")
         self.language_combo = QComboBox()
@@ -102,20 +105,27 @@ class CandidateDirectoryPage(QWidget):
             "primary",
         )
         self.new_button = styled_button(_t(self.ui_language, "新建求职者", "New Candidate"), "secondary")
+        self.rename_button = styled_button(_t(self.ui_language, "重命名", "Rename"), "secondary")
         self.delete_button = styled_button(_t(self.ui_language, "删除这个人", "Delete Candidate"), "danger")
-        right_layout.addWidget(self.open_workspace_button)
-        right_layout.addWidget(self.new_button)
-        right_layout.addWidget(self.delete_button)
+        for button in (self.open_workspace_button, self.new_button, self.rename_button, self.delete_button):
+            button.setMinimumHeight(36)
+            button.setMaximumHeight(42)
+            button.setMaximumWidth(300)
+        right_layout.addWidget(self.open_workspace_button, 0, Qt.AlignLeft)
+        right_layout.addWidget(self.new_button, 0, Qt.AlignLeft)
+        right_layout.addWidget(self.rename_button, 0, Qt.AlignLeft)
+        right_layout.addWidget(self.delete_button, 0, Qt.AlignLeft)
         right_layout.addStretch(1)
 
         content_row = QHBoxLayout()
         content_row.setContentsMargins(0, 0, 0, 0)
-        content_row.setSpacing(16)
-        content_row.addWidget(left_card, 2)
+        content_row.setSpacing(14)
+        content_row.addWidget(left_card, 3)
         content_row.addWidget(right_card, 1)
         layout.addLayout(content_row, 1)
 
         self.new_button.clicked.connect(self._new_candidate)
+        self.rename_button.clicked.connect(self._rename_candidate)
         self.delete_button.clicked.connect(self._delete_candidate)
         self.open_workspace_button.clicked.connect(self._open_default_workspace)
         self.language_combo.currentIndexChanged.connect(self._on_language_changed)
@@ -175,8 +185,10 @@ class CandidateDirectoryPage(QWidget):
             )
             profile_count = summary.profile_count if summary is not None else 0
             role_text = _t(self.ui_language, f"{profile_count} 个目标岗位", f"{profile_count} roles")
-            item = QListWidgetItem(f"{record.name}\n{resume_name}    ·    {role_text}")
+            resume_text = _t(self.ui_language, f"简历：{resume_name}", f"Resume: {resume_name}")
+            item = QListWidgetItem(f"{record.name}\n{resume_text}    ·    {role_text}")
             item.setData(Qt.UserRole, record.candidate_id)
+            item.setToolTip(f"{record.name}\n{resume_text} · {role_text}")
             self.candidate_list.addItem(item)
             if preserve_id == record.candidate_id:
                 target_row = row_index
@@ -260,6 +272,53 @@ class CandidateDirectoryPage(QWidget):
         if self.on_data_changed:
             self.on_data_changed()
 
+    def _rename_candidate(self) -> None:
+        candidate_id = self.selected_candidate_id()
+        if candidate_id is None:
+            self.dialogs.information(
+                self,
+                _t(self.ui_language, "重命名求职者", "Rename Candidate"),
+                _t(self.ui_language, "请先选择一个求职者。", "Please select a candidate first."),
+            )
+            return
+
+        record = self.context.candidates.get(candidate_id)
+        if record is None:
+            self.dialogs.warning(
+                self,
+                _t(self.ui_language, "重命名求职者", "Rename Candidate"),
+                _t(self.ui_language, "当前求职者不存在，请重新选择。", "Candidate not found. Please select again."),
+            )
+            self.reload(select_candidate_id=None, emit_selection=True)
+            return
+
+        name, ok = QInputDialog.getText(
+            self,
+            _t(self.ui_language, "重命名求职者", "Rename Candidate"),
+            _t(self.ui_language, "请输入新的求职者名称：", "Enter the new candidate name:"),
+            QLineEdit.Normal,
+            record.name,
+        )
+        if not ok:
+            return
+        new_name = name.strip()
+        if not new_name:
+            self.dialogs.warning(
+                self,
+                _t(self.ui_language, "重命名求职者", "Rename Candidate"),
+                _t(self.ui_language, "名称不能为空。", "Name cannot be empty."),
+            )
+            return
+        if new_name == record.name:
+            return
+
+        saved_candidate_id = self.context.candidates.save(replace(record, name=new_name))
+        self.reload(select_candidate_id=saved_candidate_id, emit_selection=False)
+        if self.on_candidate_selected:
+            self.on_candidate_selected(saved_candidate_id)
+        if self.on_data_changed:
+            self.on_data_changed()
+
     def _delete_candidate(self) -> None:
         candidate_id = self.selected_candidate_id()
         if candidate_id is None:
@@ -317,5 +376,6 @@ class CandidateDirectoryPage(QWidget):
     def _update_action_state(self) -> None:
         has_selection = self.selected_candidate_id() is not None
         self.open_workspace_button.setEnabled(has_selection)
+        self.rename_button.setEnabled(has_selection)
         self.delete_button.setEnabled(has_selection)
 

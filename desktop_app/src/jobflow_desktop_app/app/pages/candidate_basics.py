@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QProgressDialog,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -205,8 +206,8 @@ class CandidateForm(QWidget):
             self.email_input.hide()
 
         if self.compact_layout:
+            self.name_input.hide()
             self._set_compact_control_heights(
-                self.name_input,
                 self.base_location_input,
                 self.resume_input,
                 self.choose_resume_button,
@@ -215,21 +216,27 @@ class CandidateForm(QWidget):
                 self.add_preferred_location_button,
                 self.remove_preferred_location_button,
             )
-            self.notes_input.setMinimumHeight(300)
+            self.notes_input.setMinimumHeight(308)
+            self.notes_input.setMaximumHeight(308)
+            self.preferred_locations_list.setObjectName("CompactLocationList")
+            self.preferred_locations_list.setMinimumHeight(112)
+            self.preferred_locations_list.setMaximumHeight(112)
 
             columns_row = QWidget()
             self._mark_transparent(columns_row)
+            columns_row.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
             columns_layout = QHBoxLayout(columns_row)
             columns_layout.setContentsMargins(0, 0, 0, 0)
-            columns_layout.setSpacing(20)
+            columns_layout.setSpacing(14)
+            columns_layout.setAlignment(Qt.AlignTop)
 
             left_column = QWidget()
             left_column.setObjectName("CompactBasicsLeftColumn")
             self._mark_transparent(left_column)
+            left_column.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
             left_column_layout = QVBoxLayout(left_column)
             left_column_layout.setContentsMargins(0, 0, 0, 0)
-            left_column_layout.setSpacing(12)
-            left_column_layout.addWidget(self._build_field_block(_t(self.ui_language, "姓名", "Name"), self.name_input))
+            left_column_layout.setSpacing(10)
             left_column_layout.addWidget(
                 self._build_field_block(_t(self.ui_language, "当前所在地", "Current Location"), base_location_wrapper)
             )
@@ -239,23 +246,23 @@ class CandidateForm(QWidget):
             left_column_layout.addWidget(
                 self._build_field_block(_t(self.ui_language, "简历路径", "Resume Path"), resume_row)
             )
-            left_column_layout.addStretch(1)
 
             right_column = QWidget()
             right_column.setObjectName("CompactBasicsRightColumn")
             self._mark_transparent(right_column)
+            right_column.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
             right_column_layout = QVBoxLayout(right_column)
             right_column_layout.setContentsMargins(0, 0, 0, 0)
-            right_column_layout.setSpacing(12)
+            right_column_layout.setSpacing(10)
             right_column_layout.addWidget(
                 self._build_field_block(
                     _t(self.ui_language, "职业背景 / 专业摘要", "Professional Background / Summary"),
                     self.notes_input,
                 )
-            , 1)
+            )
 
-            columns_layout.addWidget(left_column, 1)
-            columns_layout.addWidget(right_column, 1)
+            columns_layout.addWidget(left_column, 1, Qt.AlignTop)
+            columns_layout.addWidget(right_column, 1, Qt.AlignTop)
             layout.addWidget(columns_row)
         else:
             layout.addWidget(self.meta_label)
@@ -292,7 +299,7 @@ class CandidateForm(QWidget):
 
     def _set_compact_control_heights(self, *widgets: QWidget) -> None:
         for widget in widgets:
-            widget.setMinimumHeight(42)
+            widget.setMinimumHeight(38)
 
     def _build_field_block(self, label_text: str, field_widget: QWidget) -> QWidget:
         wrapper = QWidget()
@@ -624,7 +631,7 @@ class CandidateBasicsStep(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(16)
+        layout.setSpacing(12)
         if not compact_layout:
             layout.addWidget(
                 make_page_title(
@@ -639,8 +646,8 @@ class CandidateBasicsStep(QWidget):
 
         card = make_card()
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(18, 18, 18, 18)
-        card_layout.setSpacing(14)
+        card_layout.setContentsMargins(14, 14, 14, 14)
+        card_layout.setSpacing(12)
 
         self.form = CandidateForm(
             save_button_text=_t(self.ui_language, "保存基础信息", "Save Basics"),
@@ -651,18 +658,18 @@ class CandidateBasicsStep(QWidget):
         if compact_layout:
             self.form.meta_label.hide()
         card_layout.addWidget(self.form)
-        layout.addWidget(card)
         if compact_layout:
             compact_footer_row = QWidget()
             compact_footer_row.setObjectName("CompactBasicsFooterRow")
             compact_footer_row.setProperty("transparentBg", True)
             compact_footer_row.setAttribute(Qt.WA_StyledBackground, True)
             compact_footer_layout = QHBoxLayout(compact_footer_row)
-            compact_footer_layout.setContentsMargins(0, 0, 18, 0)
-            compact_footer_layout.setSpacing(12)
+            compact_footer_layout.setContentsMargins(0, 4, 0, 0)
+            compact_footer_layout.setSpacing(10)
             compact_footer_layout.addStretch(1)
             compact_footer_layout.addWidget(self.form.save_button, 0, Qt.AlignRight)
-            layout.addWidget(compact_footer_row)
+            card_layout.addWidget(compact_footer_row)
+        layout.addWidget(card)
         layout.addStretch(1)
 
         self.form.save_button.clicked.connect(self._save_candidate)

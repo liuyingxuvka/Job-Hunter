@@ -133,6 +133,19 @@ class CandidateBasicsStepTests(unittest.TestCase):
             self.assertIsNone(page.findChild(QWidget, "CompactBasicsActionRow"))
             self.assertIsNone(page.findChild(QWidget, "CompactBasicsHeaderRow"))
             self.assertTrue(page.form.meta_label.isHidden())
+            self.assertTrue(page.form.name_input.isHidden())
+            self.assertEqual(page.form.notes_input.maximumHeight(), 308)
+            self.assertEqual(page.form.preferred_locations_list.maximumHeight(), 112)
+            self.assertEqual(page.form.preferred_locations_list.objectName(), "CompactLocationList")
+            field_labels = [
+                label.text()
+                for label in page.findChildren(QLabel)
+                if label.objectName() == "FieldLabel"
+            ]
+            self.assertNotIn("姓名", field_labels)
+            self.assertIn("当前所在地", field_labels)
+            self.assertIn("希望找工作的地点", field_labels)
+            self.assertIn("简历路径", field_labels)
             compact_titles = [
                 label.text()
                 for label in page.findChildren(QLabel)

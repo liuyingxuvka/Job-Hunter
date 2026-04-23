@@ -65,15 +65,15 @@ class SearchResultsCompactStep(SearchResultsStep):
         card = make_card()
         card.setObjectName("CompactResultsControlCard")
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(6)
 
         toolbar = QWidget()
         toolbar.setObjectName("CompactResultsToolbar")
         toolbar.setProperty("transparentBg", True)
         toolbar_layout = QHBoxLayout(toolbar)
         toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        toolbar_layout.setSpacing(8)
+        toolbar_layout.setSpacing(7)
 
         toolbar_layout.addWidget(self.refresh_button)
         self.delete_button.setText(_t(self.ui_language, "删除勾选岗位", "Delete Checked Jobs"))
@@ -82,8 +82,8 @@ class SearchResultsCompactStep(SearchResultsStep):
         duration_group = QWidget()
         duration_group.setProperty("transparentBg", True)
         duration_layout = QHBoxLayout(duration_group)
-        duration_layout.setContentsMargins(8, 0, 0, 0)
-        duration_layout.setSpacing(8)
+        duration_layout.setContentsMargins(6, 0, 0, 0)
+        duration_layout.setSpacing(7)
         duration_layout.addWidget(self.search_duration_label)
         duration_layout.addWidget(self.search_duration_combo)
         duration_layout.addWidget(self.search_countdown_label)
@@ -102,17 +102,25 @@ class SearchResultsCompactStep(SearchResultsStep):
         self.results_progress_label.setObjectName("InlineMetaLabel")
         self.results_stats_label.setWordWrap(False)
         self.results_stats_label.setObjectName("InlineMetaLabel")
-        layout.addWidget(self.results_meta_label)
-        layout.addWidget(self.results_stats_label)
-        layout.addWidget(self.results_progress_label)
+        status_row = QWidget()
+        status_row.setObjectName("CompactResultsStatusRow")
+        status_row.setProperty("transparentBg", True)
+        status_layout = QHBoxLayout(status_row)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(12)
+        status_layout.addWidget(self.results_meta_label)
+        status_layout.addWidget(self.results_stats_label)
+        status_layout.addStretch(1)
+        status_layout.addWidget(self.results_progress_label)
+        layout.addWidget(status_row)
         return card
 
     def _build_compact_results_card(self) -> QFrame:
         card = make_card()
         card.setObjectName("CompactResultsTableCard")
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(12, 10, 12, 12)
+        layout.setSpacing(6)
 
         self.table.setObjectName("CompactResultsTable")
         self.table.setColumnCount(9)
@@ -129,11 +137,11 @@ class SearchResultsCompactStep(SearchResultsStep):
                 _t(self.ui_language, "状态", "Status"),
             ]
         )
-        self.table.setMinimumHeight(480)
+        self.table.setMinimumHeight(420)
         self.table.setAlternatingRowColors(False)
         self.table.setWordWrap(False)
         self.table.verticalHeader().setMinimumWidth(34)
-        self.table.verticalHeader().setDefaultSectionSize(44)
+        self.table.verticalHeader().setDefaultSectionSize(40)
         self.table.verticalHeader().setDefaultAlignment(Qt.AlignCenter)
         self.table.setStyleSheet(
             f"""
@@ -252,6 +260,10 @@ class SearchResultsCompactStep(SearchResultsStep):
               color: {UI_COLORS["text_primary"]};
               font-size: 15px;
               font-weight: 700;
+              min-width: 16px;
+              max-width: 16px;
+              min-height: 16px;
+              max-height: 16px;
               padding: 0px;
             }}
             QPushButton:hover {{

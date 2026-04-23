@@ -59,8 +59,8 @@ class CandidateWorkspaceCompactPage(QWidget):
         ]
 
         outer_layout = QVBoxLayout(self)
-        outer_layout.setContentsMargins(16, 8, 16, 12)
-        outer_layout.setSpacing(10)
+        outer_layout.setContentsMargins(14, 6, 14, 10)
+        outer_layout.setSpacing(8)
 
         self.body_stack = QStackedWidget()
         outer_layout.addWidget(self.body_stack, 1)
@@ -70,7 +70,7 @@ class CandidateWorkspaceCompactPage(QWidget):
         self.content_page.setObjectName("CompactWorkspaceContent")
         content_layout = QVBoxLayout(self.content_page)
         content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(10)
+        content_layout.setSpacing(8)
 
         self.hero_card = self._build_candidate_strip()
         content_layout.addWidget(self.hero_card)
@@ -116,7 +116,7 @@ class CandidateWorkspaceCompactPage(QWidget):
                 stop:0 {UI_COLORS["accent_primary"]},
                 stop:1 {UI_COLORS["accent_secondary"]}
               );
-              border-radius: 16px;
+              border-radius: 14px;
               border: none;
             }}
             QFrame#CompactWorkspaceHero QLabel,
@@ -125,7 +125,7 @@ class CandidateWorkspaceCompactPage(QWidget):
             }}
             QLabel#CompactWorkspaceName {{
               color: {UI_COLORS["text_inverse"]};
-              font-size: 18px;
+              font-size: 17px;
               font-weight: 700;
             }}
             QLabel#CompactWorkspaceMeta {{
@@ -133,8 +133,8 @@ class CandidateWorkspaceCompactPage(QWidget):
               font-size: 12px;
             }}
             QPushButton#CompactStepButton {{
-              min-height: 30px;
-              padding: 2px 10px;
+              min-height: 28px;
+              padding: 1px 9px;
               border-radius: 8px;
               border: 1px solid {UI_COLORS["border"]};
               background: {UI_COLORS["bg_card"]};
@@ -148,8 +148,8 @@ class CandidateWorkspaceCompactPage(QWidget):
               border: 1px solid {UI_COLORS["accent_primary"]};
             }}
             QPushButton#CompactToolbarButton {{
-              min-height: 30px;
-              padding: 2px 10px;
+              min-height: 28px;
+              padding: 1px 9px;
               border-radius: 8px;
             }}
             """
@@ -201,12 +201,12 @@ class CandidateWorkspaceCompactPage(QWidget):
         hero = make_card()
         hero.setObjectName("CompactWorkspaceHero")
         layout = QHBoxLayout(hero)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(12)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(10)
 
         left = QVBoxLayout()
         left.setContentsMargins(0, 0, 0, 0)
-        left.setSpacing(4)
+        left.setSpacing(3)
         self.hero_title = QLabel(_t(self.ui_language, "未选择求职者", "No Candidate Selected"))
         self.hero_title.setObjectName("CompactWorkspaceName")
         self.hero_meta = QLabel("")
@@ -222,7 +222,7 @@ class CandidateWorkspaceCompactPage(QWidget):
 
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
-        actions.setSpacing(6)
+        actions.setSpacing(5)
         self.workspace_settings_button = styled_button(
             _t(self.ui_language, "设置 / Settings", "Settings / 设置"),
             "hero",
@@ -244,7 +244,7 @@ class CandidateWorkspaceCompactPage(QWidget):
     def _build_step_bar(self) -> QWidget:
         card = make_card()
         layout = QHBoxLayout(card)
-        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(6)
         for index, title in enumerate(self.step_titles):
             button = styled_button(f"{index + 1}. {title}", "step")

@@ -207,7 +207,7 @@ def _build_window(app: QApplication, runtime_root: Path, *, width: int, height: 
     finally:
         bootstrap_module.build_app_paths = original_build_app_paths
 
-    context.settings.save_ui_language("zh")
+    context.settings.save_ui_language("en")
     icon = _resolve_app_icon(context)
     if icon is not None:
         app.setWindowIcon(icon)

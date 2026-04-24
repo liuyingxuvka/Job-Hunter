@@ -1,5 +1,9 @@
 # Job Hunter
 
+<p align="center">
+  <img src="desktop_app/assets/app_icon.png" alt="Job Hunter app icon" width="96">
+</p>
+
 > 面向有经验求职者的本地优先岗位发现工作台。核心思路是：先找对公司，再找对岗位。  
 > A local-first job discovery workspace for experienced professionals. The core idea is simple: find the right companies before chasing the right roles.
 >
@@ -8,11 +12,14 @@
 
 ## Product Preview / 产品预览
 
-### Candidate Entry / 候选人入口
+截图使用内置 demo candidate 和公开示例链接生成，不包含真实求职者数据。<br>
+Screenshots are generated from the built-in demo candidate and public example links, with no real candidate data.
+
+### Candidate Directory / 求职者入口
 
 ![Job Hunter candidate entry](docs/images/readme-screenshot-directory.png)
 
-### Search Workspace / 搜索工作台
+### Job Search Workspace / 岗位搜索工作台
 
 ![Job Hunter search workspace](docs/images/readme-screenshot-search-results.png)
 

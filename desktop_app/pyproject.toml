@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jobflow-desktop-app"
-version = "0.8.2"
+version = "0.8.3"
 description = "Local desktop application for job discovery, screening, scoring, and export."
 readme = "README.md"
 requires-python = ">=3.10"

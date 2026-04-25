@@ -10,6 +10,11 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-04-25
+
+### Changed
+
+- 优化岗位搜索链路可维护性、增加直接岗位发现流程并补充公司池与岗位评分可迭代关系的用户价值说明；本次为发布说明级更新
 ## [0.8.2] - 2026-04-25
 
 ### Added

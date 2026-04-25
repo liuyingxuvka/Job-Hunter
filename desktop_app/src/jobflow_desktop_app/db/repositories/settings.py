@@ -10,9 +10,32 @@ from ..connection import Database
 @dataclass(frozen=True)
 class OpenAISettings:
     api_key: str = ""
-    model: str = "gpt-5"
+    model: str = ""
     api_key_source: str = "direct"
     api_key_env_var: str = ""
+    quality_model: str = ""
+
+    @property
+    def fast_model(self) -> str:
+        return self.model.strip()
+
+    def for_fast_model(self) -> "OpenAISettings":
+        return OpenAISettings(
+            api_key=self.api_key,
+            model=self.fast_model,
+            api_key_source=self.api_key_source,
+            api_key_env_var=self.api_key_env_var,
+            quality_model=self.quality_model,
+        )
+
+    def for_quality_model(self) -> "OpenAISettings":
+        return OpenAISettings(
+            api_key=self.api_key,
+            model=self.quality_model.strip(),
+            api_key_source=self.api_key_source,
+            api_key_env_var=self.api_key_env_var,
+            quality_model=self.quality_model,
+        )
 
 
 class AppSettingsRepository:
@@ -58,28 +81,44 @@ class AppSettingsRepository:
         )
         return OpenAISettings(
             api_key=self.get_value("openai_api_key", ""),
-            model=self.get_value("openai_model", "gpt-5"),
+            model=self.get_value("openai_model", ""),
             api_key_source=source,
             api_key_env_var=env_var,
+            quality_model=self.get_value("openai_quality_model", ""),
         )
 
     def get_effective_openai_settings(self) -> OpenAISettings:
         stored = self.get_openai_settings()
         resolved_api_key = self.resolve_api_key(stored)
-        stored_model = stored.model.strip()
-        env_model = ""
-        if not stored_model:
-            env_model = self._first_env(
+        stored_fast_model = stored.model.strip()
+        env_fast_model = ""
+        if not stored_fast_model:
+            env_fast_model = self._first_env(
+                "JOBFLOW_OPENAI_FAST_MODEL",
                 "JOBFLOW_OPENAI_MODEL",
                 "AZURE_OPENAI_MODEL",
                 "AZURE_OPENAI_DEPLOYMENT",
             )
+        stored_quality_model = stored.quality_model.strip()
+        env_quality_model = ""
+        if not stored_quality_model:
+            env_quality_model = self._first_env(
+                "JOBFLOW_OPENAI_QUALITY_MODEL",
+                "JOBFLOW_OPENAI_HIGH_QUALITY_MODEL",
+            )
         return OpenAISettings(
             api_key=resolved_api_key,
-            model=stored_model or env_model or "gpt-5",
+            model=stored_fast_model or env_fast_model,
             api_key_source=stored.api_key_source,
             api_key_env_var=stored.api_key_env_var,
+            quality_model=stored_quality_model or env_quality_model,
         )
+
+    def get_fast_openai_settings(self) -> OpenAISettings:
+        return self.get_effective_openai_settings().for_fast_model()
+
+    def get_quality_openai_settings(self) -> OpenAISettings:
+        return self.get_effective_openai_settings().for_quality_model()
 
     def get_openai_base_url(self) -> str:
         direct = self._first_env("OPENAI_BASE_URL", "OPENAI_API_BASE")
@@ -102,7 +141,8 @@ class AppSettingsRepository:
         source = self._normalize_api_key_source(settings.api_key_source)
         env_var = self._normalize_api_key_env_var(settings.api_key_env_var)
         self.set_value("openai_api_key", settings.api_key.strip())
-        self.set_value("openai_model", settings.model.strip() or "gpt-5")
+        self.set_value("openai_model", settings.model.strip())
+        self.set_value("openai_quality_model", settings.quality_model.strip())
         self.set_value("openai_api_key_source", source)
         self.set_value("openai_api_key_env_var", env_var)
 

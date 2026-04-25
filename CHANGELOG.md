@@ -10,6 +10,26 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-04-25
+
+### Added
+
+- Added separate fast-model and high-quality-model OpenAI settings, with AI validation requiring both saved models to be available and usable.
+- Added runtime model routing so high-volume job preranking and display translation can use the fast model while target-role recommendation, semantic profile extraction, manual role enrichment, company fit, formal job scoring, and post-verify use the high-quality model.
+- Added the daily packaged-app QA loop document for the local test, repair, rebuild, and retest workflow.
+
+### Changed
+
+- Updated the AI settings dialog to show the model-list load action before the fast and high-quality model selectors, with a compact button layout that avoids clipping.
+- Limited search duration choices to one, two, three, and four hours, with one hour as the default supported daily run length.
+- Tightened AI target-role recommendation prompts toward concise market-facing job-board titles.
+
+### Fixed
+
+- Fixed manual target-role add so missing role type validation keeps the dialog open and preserves the draft.
+- Fixed manual target-role AI enrichment so timeout or failure saves a draft role from the user's input instead of losing the attempt.
+- Removed personal maintainer name/email defaults from the Windows package metadata and support dialog fallback.
+
 ## [0.8.1] - 2026-04-24
 
 ### Added
@@ -87,7 +107,7 @@ This project currently follows a lightweight semantic versioning approach:
 - Hardened search-profile persistence to sanitize incomplete text values and malformed query payloads before saving instead of crashing on partial UI state.
 - Added public `companyFit` defaults to the legacy example configs and clarified in the legacy README that company-fit scores are run-local reranking signals, not permanent stored labels.
 - Refined desktop button disabled-state styling and routed unhandled UI callback failures into `crash.log` with user-facing diagnostics instead of failing silently.
-- Updated the Windows packaging metadata so the packaged `.exe` carries `Yingxu Liu` in its embedded author/publisher-style version information.
+- Updated the Windows packaging metadata so the packaged `.exe` carries branded project information in its embedded version metadata.
 
 ## [0.4.0] - 2026-04-12
 
@@ -123,7 +143,7 @@ This project currently follows a lightweight semantic versioning approach:
 ### Added
 
 - Added an experimental `jobflow-agent` CLI that exposes JSON-based overview, candidate/profile inspection, and AI role recommendation entry points for headless automation.
-- Added repository-facing agent integration documentation, GitHub issue intake for automation requests, and GitHub Sponsors funding metadata.
+- Added repository-facing agent integration documentation, GitHub issue intake for automation requests, and repository support metadata.
 - Added `pypdf` support and package metadata updates so desktop installs can parse text-based PDF resumes more reliably and surface better project metadata.
 
 ### Changed

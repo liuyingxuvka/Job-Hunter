@@ -154,7 +154,7 @@ class ManualRoleInputDialog(QDialog):
         layout.addLayout(actions)
 
         self.cancel_button.clicked.connect(self.reject)
-        self.submit_button.clicked.connect(self.accept)
+        self.submit_button.clicked.connect(self._submit)
 
     def values(self) -> tuple[str, str]:
         return (
@@ -164,4 +164,28 @@ class ManualRoleInputDialog(QDialog):
 
     def selected_scope_profile(self) -> str:
         return str(self.scope_profile_combo.currentData() or "").strip()
+
+    def _submit(self) -> None:
+        role_name, _rough_description = self.values()
+        if not role_name:
+            QMessageBox.warning(
+                self,
+                _t(self.ui_language, "手动添加岗位", "Add Role Manually"),
+                _t(self.ui_language, "岗位名称不能为空。", "Role name cannot be empty."),
+            )
+            self.role_name_input.setFocus()
+            return
+        if not self.selected_scope_profile():
+            QMessageBox.warning(
+                self,
+                _t(self.ui_language, "手动添加岗位", "Add Role Manually"),
+                _t(
+                    self.ui_language,
+                    "请先选择这个岗位属于核心、相邻还是探索方向。",
+                    "Please choose whether this role is core, adjacent, or exploratory first.",
+                ),
+            )
+            self.scope_profile_combo.setFocus()
+            return
+        self.accept()
 

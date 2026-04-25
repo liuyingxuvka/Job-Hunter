@@ -60,7 +60,19 @@ class MainWindowSmokeTests(unittest.TestCase):
                 self.assertEqual(window.stack.currentWidget(), window.workspace_compact_page)
                 self.assertEqual(window.current_candidate_id, candidate_id)
                 self.assertEqual(window.workspace_compact_page.current_candidate_id, candidate_id)
+                self.assertEqual(window.workspace_compact_page.step_stack.currentIndex(), 0)
                 self.assertIn("Smoke Candidate", window.statusBar().currentMessage())
+
+                window.workspace_compact_page._set_step(2)
+                window._show_candidates_page()
+                QTest.mouseClick(
+                    window.candidate_directory_page.open_workspace_button,
+                    Qt.LeftButton,
+                )
+                process_events()
+
+                self.assertEqual(window.stack.currentWidget(), window.workspace_compact_page)
+                self.assertEqual(window.workspace_compact_page.step_stack.currentIndex(), 0)
             finally:
                 window.close()
                 process_events()

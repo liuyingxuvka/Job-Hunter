@@ -9,7 +9,7 @@ from ..widgets.common import _t
 def selected_search_duration_seconds(
     value: object,
     *,
-    minimum_seconds: int = 300,
+    minimum_seconds: int = 3600,
     default_seconds: int = 3600,
 ) -> int:
     try:

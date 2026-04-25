@@ -115,12 +115,11 @@ class SearchResultsStep(QWidget):
         self.search_duration_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.search_duration_combo.setMinimumContentsLength(8)
         self.search_duration_combo.setMinimumWidth(170)
-        self.search_duration_combo.addItem(_t(self.ui_language, "10 分钟", "10 minutes"), 600)
-        self.search_duration_combo.addItem(_t(self.ui_language, "30 分钟", "30 minutes"), 1800)
         self.search_duration_combo.addItem(_t(self.ui_language, "1 小时", "1 hour"), 3600)
         self.search_duration_combo.addItem(_t(self.ui_language, "2 小时", "2 hours"), 7200)
+        self.search_duration_combo.addItem(_t(self.ui_language, "3 小时", "3 hours"), 10800)
         self.search_duration_combo.addItem(_t(self.ui_language, "4 小时", "4 hours"), 14400)
-        self.search_duration_combo.setCurrentIndex(2)
+        self.search_duration_combo.setCurrentIndex(0)
         self.search_duration_combo.currentIndexChanged.connect(self._refresh_search_countdown)
 
         self.search_countdown_label = QLabel(
@@ -520,6 +519,7 @@ class SearchResultsStep(QWidget):
 
     def _reload_existing_results(self, candidate_id: int) -> None:
         search_results_candidate_state.reload_existing_results(self, candidate_id)
+        self._apply_search_prerequisite_state()
 
     def set_ai_validation_state(self, message: str, level: str = "idle") -> None:
         was_blocked = bool(self._blocked_ai_issue())
@@ -563,7 +563,7 @@ class SearchResultsStep(QWidget):
 
     def _job_display_i18n_context(self) -> tuple[OpenAISettings | None, str]:
         return (
-            self.context.settings.get_effective_openai_settings(),
+            self.context.settings.get_fast_openai_settings(),
             self.context.settings.get_openai_base_url(),
         )
 

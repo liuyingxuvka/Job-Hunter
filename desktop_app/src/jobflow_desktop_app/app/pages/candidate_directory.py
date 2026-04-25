@@ -4,7 +4,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from ...db.repositories.candidates import CandidateRecord, CandidateSummary
 from ..context import AppContext
+from ..theme import UI_COLORS
 from ..widgets.common import _t, make_card, styled_button
 from ..widgets.dialog_presenter import QtDialogPresenter
 
@@ -56,6 +58,34 @@ class CandidateDirectoryPage(QWidget):
         self.candidate_list = QListWidget()
         self.candidate_list.setObjectName("EntityList")
         self.candidate_list.setSpacing(4)
+        self.candidate_list.setIconSize(QSize(34, 34))
+        self.candidate_list.setStyleSheet(
+            f"""
+            QListWidget#EntityList {{
+              padding: 6px;
+            }}
+            QListWidget#EntityList::item {{
+              min-height: 58px;
+              padding: 8px 12px;
+              margin: 2px 0;
+              border-radius: 12px;
+              border: 1px solid transparent;
+            }}
+            QListWidget#EntityList::item:hover:!selected {{
+              background: {UI_COLORS["bg_subtle"]};
+              border: 1px solid {UI_COLORS["border"]};
+            }}
+            QListWidget#EntityList::item:selected {{
+              background: qlineargradient(
+                x1:0, y1:0, x2:1, y2:1,
+                stop:0 {UI_COLORS["accent_primary"]},
+                stop:1 {UI_COLORS["accent_secondary"]}
+              );
+              color: {UI_COLORS["text_inverse"]};
+              border: 1px solid {UI_COLORS["accent_secondary"]};
+            }}
+            """
+        )
         left_layout.addWidget(self.candidate_list, 1)
 
         right_card = make_card()
@@ -110,7 +140,7 @@ class CandidateDirectoryPage(QWidget):
         for button in (self.open_workspace_button, self.new_button, self.rename_button, self.delete_button):
             button.setMinimumHeight(36)
             button.setMaximumHeight(42)
-            button.setMaximumWidth(300)
+            button.setFixedWidth(150)
         right_layout.addWidget(self.open_workspace_button, 0, Qt.AlignLeft)
         right_layout.addWidget(self.new_button, 0, Qt.AlignLeft)
         right_layout.addWidget(self.rename_button, 0, Qt.AlignLeft)
@@ -187,6 +217,8 @@ class CandidateDirectoryPage(QWidget):
             role_text = _t(self.ui_language, f"{profile_count} 个目标岗位", f"{profile_count} roles")
             resume_text = _t(self.ui_language, f"简历：{resume_name}", f"Resume: {resume_name}")
             item = QListWidgetItem(f"{record.name}\n{resume_text}    ·    {role_text}")
+            item.setIcon(self._candidate_avatar_icon())
+            item.setSizeHint(QSize(0, 68))
             item.setData(Qt.UserRole, record.candidate_id)
             item.setToolTip(f"{record.name}\n{resume_text} · {role_text}")
             self.candidate_list.addItem(item)
@@ -222,6 +254,41 @@ class CandidateDirectoryPage(QWidget):
             return None
         candidate_id = current.data(Qt.UserRole)
         return int(candidate_id) if candidate_id is not None else None
+
+    @staticmethod
+    def _candidate_avatar_icon() -> QIcon:
+        icon = QIcon()
+        icon.addPixmap(
+            CandidateDirectoryPage._draw_candidate_avatar(
+                stroke=UI_COLORS["accent_secondary"],
+                fill="#e8f1f7",
+            ),
+            QIcon.Normal,
+        )
+        icon.addPixmap(
+            CandidateDirectoryPage._draw_candidate_avatar(
+                stroke=UI_COLORS["text_inverse"],
+                fill=QColor(255, 255, 255, 42),
+            ),
+            QIcon.Selected,
+        )
+        return icon
+
+    @staticmethod
+    def _draw_candidate_avatar(*, stroke: str, fill: str | QColor) -> QPixmap:
+        pixmap = QPixmap(34, 34)
+        pixmap.fill(Qt.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(QColor(stroke), 1.6))
+        painter.setBrush(QColor(fill) if isinstance(fill, str) else fill)
+        painter.drawEllipse(2, 2, 30, 30)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(12, 8, 10, 10)
+        painter.drawArc(8, 17, 18, 12, 20 * 16, 140 * 16)
+        painter.end()
+        return pixmap
 
     def _on_candidate_selected(self, current: QListWidgetItem | None, _: QListWidgetItem | None) -> None:
         if current is None:

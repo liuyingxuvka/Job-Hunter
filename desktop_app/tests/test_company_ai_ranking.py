@@ -51,6 +51,64 @@ class CompanyAiRankingTests(unittest.TestCase):
             },
         }
 
+    def test_company_fit_prefers_quality_fit_model(self) -> None:
+        config = self._config()
+        config["companyDiscovery"]["fitModel"] = "gpt-5.4"
+        client = _FakeClient(
+            [
+                {
+                    "output_text": json.dumps(
+                        {"companies": [{"companyKey": "domain:linkedin.com", "fitScore": 92}]}
+                    )
+                }
+            ]
+        )
+
+        score_companies_for_candidate(
+            client,
+            config=config,
+            companies=[{"name": "LinkedIn", "website": "https://www.linkedin.com"}],
+        )
+
+        self.assertEqual(client.requests[0]["model"], "gpt-5.4")
+
+    def test_job_prerank_prefers_fast_prerank_model(self) -> None:
+        config = self._config()
+        config["analysis"]["model"] = "gpt-5.4"
+        config["analysis"]["preRankModel"] = "gpt-5-nano"
+        client = _FakeClient(
+            [
+                {
+                    "output_text": json.dumps(
+                        {
+                            "jobs": [
+                                {
+                                    "jobKey": "https://www.linkedin.com/jobs/view/ta-manager",
+                                    "preRankScore": 95,
+                                    "reason": "Direct match.",
+                                }
+                            ]
+                        }
+                    )
+                }
+            ]
+        )
+
+        prerank_company_jobs_for_candidate(
+            client,
+            config=config,
+            company={"name": "LinkedIn", "website": "https://www.linkedin.com"},
+            jobs=[
+                {
+                    "title": "Talent Acquisition Manager",
+                    "url": "https://www.linkedin.com/jobs/view/ta-manager",
+                    "summary": "Lead talent acquisition.",
+                }
+            ],
+        )
+
+        self.assertEqual(client.requests[0]["model"], "gpt-5-nano")
+
     def test_score_companies_for_candidate_merges_ai_scores(self) -> None:
         client = _FakeClient(
             [

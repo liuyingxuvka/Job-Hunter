@@ -37,7 +37,7 @@ def start_role_suggestion_flow(
         )
         return
 
-    settings = context.settings.get_effective_openai_settings()
+    settings = context.settings.get_quality_openai_settings()
     if not settings.api_key.strip():
         show_warning(
             _t(ui_language, "AI 推荐岗位", "AI Recommend Roles"),

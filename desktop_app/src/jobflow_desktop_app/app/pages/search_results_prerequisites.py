@@ -4,6 +4,7 @@ from typing import Callable
 
 from ...db.repositories.profiles import SearchProfileRecord
 from ..widgets.common import _t
+from .ai_status_messages import compact_ai_blocking_issue
 
 
 def search_owner_name(candidate_id: int | None, *, resolve_candidate_name: Callable[[int], str | None]) -> str:
@@ -25,10 +26,10 @@ def blocked_ai_issue(
 ) -> str:
     if ai_validation_level not in blocked_ai_levels:
         return ""
-    return ai_validation_message or _t(
+    return compact_ai_blocking_issue(
         ui_language,
-        "当前 AI 状态未通过验证。请先在右上角“设置 / Settings”里修复后再开始岗位搜索。",
-        "The current AI status has not passed validation. Fix it in the top-right Settings / 设置 before starting job search.",
+        ai_validation_level,
+        ai_validation_message,
     )
 
 

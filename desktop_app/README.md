@@ -128,6 +128,14 @@ cd .\desktop_app
 | `assets/` | 图标等静态资源 |
 | `run_release.ps1` | Windows 启动脚本 |
 
+### 支持
+
+如果这个项目对你有帮助，欢迎通过下面的链接请开发者喝杯咖啡：
+
+[通过 PayPal 请开发者喝杯咖啡](https://paypal.me/Yingxuliu)
+
+这只是自愿支持项目维护，不代表购买技术支持、质保、优先服务、商业授权或功能定制。
+
 ## English
 
 ### What This Subproject Is
@@ -252,3 +260,11 @@ It is intended for the source checkout; the GitHub Release package provides `Job
 | `runtime/` | Local runtime data, logs, exports, and per-candidate search run outputs |
 | `assets/` | Static assets such as icons |
 | `run_release.ps1` | Windows launch script |
+
+### Support
+
+If this project is useful to you, you're welcome to buy the developer a coffee here:
+
+[Buy me a coffee via PayPal](https://paypal.me/Yingxuliu)
+
+This is voluntary support for project maintenance. It does not purchase technical support, warranty, priority service, commercial rights, or feature requests.

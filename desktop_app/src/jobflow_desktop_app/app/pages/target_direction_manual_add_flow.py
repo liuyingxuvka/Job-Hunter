@@ -16,6 +16,9 @@ from . import target_direction_profile_completion
 from . import target_direction_profile_records
 
 
+MANUAL_ROLE_ENRICH_TIMEOUT_MS = 120_000
+
+
 def start_manual_add_flow(
     *,
     owner: QWidget,
@@ -71,7 +74,7 @@ def start_manual_add_flow(
         return
 
     candidate_id = int(current_candidate.candidate_id)
-    settings = context.settings.get_effective_openai_settings()
+    settings = context.settings.get_quality_openai_settings()
     api_base_url = context.settings.get_openai_base_url()
     use_ai = bool(settings.api_key.strip()) and bool(allow_ai_actions())
     dialog_title = _t(ui_language, "手动添加岗位", "Add Role Manually")
@@ -92,6 +95,7 @@ def start_manual_add_flow(
             except RoleRecommendationError as exc:
                 enrich_error = str(exc)
 
+        completion_use_ai = bool(enable_ai and suggestion is not None)
         if suggestion is not None:
             role_name_zh = suggestion.name_zh.strip()
             role_name_en = (suggestion.name_en or suggestion.name).strip()
@@ -113,7 +117,7 @@ def start_manual_add_flow(
             fallback_name=direction_name,
             settings=settings,
             api_base_url=api_base_url,
-            use_ai=enable_ai,
+            use_ai=completion_use_ai,
             complete_role_name_pair=complete_role_name_pair,
             complete_description_pair=complete_description_pair,
         )
@@ -126,7 +130,7 @@ def start_manual_add_flow(
             "enrich_error": enrich_error,
         }
 
-    def _persist_payload(payload: dict[str, str]) -> None:
+    def _persist_payload(payload: dict[str, str]) -> bool:
         role_name_zh = str(payload.get("role_name_zh") or "").strip()
         role_name_en = str(payload.get("role_name_en") or "").strip()
         description_zh = str(payload.get("description_zh") or "").strip()
@@ -154,7 +158,7 @@ def start_manual_add_flow(
                     "Please add a more specific direction and submit again.",
                 ),
             )
-            return
+            return False
 
         profile_id = context.profiles.save(
             target_direction_profile_records.build_new_profile_record(
@@ -180,6 +184,7 @@ def start_manual_add_flow(
                     f"Error: {enrich_error}",
                 ),
             )
+        return True
 
     if not use_ai:
         _persist_payload(_build_payload(False))
@@ -208,22 +213,42 @@ def start_manual_add_flow(
         if not candidate_still_current():
             return
         if not isinstance(result, dict):
-            show_warning(
-                dialog_title,
-                _t(ui_language, "返回结果格式异常。", "Unexpected result payload."),
-            )
+            _persist_fallback_after_ai_failure(RuntimeError("Unexpected result payload."))
             return
         _persist_payload(result)
 
+    def _persist_fallback_after_ai_failure(exc: Exception) -> None:
+        if not candidate_still_current():
+            return
+        error_detail = str(exc or "").strip() or exc.__class__.__name__
+        try:
+            saved = _persist_payload(_build_payload(False))
+        except Exception as fallback_exc:  # pragma: no cover - defensive UI fallback
+            fallback_detail = str(fallback_exc or "").strip() or fallback_exc.__class__.__name__
+            show_warning(
+                dialog_title,
+                _t(
+                    ui_language,
+                    f"岗位补全失败，而且草稿保存也失败：{fallback_detail}\n\n原始错误：{error_detail}",
+                    f"Role enrichment failed, and saving a draft also failed: {fallback_detail}\n\nOriginal error: {error_detail}",
+                ),
+            )
+            return
+        if saved:
+            show_information(
+                dialog_title,
+                _t(
+                    ui_language,
+                    "AI 自动补全超时或失败，已先按你的输入创建草稿岗位。你可以继续编辑该岗位说明。\n\n"
+                    f"错误信息：{error_detail}",
+                    "AI enrichment timed out or failed, so a draft role was created from your input first. "
+                    "You can keep editing the role details.\n\n"
+                    f"Error: {error_detail}",
+                ),
+            )
+
     def _on_error(exc: Exception) -> None:
-        show_warning(
-            dialog_title,
-            _t(
-                ui_language,
-                f"岗位补全失败：{exc}",
-                f"Role enrichment failed: {exc}",
-            ),
-        )
+        _persist_fallback_after_ai_failure(exc)
 
     def _on_finally() -> None:
         add_button.setEnabled(current_candidate is not None)
@@ -237,6 +262,7 @@ def start_manual_add_flow(
         on_success=_on_success,
         on_error=_on_error,
         on_finally=_on_finally,
+        timeout_ms=MANUAL_ROLE_ENRICH_TIMEOUT_MS,
     )
     if not started:
         add_button.setEnabled(current_candidate is not None)

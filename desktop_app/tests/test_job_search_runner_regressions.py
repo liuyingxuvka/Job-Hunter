@@ -35,6 +35,7 @@ class JobSearchRunnerRegressionTests(unittest.TestCase):
             settings = OpenAISettings(
                 api_key="test-key",
                 model="gpt-5-nano",
+                quality_model="gpt-5.4",
                 api_key_source="direct",
                 api_key_env_var="",
             )
@@ -83,6 +84,7 @@ class JobSearchRunnerRegressionTests(unittest.TestCase):
             settings = OpenAISettings(
                 api_key="test-key",
                 model="gpt-5-nano",
+                quality_model="gpt-5.4",
                 api_key_source="direct",
                 api_key_env_var="",
             )
@@ -147,6 +149,7 @@ class JobSearchRunnerRegressionTests(unittest.TestCase):
             settings = OpenAISettings(
                 api_key="test-key",
                 model="gpt-5-nano",
+                quality_model="gpt-5.4",
                 api_key_source="direct",
                 api_key_env_var="",
             )
@@ -204,6 +207,8 @@ class JobSearchRunnerRegressionTests(unittest.TestCase):
             self.assertEqual(build_context_mock.call_count, 1)
             self.assertGreaterEqual(len(build_calls), 2)
             self.assertEqual([call["pipeline_stage"] for call in build_calls[:2]], ["main", "resume_pending"])
+            self.assertEqual([call["model_override"] for call in build_calls[:2]], ["gpt-5-nano", "gpt-5-nano"])
+            self.assertEqual([call["quality_model_override"] for call in build_calls[:2]], ["gpt-5.4", "gpt-5.4"])
             self.assertIs(build_calls[0]["signals"], shared_signals)
             self.assertIs(build_calls[1]["signals"], shared_signals)
             self.assertIs(build_calls[0]["candidate_context"], shared_candidate_context)

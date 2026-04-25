@@ -100,6 +100,7 @@ class SearchResultsCompactStep(SearchResultsStep):
         self.results_meta_label.setObjectName("InlineStatusLabel")
         self.results_progress_label.setWordWrap(False)
         self.results_progress_label.setObjectName("InlineMetaLabel")
+        layout.addWidget(self.results_progress_label)
         self.results_stats_label.setWordWrap(False)
         self.results_stats_label.setObjectName("InlineMetaLabel")
         status_row = QWidget()
@@ -111,7 +112,6 @@ class SearchResultsCompactStep(SearchResultsStep):
         status_layout.addWidget(self.results_meta_label)
         status_layout.addWidget(self.results_stats_label)
         status_layout.addStretch(1)
-        status_layout.addWidget(self.results_progress_label)
         layout.addWidget(status_row)
         return card
 

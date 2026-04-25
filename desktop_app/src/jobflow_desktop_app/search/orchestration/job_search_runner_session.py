@@ -38,10 +38,11 @@ def load_candidate_semantic_profile_for_run(
     run_dir: Path,
 ):
     service = OpenAIRoleRecommendationService()
+    profile_settings = settings.for_quality_model() if settings is not None else OpenAISettings()
     try:
         return service.extract_candidate_semantic_profile(
             candidate=candidate,
-            settings=settings or OpenAISettings(),
+            settings=profile_settings,
             api_base_url=api_base_url,
             cache_path=None,
         )
@@ -186,7 +187,8 @@ def run_search(
     candidate_search_signals = None
     candidate_runtime_context = None
     effective_max_companies = max(1, int(max_companies))
-    model_override = runtime_config_builder.resolve_model_override(settings)
+    model_overrides = runtime_config_builder.resolve_model_overrides(settings)
+    model_override = model_overrides.fast_model
 
     try:
         base_config = runtime_config_builder.load_base_config()
@@ -228,6 +230,7 @@ def run_search(
             query_rotation_seed=query_rotation_seed,
             semantic_profile=semantic_profile,
             model_override=model_override,
+            quality_model_override=model_overrides.quality_model,
             pipeline_stage="main",
             signals=candidate_search_signals,
             candidate_context=candidate_runtime_context,
@@ -251,6 +254,7 @@ def run_search(
             query_rotation_seed=query_rotation_seed,
             semantic_profile=semantic_profile,
             model_override=model_override,
+            quality_model_override=model_overrides.quality_model,
             pipeline_stage="resume_pending",
             signals=candidate_search_signals,
             candidate_context=candidate_runtime_context,

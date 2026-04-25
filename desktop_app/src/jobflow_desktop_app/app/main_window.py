@@ -80,6 +80,12 @@ def _validate_structured_model_request(
     return False, "AI model validation returned an unexpected JSON payload."
 
 
+def _format_model_pair(*, fast_model: str, quality_model: str) -> str:
+    fast = str(fast_model or "").strip() or "not set"
+    quality = str(quality_model or "").strip() or "not set"
+    return f"fast {fast}; quality {quality}"
+
+
 class _AIValidationWorker(QObject):
     finished = Signal(object)
 
@@ -115,42 +121,86 @@ class _AIValidationWorker(QObject):
             )
             return
 
-        current_model = effective_settings.model.strip()
-        if not current_model:
+        fast_model = effective_settings.fast_model
+        quality_model = effective_settings.quality_model.strip()
+        model_label = _format_model_pair(fast_model=fast_model, quality_model=quality_model)
+        missing_parts: list[str] = []
+        if not fast_model:
+            missing_parts.append("fast model")
+        if not quality_model:
+            missing_parts.append("quality model")
+        if missing_parts:
             self.finished.emit(
                 {
                     "state": "model_unverified",
-                    "current_model": "",
-                    "error": "No model is currently saved.",
+                    "current_model": model_label,
+                    "fast_model": fast_model,
+                    "quality_model": quality_model,
+                    "error": "No " + " or ".join(missing_parts) + " is currently saved.",
                 }
             )
             return
 
-        current_model_in_catalog = any(
-            str(item or "").strip().casefold() == current_model.casefold() for item in result.models
-        )
-        if not current_model_in_catalog:
+        catalog_keys = {str(item or "").strip().casefold() for item in result.models}
+        missing_catalog_models: list[str] = []
+        if fast_model.casefold() not in catalog_keys:
+            missing_catalog_models.append(f"fast model {fast_model}")
+        if quality_model.casefold() not in catalog_keys:
+            missing_catalog_models.append(f"quality model {quality_model}")
+        if missing_catalog_models:
             self.finished.emit(
                 {
                     "state": "model_unverified",
-                    "current_model": current_model,
-                    "error": f"The saved model {current_model} is not present in the current model catalog.",
+                    "current_model": model_label,
+                    "fast_model": fast_model,
+                    "quality_model": quality_model,
+                    "error": "The saved "
+                    + " and ".join(missing_catalog_models)
+                    + " is not present in the current model catalog.",
                 }
             )
             return
 
-        current_model_usable, validation_error = _validate_structured_model_request(
+        fast_model_usable, fast_validation_error = _validate_structured_model_request(
             api_key=api_key,
-            model_id=current_model,
+            model_id=fast_model,
+            api_base_url=base_url,
+            timeout_seconds=8,
+        )
+        if not fast_model_usable:
+            self.finished.emit(
+                {
+                    "state": "model_unverified",
+                    "current_model": model_label,
+                    "fast_model": fast_model,
+                    "quality_model": quality_model,
+                    "fast_model_usable": False,
+                    "quality_model_usable": False,
+                    "error": f"Fast model {fast_model} failed validation. {str(fast_validation_error or '').strip()}",
+                }
+            )
+            return
+
+        quality_model_usable, quality_validation_error = _validate_structured_model_request(
+            api_key=api_key,
+            model_id=quality_model,
             api_base_url=base_url,
             timeout_seconds=8,
         )
         self.finished.emit(
             {
-                "state": "ok" if current_model_usable else "model_unverified",
-                "current_model": current_model,
-                "current_model_usable": current_model_usable,
-                "error": str(validation_error or "").strip(),
+                "state": "ok" if quality_model_usable else "model_unverified",
+                "current_model": model_label,
+                "fast_model": fast_model,
+                "quality_model": quality_model,
+                "current_model_usable": bool(fast_model_usable and quality_model_usable),
+                "fast_model_usable": fast_model_usable,
+                "quality_model_usable": quality_model_usable,
+                "error": (
+                    ""
+                    if quality_model_usable
+                    else f"Quality model {quality_model} failed validation. {str(quality_validation_error or '').strip()}"
+                ),
             }
         )
 
@@ -201,11 +251,11 @@ class MainWindow(QMainWindow):
         try:
             if isinstance(getattr(self, "workspace_compact_page", None), CandidateWorkspaceCompactPage):
                 self.workspace_compact_page.shutdown_background_work(wait_ms=8000)
-            # Validation can spend up to ~16 seconds across model list fetch and
-            # a structured JSON smoke request, so give shutdown enough headroom
+            # Validation can spend up to ~24 seconds across model list fetch and
+            # two structured JSON smoke requests, so give shutdown enough headroom
             # to avoid tearing
             # down Qt while the worker thread is still alive.
-            self._shutdown_ai_validation(wait_ms=20000)
+            self._shutdown_ai_validation(wait_ms=30000)
         finally:
             super().closeEvent(event)
 
@@ -261,6 +311,7 @@ class MainWindow(QMainWindow):
             self._set_current_candidate(candidate_id)
         else:
             self.workspace_compact_page.set_candidate(candidate_id)
+        self.workspace_compact_page.show_initial_step()
         self.stack.setCurrentWidget(self.workspace_compact_page)
         self._start_ai_health_check()
 
@@ -310,8 +361,8 @@ class MainWindow(QMainWindow):
                 _t(self.ui_language, "正在验证", "Checking"),
                 _t(
                     self.ui_language,
-                    "正在后台验证 AI Key 和当前保存模型的可用性。你可以继续操作，验证完成后会自动更新状态。",
-                    "Validating the AI key and the currently saved model in the background. You can keep working while the status updates automatically.",
+                    "正在后台验证 AI Key、快速模型和高质量模型的可用性。你可以继续操作，验证完成后会自动更新状态。",
+                    "Validating the AI key, fast model, and quality model in the background. You can keep working while the status updates automatically.",
                 ),
             )
         if level == "missing":
@@ -319,8 +370,8 @@ class MainWindow(QMainWindow):
                 _t(self.ui_language, "未配置", "Not configured"),
                 _t(
                     self.ui_language,
-                    "尚未检测到可用的 AI Key。请在右上角“设置 / Settings”中检查环境变量或直接填写 Key。",
-                    "No usable AI key was detected yet. Check the environment variable or enter the key in 'Settings / 设置'.",
+                    "未检测到可用 AI Key。请在“设置 / Settings”中配置。",
+                    "No usable AI key was detected. Configure it in Settings.",
                 ),
             )
         if level == "invalid":
@@ -328,8 +379,8 @@ class MainWindow(QMainWindow):
                 _t(self.ui_language, "校验失败", "Validation failed"),
                 _t(
                     self.ui_language,
-                    f"AI Key 校验失败。请打开右上角“设置 / Settings”检查 Key、环境变量或接口地址。{('错误：' + error) if error else ''}",
-                    f"AI key validation failed. Open 'Settings / 设置' in the top-right to check the key, environment variable, or API base URL.{(' Error: ' + error) if error else ''}",
+                    "AI Key 校验失败。请在“设置 / Settings”检查 Key 或接口地址。",
+                    "AI key validation failed. Check the key or API base URL in Settings.",
                 ),
             )
         if level == "model_unverified":
@@ -338,14 +389,12 @@ class MainWindow(QMainWindow):
                 _t(
                     self.ui_language,
                     (
-                        f"AI Key 已读取到，但当前保存模型 {model_name or '未设置'} 未通过验证。"
-                        "请打开“设置 / Settings”重新加载模型列表并重新选择。"
-                        f"{(' 详细信息：' + error) if error else ''}"
+                        f"AI Key 已读取，但模型未验证（{model_name or '未设置'}）。"
+                        "请在“设置 / Settings”重新加载并选择模型。"
                     ),
                     (
-                        f"The AI key was found, but the saved model {model_name or 'not set'} did not pass validation. "
-                        "Open 'Settings / 设置' to reload the model list and choose again."
-                        f"{(' Details: ' + error) if error else ''}"
+                        f"AI key found, but models are not verified ({model_name or 'not set'}). "
+                        "Reload and choose models in Settings."
                     ),
                 ),
             )
@@ -358,16 +407,16 @@ class MainWindow(QMainWindow):
                 ),
                 _t(
                     self.ui_language,
-                    f"AI 已验证可用，当前模型 {model_name} 可以直接使用。",
-                    f"AI is verified and ready. Current model {model_name} can be used directly.",
+                    f"AI 已验证可用，当前模型设置为 {model_name}。",
+                    f"AI is verified and ready. Current model settings are {model_name}.",
                 ),
             )
         return (
             _t(self.ui_language, "未检查", "Not checked"),
             _t(
                 self.ui_language,
-                "进入求职者工作台后会自动验证 AI Key 和当前模型。",
-                "The AI key and current model will be checked automatically after entering the workspace.",
+                "进入求职者工作台后会自动验证 AI Key、快速模型和高质量模型。",
+                "The AI key, fast model, and quality model will be checked automatically after entering the workspace.",
             ),
         )
 
@@ -407,6 +456,17 @@ class MainWindow(QMainWindow):
             f"{prefix}  |  {label}: {record.name}{suffix}"
         )
 
+    def _format_ai_status_model_name(self, data: dict) -> str:
+        fast_model = str(data.get("fast_model") or "").strip()
+        quality_model = str(data.get("quality_model") or "").strip()
+        if fast_model or quality_model:
+            return _t(
+                self.ui_language,
+                f"快速 {fast_model or '未设置'}；高质量 {quality_model or '未设置'}",
+                f"fast {fast_model or 'not set'}; quality {quality_model or 'not set'}",
+            )
+        return str(data.get("current_model") or "").strip()
+
     def _warmup_model_catalog(self) -> None:
         self._start_ai_health_check()
 
@@ -444,7 +504,7 @@ class MainWindow(QMainWindow):
         if state == "model_unverified":
             self._set_ai_status(
                 "model_unverified",
-                model_name=str(data.get("current_model") or "").strip(),
+                model_name=self._format_ai_status_model_name(data),
                 error=str(data.get("error") or "").strip(),
             )
             return
@@ -452,7 +512,7 @@ class MainWindow(QMainWindow):
             self._set_ai_status("invalid")
             return
 
-        current_model = str(data.get("current_model") or "").strip()
+        current_model = self._format_ai_status_model_name(data)
         current_model_usable = bool(data.get("current_model_usable"))
         if current_model_usable:
             self._set_ai_status("ready", model_name=current_model)

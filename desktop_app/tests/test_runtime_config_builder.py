@@ -19,6 +19,7 @@ if str(SRC_ROOT) not in sys.path:
 
 from jobflow_desktop_app.ai.role_recommendations import CandidateSemanticProfile  # noqa: E402
 from jobflow_desktop_app.db.repositories.profiles import SearchProfileRecord  # noqa: E402
+from jobflow_desktop_app.db.repositories.settings import OpenAISettings  # noqa: E402
 from jobflow_desktop_app.search.orchestration import runtime_config_builder  # noqa: E402
 from jobflow_desktop_app.search.orchestration.candidate_search_signals import (  # noqa: E402
     CandidateSearchSignals,
@@ -33,6 +34,66 @@ class _FakeRunner:
 
 
 class RuntimeConfigBuilderTests(unittest.TestCase):
+    def test_apply_runtime_model_override_routes_fast_and_quality_models(self) -> None:
+        search_config: dict = {}
+        company_discovery_config: dict = {}
+        analysis_config: dict = {}
+        translation_config: dict = {}
+
+        runtime_config_builder.apply_runtime_model_override(
+            search_config=search_config,
+            company_discovery_config=company_discovery_config,
+            analysis_config=analysis_config,
+            translation_config=translation_config,
+            model_override="gpt-5-nano",
+            quality_model_override="gpt-5.4",
+        )
+
+        self.assertEqual(search_config["model"], "gpt-5-nano")
+        self.assertEqual(translation_config["model"], "gpt-5-nano")
+        self.assertEqual(company_discovery_config["model"], "gpt-5-nano")
+        self.assertEqual(company_discovery_config["fitModel"], "gpt-5.4")
+        self.assertEqual(analysis_config["preRankModel"], "gpt-5-nano")
+        self.assertEqual(analysis_config["model"], "gpt-5.4")
+        self.assertEqual(analysis_config["postVerifyModel"], "gpt-5.4")
+
+    def test_resolve_model_overrides_reads_fast_and_quality_settings(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "JOBFLOW_OPENAI_FAST_MODEL": "",
+                "JOBFLOW_OPENAI_MODEL": "",
+                "JOBFLOW_OPENAI_QUALITY_MODEL": "",
+                "JOBFLOW_OPENAI_HIGH_QUALITY_MODEL": "",
+                "AZURE_OPENAI_MODEL": "",
+                "AZURE_OPENAI_DEPLOYMENT": "",
+            },
+            clear=False,
+        ):
+            overrides = runtime_config_builder.resolve_model_overrides(
+                OpenAISettings(
+                    api_key="test-key",
+                    model="gpt-5-nano",
+                    quality_model="gpt-5.4",
+                )
+            )
+
+        self.assertEqual(overrides.fast_model, "gpt-5-nano")
+        self.assertEqual(overrides.quality_model, "gpt-5.4")
+
+    def test_build_runtime_env_exports_fast_and_quality_models(self) -> None:
+        settings = OpenAISettings(
+            api_key="test-key",
+            model="gpt-5-nano",
+            quality_model="gpt-5.4",
+        )
+
+        env = runtime_config_builder.build_runtime_env(settings, api_base_url="")
+
+        self.assertEqual(env["JOBFLOW_OPENAI_MODEL"], "gpt-5-nano")
+        self.assertEqual(env["JOBFLOW_OPENAI_FAST_MODEL"], "gpt-5-nano")
+        self.assertEqual(env["JOBFLOW_OPENAI_QUALITY_MODEL"], "gpt-5.4")
+
     def test_resolve_effective_max_companies_prefers_runtime_cap_when_present(self) -> None:
         self.assertEqual(
             runtime_config_builder.resolve_effective_max_companies(
@@ -199,6 +260,45 @@ class RuntimeConfigBuilderTests(unittest.TestCase):
                 runtime_config["fetch"]["timeoutMs"],
                 runtime_config_builder.HTTP_REQUEST_TIMEOUT_MS,
             )
+
+    def test_build_runtime_config_applies_two_tier_model_routing(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context, name="Model Routing Candidate")
+            create_profile(context, candidate_id, name="Systems Engineer", is_active=True)
+            candidate = context.candidates.get(candidate_id)
+            profiles = context.profiles.list_for_candidate(candidate_id)
+            self.assertIsNotNone(candidate)
+
+            run_dir = context.paths.runtime_dir / "search_runs" / f"candidate_{candidate_id}"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            candidate_context = runtime_config_builder.RuntimeCandidateConfigContext(
+                candidate_inputs=runtime_config_builder.RuntimeCandidateInputPrep(
+                    resume_path=str((run_dir / "resume.generated.md").resolve()),
+                    scope_profiles=("hydrogen_mainline",),
+                    target_roles=[],
+                ),
+                signals=_FakeRunner.signals,
+                discovery_query_input={},
+            )
+
+            runtime_config = runtime_config_builder.build_runtime_config(
+                None,
+                base_config={},
+                candidate=candidate,
+                profiles=profiles,
+                run_dir=run_dir,
+                model_override="gpt-5-nano",
+                quality_model_override="gpt-5.4",
+                candidate_context=candidate_context,
+            )
+
+            self.assertEqual(runtime_config["search"]["model"], "gpt-5-nano")
+            self.assertEqual(runtime_config["translation"]["model"], "gpt-5-nano")
+            self.assertEqual(runtime_config["companyDiscovery"]["model"], "gpt-5-nano")
+            self.assertEqual(runtime_config["companyDiscovery"]["fitModel"], "gpt-5.4")
+            self.assertEqual(runtime_config["analysis"]["preRankModel"], "gpt-5-nano")
+            self.assertEqual(runtime_config["analysis"]["model"], "gpt-5.4")
+            self.assertEqual(runtime_config["analysis"]["postVerifyModel"], "gpt-5.4")
 
     def test_build_runtime_config_resume_pending_injects_analysis_and_fetch_defaults(self) -> None:
         with make_temp_context() as context:

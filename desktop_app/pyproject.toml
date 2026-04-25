@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jobflow-desktop-app"
-version = "0.8.1"
+version = "0.8.2"
 description = "Local desktop application for job discovery, screening, scoring, and export."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -34,6 +34,7 @@ Homepage = "https://github.com/liuyingxuvka/Job-Hunter"
 Documentation = "https://github.com/liuyingxuvka/Job-Hunter/blob/main/README.md"
 Repository = "https://github.com/liuyingxuvka/Job-Hunter"
 Issues = "https://github.com/liuyingxuvka/Job-Hunter/issues"
+Funding = "https://paypal.me/Yingxuliu"
 
 [project.scripts]
 jobflow-desktop = "jobflow_desktop_app.main:main"

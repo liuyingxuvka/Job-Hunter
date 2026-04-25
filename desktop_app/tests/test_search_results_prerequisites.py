@@ -43,7 +43,7 @@ class SearchResultsPrerequisitesTests(unittest.TestCase):
             ai_validation_message="",
             blocked_ai_levels={"warning", "error"},
         )
-        self.assertIn("AI 状态未通过验证", issue)
+        self.assertEqual(issue, "AI 暂不可用，请检查设置")
 
     def test_search_owner_name_uses_resolver_and_handles_missing_id(self) -> None:
         self.assertEqual(search_owner_name(None, resolve_candidate_name=lambda _: "ignored"), "")

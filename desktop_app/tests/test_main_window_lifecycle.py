@@ -146,14 +146,15 @@ class MainWindowLifecycleTests(unittest.TestCase):
                 window.closeEvent(QCloseEvent())
 
             shutdown_compact_mock.assert_called_once_with(wait_ms=8000)
-            shutdown_ai_mock.assert_called_once_with(wait_ms=20000)
+            shutdown_ai_mock.assert_called_once_with(wait_ms=30000)
 
-    def test_ai_validation_worker_only_validates_saved_model_without_auto_switch(self) -> None:
+    def test_ai_validation_worker_validates_fast_and_quality_models_without_auto_switch(self) -> None:
         with make_temp_context() as context:
             context.settings.save_openai_settings(
                 OpenAISettings(
                     api_key="test-key",
                     model="gpt-5-nano",
+                    quality_model="gpt-5.4",
                     api_key_source="direct",
                     api_key_env_var="",
                 )
@@ -166,22 +167,65 @@ class MainWindowLifecycleTests(unittest.TestCase):
                 patch(
                     "jobflow_desktop_app.app.main_window.fetch_available_models",
                     autospec=True,
-                    return_value=ModelCatalogResult(models=["gpt-5-mini", "gpt-5-nano"]),
+                    return_value=ModelCatalogResult(models=["gpt-5-mini", "gpt-5-nano", "gpt-5.4"]),
                 ),
                 patch(
                     "jobflow_desktop_app.app.main_window._validate_structured_model_request",
                     autospec=True,
-                    return_value=(False, "OpenAI API request failed: HTTP 429."),
+                    side_effect=[
+                        (True, ""),
+                        (False, "OpenAI API request failed: HTTP 429."),
+                    ],
                 ) as validate_mock,
             ):
                 worker.run()
 
             self.assertEqual(len(payloads), 1)
             self.assertEqual(payloads[0]["state"], "model_unverified")
-            self.assertEqual(payloads[0]["current_model"], "gpt-5-nano")
+            self.assertEqual(payloads[0]["fast_model"], "gpt-5-nano")
+            self.assertEqual(payloads[0]["quality_model"], "gpt-5.4")
+            self.assertEqual(payloads[0]["current_model"], "fast gpt-5-nano; quality gpt-5.4")
             self.assertIn("HTTP 429", payloads[0]["error"])
-            validate_mock.assert_called_once()
+            self.assertEqual(validate_mock.call_count, 2)
+            self.assertEqual(validate_mock.call_args_list[0].kwargs["model_id"], "gpt-5-nano")
+            self.assertEqual(validate_mock.call_args_list[1].kwargs["model_id"], "gpt-5.4")
             self.assertEqual(context.settings.get_openai_settings().model, "gpt-5-nano")
+            self.assertEqual(context.settings.get_openai_settings().quality_model, "gpt-5.4")
+
+    def test_ai_validation_worker_rejects_missing_quality_model_before_request_validation(self) -> None:
+        with make_temp_context() as context:
+            context.settings.save_openai_settings(
+                OpenAISettings(
+                    api_key="test-key",
+                    model="gpt-5-nano",
+                    quality_model="",
+                    api_key_source="direct",
+                    api_key_env_var="",
+                )
+            )
+            worker = _AIValidationWorker(context)
+            payloads: list[dict] = []
+            worker.finished.connect(lambda payload: payloads.append(payload))
+
+            with (
+                patch(
+                    "jobflow_desktop_app.app.main_window.fetch_available_models",
+                    autospec=True,
+                    return_value=ModelCatalogResult(models=["gpt-5-nano", "gpt-5.4"]),
+                ),
+                patch(
+                    "jobflow_desktop_app.app.main_window._validate_structured_model_request",
+                    autospec=True,
+                ) as validate_mock,
+            ):
+                worker.run()
+
+            self.assertEqual(len(payloads), 1)
+            self.assertEqual(payloads[0]["state"], "model_unverified")
+            self.assertEqual(payloads[0]["fast_model"], "gpt-5-nano")
+            self.assertEqual(payloads[0]["quality_model"], "")
+            self.assertIn("quality model", payloads[0]["error"])
+            validate_mock.assert_not_called()
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -74,6 +74,10 @@ $contentRules = @(
   @{
     Label = "absolute macOS user path"
     Regex = "/Users/[^/\s`"']+"
+  },
+  @{
+    Label = "personal maintainer identity"
+    Regex = "(Yingxu Liu|liu\.yingxu\.vka@gmail\.com)"
   }
 )
 
@@ -258,6 +262,39 @@ foreach ($path in $paths) {
         Line = $match.LineNumber
         Rule = $rule.Label
         Snippet = $snippet
+      }
+    }
+  }
+}
+
+if ($Scope -eq "package") {
+  foreach ($path in $paths) {
+    if (-not $path.EndsWith(".exe", [System.StringComparison]::OrdinalIgnoreCase)) {
+      continue
+    }
+
+    $absolutePath = $scanRoot
+    foreach ($segment in ($path -split "/")) {
+      $absolutePath = Join-Path -Path $absolutePath -ChildPath $segment
+    }
+    if (-not (Test-Path -LiteralPath $absolutePath -PathType Leaf)) {
+      continue
+    }
+
+    $versionInfo = (Get-Item -LiteralPath $absolutePath).VersionInfo
+    $metadataValues = @(
+      $versionInfo.CompanyName,
+      $versionInfo.LegalCopyright
+    ) | Where-Object { $_ }
+
+    foreach ($metadataValue in $metadataValues) {
+      if ($metadataValue -match "(Yingxu Liu|liu\.yingxu\.vka@gmail\.com)") {
+        $contentViolations += [PSCustomObject]@{
+          Path = $path
+          Line = 0
+          Rule = "personal maintainer identity in executable metadata"
+          Snippet = $metadataValue
+        }
       }
     }
   }

@@ -46,8 +46,8 @@ class AISettingsDialog(QDialog):
         note = QLabel(
             _t(
                 self.ui_language,
-                "这里设置 API Key、模型和界面语言。API Key 支持直接输入或绑定环境变量。",
-                "Configure API key, model, and UI language. API key can be direct input or an environment variable.",
+                "这里设置 API Key、快速模型、高质量模型和界面语言。API Key 支持直接输入或绑定环境变量。",
+                "Configure API key, fast model, quality model, and UI language. API key can be direct input or an environment variable.",
             )
         )
         note.setObjectName("MutedLabel")
@@ -80,27 +80,68 @@ class AISettingsDialog(QDialog):
         self.api_key_env_combo.setMinimumContentsLength(28)
         self.api_key_env_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
 
-        self.model_input = QComboBox()
-        self.model_input.setEditable(False)
-        self.model_input.setMinimumContentsLength(24)
-        self.model_input.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.fast_model_input = QComboBox()
+        self.fast_model_input.setEditable(False)
+        self.fast_model_input.setMinimumContentsLength(24)
+        self.fast_model_input.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.model_input = self.fast_model_input
+        self.quality_model_input = QComboBox()
+        self.quality_model_input.setEditable(False)
+        self.quality_model_input.setMinimumContentsLength(24)
+        self.quality_model_input.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self._detected_model_ids: list[str] = []
         self._has_env_var_options = False
         self._cached_api_key_env_var = ""
         self.refresh_models_button = styled_button(
             _t(self.ui_language, "检测并加载模型", "Detect & Load Models"),
-            "secondary",
+            "primary",
+        )
+        self.refresh_models_button.setObjectName("RefreshModelsButton")
+        self.refresh_models_button.setFixedHeight(30)
+        self.refresh_models_button.setStyleSheet(
+            """
+            QPushButton#RefreshModelsButton {
+              background: #0f7b6c;
+              color: #ffffff;
+              border: 1px solid #0f7b6c;
+              border-radius: 8px;
+              padding: 3px 12px;
+              min-height: 20px;
+              max-height: 30px;
+              font-weight: 600;
+            }
+            QPushButton#RefreshModelsButton:hover {
+              background: #0d6c5f;
+            }
+            QPushButton#RefreshModelsButton:disabled {
+              background: #d9e2ec;
+              color: #7b8794;
+              border: 1px solid #c5d0db;
+            }
+            """
         )
         model_row = QWidget()
         model_row_layout = QHBoxLayout(model_row)
         model_row_layout.setContentsMargins(0, 0, 0, 0)
         model_row_layout.setSpacing(8)
-        model_row_layout.addWidget(self.model_input, 1)
-        model_row_layout.addWidget(self.refresh_models_button)
+        model_row_layout.addWidget(self.fast_model_input, 1)
+
+        quality_model_row = QWidget()
+        quality_model_row_layout = QHBoxLayout(quality_model_row)
+        quality_model_row_layout.setContentsMargins(0, 0, 0, 0)
+        quality_model_row_layout.setSpacing(8)
+        quality_model_row_layout.addWidget(self.quality_model_input, 1)
+
+        refresh_models_row = QWidget()
+        refresh_models_row_layout = QHBoxLayout(refresh_models_row)
+        refresh_models_row_layout.setContentsMargins(0, 0, 0, 0)
+        refresh_models_row_layout.setSpacing(8)
+        refresh_models_row_layout.addWidget(self.refresh_models_button)
+        refresh_models_row_layout.addStretch(1)
 
         self.ui_language_combo = QComboBox()
-        self.ui_language_combo.addItem("🌐 中文 / Chinese", "zh")
-        self.ui_language_combo.addItem("🌐 English", "en")
+        self.ui_language_combo.addItem("中文 / Chinese", "zh")
+        self.ui_language_combo.addItem("English", "en")
         self.ui_language_combo.setToolTip(
             _t(
                 self.ui_language,
@@ -112,9 +153,11 @@ class AISettingsDialog(QDialog):
         form.addRow(_t(self.ui_language, "API Key 来源", "API Key Source"), self.api_key_source_combo)
         form.addRow(_t(self.ui_language, "API Key", "API Key"), self.api_key_input)
         form.addRow(_t(self.ui_language, "环境变量", "Environment Variable"), self.api_key_env_combo)
-        form.addRow(_t(self.ui_language, "模型", "Model"), model_row)
+        form.addRow(_t(self.ui_language, "模型列表", "Model List"), refresh_models_row)
+        form.addRow(_t(self.ui_language, "快速模型", "Fast Model"), model_row)
+        form.addRow(_t(self.ui_language, "高质量模型", "Quality Model"), quality_model_row)
         form.addRow(
-            _t(self.ui_language, "🌐 语言 / Language", "🌐 Language / 语言"),
+            _t(self.ui_language, "语言 / Language", "Language / 语言"),
             self.ui_language_combo,
         )
         layout.addLayout(form)
@@ -162,7 +205,8 @@ class AISettingsDialog(QDialog):
         self.api_key_input.setText(settings.api_key)
 
         self._detected_model_ids = []
-        self._populate_model_options([], "")
+        self._populate_model_options([], "", self.fast_model_input)
+        self._populate_model_options([], "", self.quality_model_input)
 
         saved_language = self.context.settings.get_ui_language()
         self.ui_language_combo.setCurrentIndex(1 if saved_language == "en" else 0)
@@ -180,7 +224,8 @@ class AISettingsDialog(QDialog):
         )
 
     def _save(self) -> None:
-        selected_model = self.model_input.currentText().strip()
+        selected_fast_model = self.fast_model_input.currentText().strip()
+        selected_quality_model = self.quality_model_input.currentText().strip()
         source = self._current_api_key_source()
         env_var = (
             self._current_api_key_env_var()
@@ -205,19 +250,31 @@ class AISettingsDialog(QDialog):
                 _t(self.ui_language, "设置 / Settings", "Settings / 设置"),
                 _t(
                     self.ui_language,
-                    "请先点击“检测并加载模型”，并从模型下拉列表中选择一个模型。",
-                    "Please click 'Detect & Load Models' first and choose one model from the dropdown list.",
+                    "请先点击“检测并加载模型”，并从下拉列表中选择快速模型和高质量模型。",
+                    "Please click 'Detect & Load Models' first and choose both a fast model and a quality model.",
                 ),
             )
             return
-        if selected_model.casefold() not in {item.casefold() for item in self._detected_model_ids}:
+        loaded_model_keys = {item.casefold() for item in self._detected_model_ids}
+        if selected_fast_model.casefold() not in loaded_model_keys:
             QMessageBox.warning(
                 self,
                 _t(self.ui_language, "设置 / Settings", "Settings / 设置"),
                 _t(
                     self.ui_language,
-                    "当前模型不在已加载的模型列表中，请重新检测后选择。",
-                    "The selected model is not in the loaded model list. Please detect again and reselect.",
+                    "当前快速模型不在已加载的模型列表中，请重新检测后选择。",
+                    "The selected fast model is not in the loaded model list. Please detect again and reselect.",
+                ),
+            )
+            return
+        if selected_quality_model.casefold() not in loaded_model_keys:
+            QMessageBox.warning(
+                self,
+                _t(self.ui_language, "设置 / Settings", "Settings / 设置"),
+                _t(
+                    self.ui_language,
+                    "当前高质量模型不在已加载的模型列表中，请重新检测后选择。",
+                    "The selected quality model is not in the loaded model list. Please detect again and reselect.",
                 ),
             )
             return
@@ -225,9 +282,10 @@ class AISettingsDialog(QDialog):
         self.context.settings.save_openai_settings(
             OpenAISettings(
                 api_key=self.api_key_input.text(),
-                model=selected_model,
+                model=selected_fast_model,
                 api_key_source=source,
                 api_key_env_var=env_var,
+                quality_model=selected_quality_model,
             )
         )
         self.context.settings.save_openai_model_catalog(self._detected_model_ids)
@@ -261,27 +319,33 @@ class AISettingsDialog(QDialog):
     def _set_env_combo_waiting_state(self) -> None:
         ai_settings_api_key_source.set_env_combo_waiting_state(self)
 
-    def _populate_model_options(self, models: list[str], selected_model: str = "") -> None:
+    def _populate_model_options(
+        self,
+        models: list[str],
+        selected_model: str = "",
+        combo: QComboBox | None = None,
+    ) -> None:
+        target_combo = combo or self.fast_model_input
         ordered = self._ordered_model_ids(models, selected_model)
 
         active = str(selected_model or "").strip()
-        self.model_input.blockSignals(True)
-        self.model_input.clear()
+        target_combo.blockSignals(True)
+        target_combo.clear()
         if ordered:
             for item in ordered:
-                self.model_input.addItem(item, item)
-            index = self.model_input.findText(active, Qt.MatchFixedString)
+                target_combo.addItem(item, item)
+            index = target_combo.findText(active, Qt.MatchFixedString)
             if index >= 0:
-                self.model_input.setCurrentIndex(index)
+                target_combo.setCurrentIndex(index)
             else:
-                self.model_input.setCurrentIndex(0)
+                target_combo.setCurrentIndex(0)
         else:
-            self.model_input.addItem(
+            target_combo.addItem(
                 _t(self.ui_language, "请先检测并加载模型", "Detect models first"),
                 self.MODEL_PLACEHOLDER,
             )
-            self.model_input.setCurrentIndex(0)
-        self.model_input.blockSignals(False)
+            target_combo.setCurrentIndex(0)
+        target_combo.blockSignals(False)
 
     @staticmethod
     def _ordered_model_ids(models: list[str], selected_model: str = "") -> list[str]:
@@ -306,31 +370,45 @@ class AISettingsDialog(QDialog):
         return ordered
 
     def _restore_saved_model_selection(self, settings: OpenAISettings) -> bool:
-        saved_model = str(settings.model or "").strip()
+        saved_fast_model = str(settings.model or "").strip()
+        saved_quality_model = str(settings.quality_model or "").strip()
         saved_catalog = self.context.settings.get_openai_model_catalog()
-        if saved_model and saved_model.casefold() not in {item.casefold() for item in saved_catalog}:
-            saved_catalog = [*saved_catalog, saved_model]
+        catalog_keys = {item.casefold() for item in saved_catalog}
+        if saved_fast_model and saved_fast_model.casefold() not in catalog_keys:
+            saved_catalog = [*saved_catalog, saved_fast_model]
+            catalog_keys.add(saved_fast_model.casefold())
+        if saved_quality_model and saved_quality_model.casefold() not in catalog_keys:
+            saved_catalog = [*saved_catalog, saved_quality_model]
         if not saved_catalog:
             return False
 
         saved_catalog = self._ordered_model_ids(saved_catalog)
-        preferred = saved_model or self._default_low_cost_model(saved_catalog)
+        preferred_fast = saved_fast_model or self._default_low_cost_model(saved_catalog)
+        preferred_quality = saved_quality_model or self._default_quality_model(saved_catalog)
         self._detected_model_ids = list(saved_catalog)
-        self._populate_model_options(saved_catalog, preferred)
+        self._populate_model_options(saved_catalog, preferred_fast, self.fast_model_input)
+        self._populate_model_options(saved_catalog, preferred_quality, self.quality_model_input)
         self._set_model_selector_enabled(True)
-        self.model_status_label.setText(
-            _t(
+        if saved_fast_model and saved_quality_model:
+            status_text = _t(
                 self.ui_language,
-                f"已恢复上次保存的模型设置：{preferred}。如需刷新完整模型列表，可点击“检测并加载模型”；当前模型可用性会在工作台后台自动校验。",
-                f"Restored the previously saved model selection: {preferred}. Click 'Detect & Load Models' to refresh the full model list; model availability is checked automatically in the workspace.",
+                f"已恢复上次保存的模型设置：快速模型 {preferred_fast}，高质量模型 {preferred_quality}。如需刷新完整模型列表，可点击“检测并加载模型”；两个模型可用性会在工作台后台自动校验。",
+                f"Restored the previously saved model selections: fast model {preferred_fast}, quality model {preferred_quality}. Click 'Detect & Load Models' to refresh the full model list; both models are checked automatically in the workspace.",
             )
-        )
+        else:
+            status_text = _t(
+                self.ui_language,
+                f"已恢复可用模型列表。当前建议选择：快速模型 {preferred_fast or '未选择'}，高质量模型 {preferred_quality or '未选择'}；请保存后再运行 AI 功能。",
+                f"Restored the available model list. Suggested selections: fast model {preferred_fast or 'none'}, quality model {preferred_quality or 'none'}; save them before running AI features.",
+            )
+        self.model_status_label.setText(status_text)
         return True
 
     def _set_model_selector_enabled(self, enabled: bool) -> None:
-        self.model_input.setEnabled(enabled)
-        self.model_input.setEditable(False)
-        self.model_input.setStyleSheet(self.ACTIVE_INPUT_STYLE if enabled else self.INACTIVE_INPUT_STYLE)
+        for combo in (self.fast_model_input, self.quality_model_input):
+            combo.setEnabled(enabled)
+            combo.setEditable(False)
+            combo.setStyleSheet(self.ACTIVE_INPUT_STYLE if enabled else self.INACTIVE_INPUT_STYLE)
 
     def _lock_model_selector(self, status_text: str = "") -> None:
         if status_text:
@@ -372,6 +450,41 @@ class AISettingsDialog(QDialog):
 
         return min(models, key=score)
 
+    @staticmethod
+    def _default_quality_model(models: list[str]) -> str:
+        if not models:
+            return ""
+        ordered = AISettingsDialog._ordered_model_ids(models)
+        preferred = (
+            "gpt-5.5",
+            "gpt-5.4",
+            "gpt-5.3",
+            "gpt-5.2",
+            "gpt-5",
+            "gpt-4.1",
+            "gpt-4o",
+        )
+        model_by_key = {item.casefold(): item for item in ordered}
+        for model_id in preferred:
+            if model_id.casefold() in model_by_key:
+                return model_by_key[model_id.casefold()]
+
+        def score(name: str) -> tuple[int, int, str]:
+            text = str(name or "").strip()
+            lower = text.casefold()
+            quality_rank = 100
+            if "nano" in lower:
+                quality_rank = 90
+            elif "mini" in lower or "small" in lower or "lite" in lower:
+                quality_rank = 80
+            elif "gpt-5" in lower:
+                quality_rank = 0
+            elif "gpt-4" in lower:
+                quality_rank = 10
+            return (quality_rank, len(text), lower)
+
+        return min(ordered, key=score)
+
     def _current_api_key_source(self) -> str:
         return ai_settings_api_key_source.current_api_key_source(self)
 
@@ -386,7 +499,8 @@ class AISettingsDialog(QDialog):
 
     def _refresh_models(self, auto: bool = False, preserve_existing: bool = False) -> None:
         restored_models = list(self._detected_model_ids)
-        restored_model = self.model_input.currentText().strip()
+        restored_fast_model = self.fast_model_input.currentText().strip()
+        restored_quality_model = self.quality_model_input.currentText().strip()
         api_key, api_key_error = self._resolve_api_key_for_actions()
         if not api_key:
             if preserve_existing and restored_models:
@@ -394,8 +508,8 @@ class AISettingsDialog(QDialog):
                 self.model_status_label.setText(
                     _t(
                         self.ui_language,
-                        f"未能完成本次验证：{api_key_error}。当前先保留上次保存的模型选择：{restored_model or self._default_low_cost_model(restored_models)}。",
-                        f"Could not revalidate now: {api_key_error}. Keeping the previously saved model selection for now: {restored_model or self._default_low_cost_model(restored_models)}.",
+                        f"未能完成本次验证：{api_key_error}。当前先保留上次保存的模型选择：快速模型 {restored_fast_model or self._default_low_cost_model(restored_models)}，高质量模型 {restored_quality_model or self._default_quality_model(restored_models)}。",
+                        f"Could not revalidate now: {api_key_error}. Keeping the previously saved model selections for now: fast model {restored_fast_model or self._default_low_cost_model(restored_models)}, quality model {restored_quality_model or self._default_quality_model(restored_models)}.",
                     )
                 )
                 return
@@ -414,9 +528,12 @@ class AISettingsDialog(QDialog):
                 )
             return
 
-        current_model = self.model_input.currentText().strip()
+        current_fast_model = self.fast_model_input.currentText().strip()
+        current_quality_model = self.quality_model_input.currentText().strip()
         base_url = self.context.settings.get_openai_base_url()
-        stored_model = self.context.settings.get_openai_settings().model.strip()
+        stored_settings = self.context.settings.get_openai_settings()
+        stored_fast_model = stored_settings.model.strip()
+        stored_quality_model = stored_settings.quality_model.strip()
         self.refresh_models_button.setEnabled(False)
         request_title = _t(self.ui_language, "设置 / Settings", "Settings / 设置")
         request_message = _t(
@@ -440,22 +557,30 @@ class AISettingsDialog(QDialog):
             if result is not None and getattr(result, "models", None):
                 loaded_models = self._ordered_model_ids(result.models)
                 current_available = {item.casefold() for item in loaded_models}
-                fallback_default = loaded_models[0] if loaded_models else ""
-                preferred = ""
-                for candidate in (current_model, stored_model):
+                preferred_fast = ""
+                for candidate in (current_fast_model, stored_fast_model):
                     text = str(candidate or "").strip()
                     if text and text.casefold() in current_available:
-                        preferred = text
+                        preferred_fast = text
                         break
-                if not preferred:
-                    preferred = fallback_default
+                if not preferred_fast:
+                    preferred_fast = self._default_low_cost_model(loaded_models)
+                preferred_quality = ""
+                for candidate in (current_quality_model, stored_quality_model):
+                    text = str(candidate or "").strip()
+                    if text and text.casefold() in current_available:
+                        preferred_quality = text
+                        break
+                if not preferred_quality:
+                    preferred_quality = self._default_quality_model(loaded_models)
                 self._detected_model_ids = loaded_models
-                self._populate_model_options(loaded_models, preferred)
+                self._populate_model_options(loaded_models, preferred_fast, self.fast_model_input)
+                self._populate_model_options(loaded_models, preferred_quality, self.quality_model_input)
                 self.context.settings.save_openai_model_catalog(loaded_models)
                 status_text = _t(
                     self.ui_language,
-                    f"模型列表已更新：共加载 {len(loaded_models)} 个模型，已按字母顺序排序。当前选择：{preferred or '未选择'}。模型可用性会在工作台后台自动校验。",
-                    f"Model list updated: {len(loaded_models)} models loaded and sorted alphabetically. Current selection: {preferred or 'none'}. Model availability is checked automatically in the workspace.",
+                    f"模型列表已更新：共加载 {len(loaded_models)} 个模型，已按字母顺序排序。当前选择：快速模型 {preferred_fast or '未选择'}，高质量模型 {preferred_quality or '未选择'}。两个模型可用性会在工作台后台自动校验。",
+                    f"Model list updated: {len(loaded_models)} models loaded and sorted alphabetically. Current selections: fast model {preferred_fast or 'none'}, quality model {preferred_quality or 'none'}. Both models are checked automatically in the workspace.",
                 )
                 self.model_status_label.setText(status_text)
                 self._set_model_selector_enabled(True)
@@ -466,7 +591,8 @@ class AISettingsDialog(QDialog):
                 error_text = str(getattr(result, "error", "") or "")
             if preserve_existing and restored_models:
                 self._detected_model_ids = restored_models
-                self._populate_model_options(restored_models, restored_model)
+                self._populate_model_options(restored_models, restored_fast_model, self.fast_model_input)
+                self._populate_model_options(restored_models, restored_quality_model, self.quality_model_input)
                 self._set_model_selector_enabled(True)
                 self.model_status_label.setText(
                     _t(
@@ -477,7 +603,8 @@ class AISettingsDialog(QDialog):
                 )
                 return
             self._detected_model_ids = []
-            self._populate_model_options([], "")
+            self._populate_model_options([], "", self.fast_model_input)
+            self._populate_model_options([], "", self.quality_model_input)
             self._lock_model_selector(
                 _t(
                     self.ui_language,
@@ -499,7 +626,8 @@ class AISettingsDialog(QDialog):
         def _on_error(exc: Exception) -> None:
             if preserve_existing and restored_models:
                 self._detected_model_ids = restored_models
-                self._populate_model_options(restored_models, restored_model)
+                self._populate_model_options(restored_models, restored_fast_model, self.fast_model_input)
+                self._populate_model_options(restored_models, restored_quality_model, self.quality_model_input)
                 self._set_model_selector_enabled(True)
                 self.model_status_label.setText(
                     _t(
@@ -510,7 +638,8 @@ class AISettingsDialog(QDialog):
                 )
                 return
             self._detected_model_ids = []
-            self._populate_model_options([], "")
+            self._populate_model_options([], "", self.fast_model_input)
+            self._populate_model_options([], "", self.quality_model_input)
             self._lock_model_selector(
                 _t(
                     self.ui_language,

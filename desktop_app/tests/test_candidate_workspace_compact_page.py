@@ -150,7 +150,7 @@ class CandidateWorkspaceCompactPageTests(unittest.TestCase):
             self.assertFalse(page.results_step.search_duration_combo.isEnabled())
             self.assertFalse(page.target_direction_step.generate_directions_button.isEnabled())
             self.assertFalse(page.results_step.results_progress_label.isHidden())
-            self.assertIn("No usable OpenAI API key", page.results_step.results_progress_label.text())
+            self.assertEqual(page.results_step.results_progress_label.text(), "AI key not configured")
             self.assertFalse(page.target_direction_step.generate_issue_label.isHidden())
 
             page.set_ai_validation_status("Validation passed", "ready")
@@ -204,6 +204,34 @@ class CandidateWorkspaceCompactPageTests(unittest.TestCase):
             process_events()
 
             self.assertEqual(item.checkState(), Qt.Unchecked)
+
+    def test_support_dialog_content_uses_paypal_me_without_email_copy_flow(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(
+                context,
+                name="Compact Candidate",
+                base_location="Hamburg, Germany",
+                preferred_locations="",
+                notes="Compact notes",
+            )
+
+            with patch("jobflow_desktop_app.app.pages.search_results.JobSearchRunner", HermeticJobSearchRunner):
+                page = CandidateWorkspaceCompactPage(
+                    context,
+                    ui_language="en",
+                )
+            self.addCleanup(page.deleteLater)
+
+            page.set_candidate(candidate_id)
+            process_events()
+
+            self.assertEqual(page._support_dialog_title(), "Support")
+            self.assertEqual(page._support_dialog_action_label(), "Buy me a coffee via PayPal")
+            self.assertIn("https://paypal.me/Yingxuliu", page._support_dialog_message())
+            self.assertNotIn("@", page._support_dialog_message())
+            self.assertNotIn("Copy PayPal Account", page._support_dialog_message())
+            self.assertIn("buy the developer a coffee", page._support_dialog_message())
+            self.assertIn("voluntary support for project maintenance", page._support_dialog_message())
 
 
 if __name__ == "__main__":  # pragma: no cover

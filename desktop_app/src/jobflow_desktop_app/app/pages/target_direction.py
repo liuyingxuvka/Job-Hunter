@@ -40,6 +40,7 @@ from . import target_direction_role_suggestion_flow
 from . import target_direction_recommendations
 from .target_direction_role_list_delegate import TargetRoleListDelegate, TargetRoleListWidget
 from . import target_direction_workspace_state
+from .ai_status_messages import compact_ai_blocking_issue
 
 class TargetDirectionStep(QWidget):
     AI_READY_LEVEL = "ready"
@@ -274,18 +275,18 @@ class TargetDirectionStep(QWidget):
     def _ai_validation_issue(self) -> str:
         if self._ai_validation_level == self.AI_READY_LEVEL:
             return ""
-        return self._ai_validation_message or _t(
+        return compact_ai_blocking_issue(
             self.ui_language,
-            "当前 AI 状态尚未通过验证。请先等待检查完成，或到右上角“设置 / Settings”里修复后再使用 AI 功能。",
-            "The current AI status has not passed validation yet. Wait for the check to finish, or fix it in the top-right Settings / 设置 before using AI features.",
+            self._ai_validation_level,
+            self._ai_validation_message,
         )
 
     def _candidate_issue(self) -> str:
         if self._current_candidate is None or self.current_candidate_id is None:
             return _t(
                 self.ui_language,
-                "当前还没有选中求职者，所以“AI 推荐岗位”暂时不可用。请先返回上一步选择求职者。",
-                "No candidate is selected yet, so AI role recommendation is unavailable. Go back and select a candidate first.",
+                "请先选择求职者",
+                "Select a candidate first",
             )
         return ""
 
@@ -296,8 +297,8 @@ class TargetDirectionStep(QWidget):
         if self.is_ai_busy_for(self.current_candidate_id):
             return self._ai_busy_message or _t(
                 self.ui_language,
-                "第二步 AI 仍在生成岗位方向。请等待当前推荐完成后再继续。",
-                "Step 2 AI is still generating target roles. Wait for the current recommendation to finish first.",
+                "AI 正在生成，请稍候",
+                "AI is generating; please wait",
             )
         return self._ai_validation_issue()
 
@@ -386,7 +387,7 @@ class TargetDirectionStep(QWidget):
 
     def _ensure_profile_bilingual_for_ui(self, profile: SearchProfileRecord) -> SearchProfileRecord:
         current_name = str(profile.name or "").strip()
-        settings = self.context.settings.get_effective_openai_settings()
+        settings = self.context.settings.get_quality_openai_settings()
         api_base_url = self.context.settings.get_openai_base_url()
         return target_direction_profile_preview.ensure_profile_bilingual_for_ui(
             profile,

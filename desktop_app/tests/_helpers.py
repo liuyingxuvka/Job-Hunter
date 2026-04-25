@@ -144,6 +144,7 @@ def save_openai_settings(
     *,
     api_key: str = "test-key",
     model: str = "gpt-5-nano",
+    quality_model: str = "gpt-5.4",
 ) -> None:
     context.settings.save_openai_settings(
         OpenAISettings(
@@ -151,6 +152,7 @@ def save_openai_settings(
             model=model,
             api_key_source="direct",
             api_key_env_var="",
+            quality_model=quality_model,
         )
     )
 

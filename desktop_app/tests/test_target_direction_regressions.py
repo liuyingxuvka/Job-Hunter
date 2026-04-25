@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QDialog
 
+from jobflow_desktop_app.app.dialogs.manual_role_input import ManualRoleInputDialog
 from jobflow_desktop_app.app.pages.target_direction import TargetDirectionStep
 from jobflow_desktop_app.app.pages.workspace_compact import CandidateWorkspaceCompactPage
 
@@ -221,7 +222,9 @@ class TargetDirectionRegressionTests(unittest.TestCase):
 
                 result = captured["task"]()
                 step.role_recommender.recommend_roles.assert_called_once()  # type: ignore[attr-defined]
+                recommend_args = step.role_recommender.recommend_roles.call_args.args  # type: ignore[attr-defined]
                 recommend_kwargs = step.role_recommender.recommend_roles.call_args.kwargs  # type: ignore[attr-defined]
+                self.assertEqual(recommend_args[1].model, "gpt-5.4")
                 self.assertEqual(recommend_kwargs["max_items"], 4)
                 mix_plan = recommend_kwargs["mix_plan"]
                 self.assertEqual((mix_plan.request_core, mix_plan.request_adjacent, mix_plan.request_exploratory), (1, 2, 1))
@@ -328,6 +331,19 @@ class TargetDirectionRegressionTests(unittest.TestCase):
             step._test_dialogs.warning.assert_called()  # type: ignore[attr-defined]
             self.assertEqual(context.profiles.list_for_candidate(candidate_id), [])
 
+    def test_manual_add_dialog_keeps_draft_when_scope_is_missing(self) -> None:
+        dialog = ManualRoleInputDialog(ui_language="zh")
+        self.addCleanup(dialog.deleteLater)
+        dialog.role_name_input.setText("Hydrogen Test Engineer")
+        dialog.rough_description_input.setPlainText("keep this draft")
+
+        with patch("jobflow_desktop_app.app.dialogs.manual_role_input.QMessageBox.warning") as warning:
+            dialog._submit()
+
+        warning.assert_called_once()
+        self.assertNotEqual(dialog.result(), QDialog.Accepted)
+        self.assertEqual(dialog.values(), ("Hydrogen Test Engineer", "keep this draft"))
+
     def test_manual_add_ai_enrichment_uses_selected_scope_and_persists_it(self) -> None:
         with make_temp_context() as context:
             save_openai_settings(context, api_key="test-key", model="gpt-5-nano")
@@ -369,10 +385,54 @@ class TargetDirectionRegressionTests(unittest.TestCase):
 
             step.role_recommender.enrich_manual_role.assert_called_once()  # type: ignore[attr-defined]
             enrich_kwargs = step.role_recommender.enrich_manual_role.call_args.kwargs  # type: ignore[attr-defined]
+            self.assertEqual(enrich_kwargs["settings"].model, "gpt-5.4")
             self.assertEqual(enrich_kwargs["desired_scope_profile"], "exploratory")
             saved_profiles = context.profiles.list_for_candidate(candidate_id)
             self.assertEqual(len(saved_profiles), 1)
             self.assertEqual(saved_profiles[0].scope_profile, "exploratory")
+
+    def test_manual_add_ai_failure_saves_draft_and_sets_timeout(self) -> None:
+        with make_temp_context() as context:
+            save_openai_settings(context, api_key="test-key", model="gpt-5-nano")
+            candidate_id = create_candidate(context, name="Manual Draft Candidate")
+            step = self._make_target_step(context)
+            step.set_candidate(candidate_id)
+            step.set_ai_validation_state("Validation passed", "ready")
+            process_events()
+
+            fake_dialog = Mock()
+            fake_dialog.exec.return_value = QDialog.Accepted
+            fake_dialog.values.return_value = ("Hydrogen Test Engineer", "test stack and validation")
+            fake_dialog.selected_scope_profile.return_value = "adjacent"
+            step.role_recommender.enrich_manual_role.side_effect = RuntimeError("network timeout")  # type: ignore[attr-defined]
+            captured: dict[str, object] = {}
+
+            def fake_run_busy_task(_owner, **kwargs):
+                captured.update(kwargs)
+                try:
+                    kwargs["task"]()
+                except Exception as exc:
+                    kwargs["on_finally"]()
+                    kwargs["on_error"](exc)
+                return True
+
+            with (
+                patch(
+                    "jobflow_desktop_app.app.pages.target_direction.ManualRoleInputDialog",
+                    return_value=fake_dialog,
+                ),
+                patch("jobflow_desktop_app.app.pages.target_direction.run_busy_task", side_effect=fake_run_busy_task),
+            ):
+                QTest.mouseClick(step.add_direction_button, Qt.LeftButton)
+                process_events()
+
+            self.assertEqual(captured["timeout_ms"], 120_000)
+            saved_profiles = context.profiles.list_for_candidate(candidate_id)
+            self.assertEqual(len(saved_profiles), 1)
+            self.assertEqual(saved_profiles[0].name, "Hydrogen Test Engineer")
+            self.assertEqual(saved_profiles[0].scope_profile, "adjacent")
+            step._test_dialogs.information.assert_called_once()  # type: ignore[attr-defined]
+            step._test_dialogs.warning.assert_not_called()  # type: ignore[attr-defined]
 
 
 if __name__ == "__main__":  # pragma: no cover

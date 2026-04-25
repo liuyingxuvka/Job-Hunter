@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import os
 from html import escape
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -26,13 +26,13 @@ from .candidate_basics import CandidateBasicsStep
 from .search_results_compact import SearchResultsCompactStep
 from .target_direction import TargetDirectionStep
 
-SUPPORT_PAYPAL_EMAIL_ENV = "JOBFLOW_SUPPORT_PAYPAL_EMAIL"
-SUPPORT_PAYPAL_EMAIL_SETTING_KEY = "support_paypal_email"
-SUPPORT_PAYPAL_EMAIL_DEFAULT = "liu.yingxu.vka@gmail.com"
+SUPPORT_PAYPAL_ME_URL = "https://paypal.me/Yingxuliu"
 
 
 class CandidateWorkspaceCompactPage(QWidget):
     """Current candidate workspace UI."""
+
+    INITIAL_STEP_INDEX = 0
 
     def __init__(
         self,
@@ -155,7 +155,7 @@ class CandidateWorkspaceCompactPage(QWidget):
             """
         )
 
-        self._set_step(2)
+        self._set_step(self.INITIAL_STEP_INDEX)
         self.set_ai_validation_status(
             _t(self.ui_language, "AI 状态：等待验证", "AI status: waiting for validation"),
             "idle",
@@ -232,7 +232,7 @@ class CandidateWorkspaceCompactPage(QWidget):
             "hero",
         )
         self.support_button = styled_button(
-            _t(self.ui_language, "☕ 支持开发", "☕ Support Dev"),
+            _t(self.ui_language, "☕ 支持", "☕ Support"),
             "hero",
         )
         for button in (self.workspace_settings_button, self.switch_candidate_button, self.support_button):
@@ -336,6 +336,9 @@ class CandidateWorkspaceCompactPage(QWidget):
             QApplication.style().unpolish(button)
             QApplication.style().polish(button)
 
+    def show_initial_step(self) -> None:
+        self._set_step(self.INITIAL_STEP_INDEX)
+
     def _on_candidate_saved(self, candidate_id: int) -> None:
         self.set_candidate(candidate_id)
 
@@ -351,71 +354,43 @@ class CandidateWorkspaceCompactPage(QWidget):
         if self.on_back_to_candidates:
             self.on_back_to_candidates()
 
-    def _support_paypal_email(self) -> str:
-        env_email = os.environ.get(SUPPORT_PAYPAL_EMAIL_ENV, "").strip()
-        if env_email:
-            return env_email
-        saved_email = self.context.settings.get_value(SUPPORT_PAYPAL_EMAIL_SETTING_KEY, "").strip()
-        if saved_email:
-            return saved_email
-        return SUPPORT_PAYPAL_EMAIL_DEFAULT
+    def _support_dialog_title(self) -> str:
+        return _t(self.ui_language, "支持", "Support")
+
+    def _support_dialog_message(self) -> str:
+        intro = _t(
+            self.ui_language,
+            "如果这个项目对你有帮助，欢迎通过下面的链接请开发者喝杯咖啡：",
+            "If this project is useful to you, you're welcome to buy the developer a coffee here:",
+        )
+        disclaimer = _t(
+            self.ui_language,
+            "这只是自愿支持项目维护，不代表购买技术支持、质保、优先服务、商业授权或功能定制。",
+            "This is voluntary support for project maintenance. It does not purchase technical support, warranty, priority service, commercial rights, or feature requests.",
+        )
+        return "\n\n".join((intro, SUPPORT_PAYPAL_ME_URL, disclaimer))
+
+    def _support_dialog_action_label(self) -> str:
+        return _t(
+            self.ui_language,
+            "通过 PayPal 请开发者喝杯咖啡",
+            "Buy me a coffee via PayPal",
+        )
 
     def _show_support_dialog(self) -> None:
-        paypal_email = self._support_paypal_email()
-        title = _t(self.ui_language, "支持开发", "Support Development")
-        message = _t(
-            self.ui_language,
-            "这个工具的开发和维护用了大量 Codex 与本地调试成本。如果它真的帮到了你，欢迎给开发者买杯咖啡。",
-            "Building and maintaining this tool takes substantial Codex usage and local debugging cost. If it genuinely helps you, you are welcome to buy the developer a coffee.",
-        )
-        info_lines = [message, ""]
-        if paypal_email:
-            info_lines.extend(
-                [
-                    _t(
-                        self.ui_language,
-                        "可通过 PayPal 向下面这个账号转账：",
-                        "You can send support via PayPal to this account:",
-                    ),
-                    paypal_email,
-                ]
-            )
-        else:
-            info_lines.append(
-                _t(
-                    self.ui_language,
-                    "PayPal 账号暂未配置。你之后给我邮箱地址后，我可以再帮你直接写进去。",
-                    "PayPal account is not configured yet. Once you provide the email address, I can wire it in directly.",
-                )
-            )
-
         dialog = QMessageBox(self)
         dialog.setIcon(QMessageBox.NoIcon)
-        dialog.setWindowTitle(title)
-        dialog.setText("\n".join(info_lines))
-        copy_button = None
-        if paypal_email:
-            copy_button = dialog.addButton(
-                _t(self.ui_language, "复制 PayPal 账号", "Copy PayPal Account"),
-                QMessageBox.ActionRole,
-            )
+        dialog.setWindowTitle(self._support_dialog_title())
+        dialog.setText(self._support_dialog_message())
+        open_button = dialog.addButton(
+            self._support_dialog_action_label(),
+            QMessageBox.ActionRole,
+        )
         dialog.addButton(_t(self.ui_language, "关闭", "Close"), QMessageBox.RejectRole)
         dialog.exec()
 
-        if copy_button is not None and dialog.clickedButton() is copy_button:
-            QApplication.clipboard().setText(paypal_email)
-            copied_dialog = QMessageBox(self)
-            copied_dialog.setIcon(QMessageBox.NoIcon)
-            copied_dialog.setWindowTitle(title)
-            copied_dialog.setText(
-                _t(
-                    self.ui_language,
-                    f"PayPal 账号已复制到剪贴板：{paypal_email}",
-                    f"PayPal account copied to clipboard: {paypal_email}",
-                )
-            )
-            copied_dialog.addButton(_t(self.ui_language, "关闭", "Close"), QMessageBox.AcceptRole)
-            copied_dialog.exec()
+        if dialog.clickedButton() is open_button:
+            QDesktopServices.openUrl(QUrl(SUPPORT_PAYPAL_ME_URL))
 
     def _open_ai_settings(self) -> None:
         previous_language = self.context.settings.get_ui_language()

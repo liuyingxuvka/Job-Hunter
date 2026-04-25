@@ -9,11 +9,11 @@ class SearchResultsControlsStateTests(unittest.TestCase):
     def test_selected_search_duration_seconds_uses_minimum_and_fallback(self) -> None:
         self.assertEqual(
             search_results_controls_state.selected_search_duration_seconds(120),
-            300,
+            3600,
         )
         self.assertEqual(
             search_results_controls_state.selected_search_duration_seconds("1800"),
-            1800,
+            3600,
         )
         self.assertEqual(
             search_results_controls_state.selected_search_duration_seconds("bad"),

@@ -7,6 +7,9 @@ desktop_app/src/*.egg-info/
 desktop_app/**/*.pyc
 desktop_app/**/__pycache__/
 desktop_app/runtime/data/jobflow_desktop.db*
+desktop_app/runtime/*.db*
+desktop_app/runtime/*.log
+desktop_app/runtime/*.png
 desktop_app/runtime/backups/**
 !desktop_app/runtime/backups/.gitignore
 desktop_app/runtime/exports/**
@@ -15,3 +18,8 @@ desktop_app/runtime/logs/**
 !desktop_app/runtime/logs/.gitkeep
 desktop_app/runtime/search_runs/**
 !desktop_app/runtime/search_runs/.gitkeep
+
+# Local desktop QA runs, private user runtime pointers, logs, screenshots, and generated artifacts.
+runtime/**
+kb/
+tmp_*.png

@@ -119,6 +119,15 @@ class SearchResultsCompactStepTests(unittest.TestCase):
                 [compact.search_duration_combo.itemData(index) for index in range(compact.search_duration_combo.count())],
                 [base.search_duration_combo.itemData(index) for index in range(base.search_duration_combo.count())],
             )
+            self.assertEqual(
+                [base.search_duration_combo.itemData(index) for index in range(base.search_duration_combo.count())],
+                [3600, 7200, 10800, 14400],
+            )
+            self.assertEqual(
+                [base.search_duration_combo.itemText(index) for index in range(base.search_duration_combo.count())],
+                ["1 小时", "2 小时", "3 小时", "4 小时"],
+            )
+            self.assertEqual(base.search_duration_combo.currentData(), 3600)
 
     def test_compact_step_does_not_reset_user_resized_widths_on_rerender(self) -> None:
         with make_temp_context() as context:

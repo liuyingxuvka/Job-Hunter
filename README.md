@@ -169,6 +169,14 @@ python -m venv .venv
 
 当前已经把这套边界写进 `.gitignore`、`scripts/privacy_audit.ps1` 和 GitHub Actions，所以未来同事协作时也会按同一规则执行。
 
+### 支持
+
+如果这个项目对你有帮助，欢迎通过下面的链接请开发者喝杯咖啡：
+
+[通过 PayPal 请开发者喝杯咖啡](https://paypal.me/Yingxuliu)
+
+这只是自愿支持项目维护，不代表购买技术支持、质保、优先服务、商业授权或功能定制。
+
 ### 文档导航
 
 - [更新记录](CHANGELOG.md)
@@ -341,6 +349,14 @@ Things the project should not overclaim today:
 The public repository keeps only source code, documentation, demo seeds, and safe example templates. Personal resumes, company pools, search outputs, SQLite data, and runtime backups must remain local.
 
 This boundary is now enforced through `.gitignore`, `scripts/privacy_audit.ps1`, and GitHub Actions so future collaborators follow the same rules by default.
+
+### Support
+
+If this project is useful to you, you're welcome to buy the developer a coffee here:
+
+[Buy me a coffee via PayPal](https://paypal.me/Yingxuliu)
+
+This is voluntary support for project maintenance. It does not purchase technical support, warranty, priority service, commercial rights, or feature requests.
 
 ### Documentation
 

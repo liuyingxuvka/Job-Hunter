@@ -16,7 +16,8 @@ $pyInstallerWork = Join-Path $buildRoot "pyinstaller-work"
 $pyInstallerDist = Join-Path $buildRoot "pyinstaller-dist"
 $appName = "Jobflow Desktop"
 $productName = "Job-Hunter"
-$exeAuthorName = "Yingxu Liu"
+$exeCompanyName = "Job-Hunter"
+$exeCopyrightOwner = "Job-Hunter contributors"
 $iconPath = Join-Path $desktopRoot "assets\app_icon.ico"
 
 function Resolve-PythonExe {
@@ -156,14 +157,14 @@ VSVersionInfo(
         StringTable(
           "040904B0",
           [
-            StringStruct("CompanyName", "$exeAuthorName"),
+            StringStruct("CompanyName", "$exeCompanyName"),
             StringStruct("FileDescription", "$appName"),
             StringStruct("FileVersion", "$releaseVersion"),
             StringStruct("InternalName", "$appName"),
             StringStruct("OriginalFilename", "$appName.exe"),
             StringStruct("ProductName", "$productName"),
             StringStruct("ProductVersion", "$releaseVersion"),
-            StringStruct("LegalCopyright", "Copyright (c) $(Get-Date -Format yyyy) $exeAuthorName")
+            StringStruct("LegalCopyright", "Copyright (c) $(Get-Date -Format yyyy) $exeCopyrightOwner")
           ]
         )
       ]

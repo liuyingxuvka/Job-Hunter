@@ -61,6 +61,22 @@ class RoleRecommendationsPromptsTests(unittest.TestCase):
         self.assertIn("Fuel Cell Systems Engineer", prompt)
         self.assertIn("hydrogen systems", prompt)
 
+    def test_build_role_recommendation_prompt_asks_for_market_facing_job_titles(self) -> None:
+        prompt = build_role_recommendation_prompt(
+            self._candidate(),
+            resume_result=ResumeReadResult(text="resume excerpt", source_type=".txt"),
+        )
+
+        self.assertIn("market-facing job-board title", prompt)
+        self.assertIn("prefer 3-6 meaningful words", prompt)
+        self.assertIn("Put technical specificity in role.description_zh and role.description_en", prompt)
+        self.assertIn("Good role.name_en examples:", prompt)
+        self.assertIn("Fuel Cell Modeling Engineer", prompt)
+        self.assertIn("Hydrogen Systems Engineer", prompt)
+        self.assertIn("Bad role.name_en examples:", prompt)
+        self.assertIn("LT-PEM Fuel Cell Degradation Lifetime Multi-Physics Modeling Specialist", prompt)
+        self.assertIn("cover different practical work settings", prompt)
+
     def test_build_manual_role_enrich_prompt_includes_required_scope_profile(self) -> None:
         prompt = build_manual_role_enrich_prompt(
             self._candidate(),

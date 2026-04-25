@@ -72,6 +72,12 @@ class RuntimeConfigSections:
     fetch: dict
 
 
+@dataclass(frozen=True)
+class RuntimeModelOverrides:
+    fast_model: str = ""
+    quality_model: str = ""
+
+
 def coerce_bool(value: object) -> bool:
     if isinstance(value, bool):
         return value
@@ -108,16 +114,36 @@ def build_runtime_env(settings: OpenAISettings | None, api_base_url: str) -> dic
         if azure_key:
             env["OPENAI_API_KEY"] = azure_key
 
-    settings_model = settings.model.strip() if settings is not None else ""
-    if settings_model:
-        env["JOBFLOW_OPENAI_MODEL"] = settings_model
+    settings_fast_model = (
+        str(getattr(settings, "fast_model", "") or getattr(settings, "model", "") or "").strip()
+        if settings is not None
+        else ""
+    )
+    settings_quality_model = (
+        str(getattr(settings, "quality_model", "") or "").strip()
+        if settings is not None
+        else ""
+    )
+    if settings_fast_model:
+        env["JOBFLOW_OPENAI_FAST_MODEL"] = settings_fast_model
+        env["JOBFLOW_OPENAI_MODEL"] = settings_fast_model
     elif not env.get("JOBFLOW_OPENAI_MODEL", "").strip():
         azure_model = env.get("AZURE_OPENAI_MODEL", "").strip() or env.get("AZURE_OPENAI_DEPLOYMENT", "").strip()
         if azure_model:
+            env["JOBFLOW_OPENAI_FAST_MODEL"] = azure_model
             env["JOBFLOW_OPENAI_MODEL"] = azure_model
+
+    if settings_quality_model:
+        env["JOBFLOW_OPENAI_QUALITY_MODEL"] = settings_quality_model
+    elif not env.get("JOBFLOW_OPENAI_QUALITY_MODEL", "").strip():
+        env_quality_model = env.get("JOBFLOW_OPENAI_HIGH_QUALITY_MODEL", "").strip()
+        if env_quality_model:
+            env["JOBFLOW_OPENAI_QUALITY_MODEL"] = env_quality_model
 
     if not env.get("JOBFLOW_OPENAI_MODEL", "").strip():
         env["JOBFLOW_OPENAI_MODEL"] = "gpt-5"
+    if not env.get("JOBFLOW_OPENAI_FAST_MODEL", "").strip():
+        env["JOBFLOW_OPENAI_FAST_MODEL"] = env["JOBFLOW_OPENAI_MODEL"]
 
     if not (env.get("OPENAI_BASE_URL", "").strip() or env.get("OPENAI_API_BASE", "").strip()):
         azure_endpoint = env.get("AZURE_OPENAI_ENDPOINT", "").strip()
@@ -325,7 +351,21 @@ def resolve_model_override(settings: OpenAISettings | None) -> str:
         return azure_model
     if settings is None:
         return ""
-    return settings.model.strip()
+    return str(getattr(settings, "fast_model", "") or getattr(settings, "model", "") or "").strip()
+
+
+def resolve_model_overrides(settings: OpenAISettings | None) -> RuntimeModelOverrides:
+    fast_model = os.getenv("JOBFLOW_OPENAI_FAST_MODEL", "").strip() or resolve_model_override(settings)
+    quality_model = (
+        os.getenv("JOBFLOW_OPENAI_QUALITY_MODEL", "").strip()
+        or os.getenv("JOBFLOW_OPENAI_HIGH_QUALITY_MODEL", "").strip()
+    )
+    if not quality_model and settings is not None:
+        quality_model = str(getattr(settings, "quality_model", "") or "").strip()
+    return RuntimeModelOverrides(
+        fast_model=fast_model,
+        quality_model=quality_model,
+    )
 
 
 def prepare_runtime_candidate_inputs(
@@ -633,19 +673,30 @@ def apply_runtime_model_override(
     analysis_config: dict,
     translation_config: dict,
     model_override: str,
+    quality_model_override: str = "",
 ) -> None:
-    if not model_override:
+    fast_model = str(model_override or "").strip()
+    quality_model = str(quality_model_override or "").strip() or fast_model
+    if not fast_model and not quality_model:
         return
-    update_section(search_config, {"model": model_override})
-    update_section(company_discovery_config, {"model": model_override})
+    if fast_model:
+        update_section(search_config, {"model": fast_model})
+        update_section(translation_config, {"model": fast_model})
+    update_section(
+        company_discovery_config,
+        {
+            "model": fast_model or quality_model,
+            "fitModel": quality_model,
+        },
+    )
     update_section(
         analysis_config,
         {
-            "model": model_override,
-            "postVerifyModel": model_override,
+            "model": quality_model,
+            "postVerifyModel": quality_model,
+            "preRankModel": fast_model or quality_model,
         },
     )
-    update_section(translation_config, {"model": model_override})
 
 
 def apply_runtime_analysis_defaults(*, analysis_config: dict) -> None:
@@ -683,6 +734,7 @@ def populate_runtime_config_common(
     query_rotation_seed: int,
     semantic_profile: CandidateSemanticProfile | None,
     model_override: str,
+    quality_model_override: str = "",
     signals: CandidateSearchSignals | None = None,
     candidate_context: RuntimeCandidateConfigContext | None = None,
 ) -> RuntimeCandidateConfigContext:
@@ -707,6 +759,7 @@ def populate_runtime_config_common(
         analysis_config=analysis_config,
         translation_config=translation_config,
         model_override=model_override,
+        quality_model_override=quality_model_override,
     )
     apply_runtime_analysis_defaults(analysis_config=analysis_config)
     update_section(fetch_config, {"timeoutMs": HTTP_REQUEST_TIMEOUT_MS})
@@ -805,6 +858,7 @@ def build_runtime_config(
     query_rotation_seed: int = 0,
     semantic_profile: CandidateSemanticProfile | None = None,
     model_override: str = "",
+    quality_model_override: str = "",
     pipeline_stage: str = "main",
     signals: CandidateSearchSignals | None = None,
     candidate_context: RuntimeCandidateConfigContext | None = None,
@@ -827,6 +881,7 @@ def build_runtime_config(
         query_rotation_seed=query_rotation_seed,
         semantic_profile=semantic_profile,
         model_override=model_override,
+        quality_model_override=quality_model_override,
         signals=signals,
         candidate_context=candidate_context,
     )
@@ -860,6 +915,7 @@ __all__ = [
     "RuntimeCandidateInputPrep",
     "RuntimeCandidateConfigContext",
     "RuntimeConfigSections",
+    "RuntimeModelOverrides",
     "apply_runtime_analysis_defaults",
     "apply_runtime_candidate_context",
     "apply_runtime_config_main_stage",
@@ -879,6 +935,7 @@ __all__ = [
     "prepare_runtime_candidate_inputs",
     "refresh_runtime_candidate_context",
     "resolve_model_override",
+    "resolve_model_overrides",
     "resolve_resume_path",
     "resolve_scope_profiles",
     "runtime_config_sections",

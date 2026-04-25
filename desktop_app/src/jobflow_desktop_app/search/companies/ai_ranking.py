@@ -235,7 +235,8 @@ def _resolve_company_fit_model(config: Mapping[str, Any] | None) -> str:
     company_discovery = config.get("companyDiscovery") if isinstance(config, Mapping) else {}
     analysis = config.get("analysis") if isinstance(config, Mapping) else {}
     return str(
-        (company_discovery.get("model") if isinstance(company_discovery, Mapping) else "")
+        (company_discovery.get("fitModel") if isinstance(company_discovery, Mapping) else "")
+        or (company_discovery.get("model") if isinstance(company_discovery, Mapping) else "")
         or (analysis.get("model") if isinstance(analysis, Mapping) else "")
         or ""
     ).strip()
@@ -245,7 +246,8 @@ def _resolve_job_prerank_model(config: Mapping[str, Any] | None) -> str:
     analysis = config.get("analysis") if isinstance(config, Mapping) else {}
     company_discovery = config.get("companyDiscovery") if isinstance(config, Mapping) else {}
     return str(
-        (analysis.get("model") if isinstance(analysis, Mapping) else "")
+        (analysis.get("preRankModel") if isinstance(analysis, Mapping) else "")
+        or (analysis.get("model") if isinstance(analysis, Mapping) else "")
         or (company_discovery.get("model") if isinstance(company_discovery, Mapping) else "")
         or ""
     ).strip()

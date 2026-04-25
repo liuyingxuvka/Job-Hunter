@@ -1,0 +1,16 @@
+Candidate context:
+{candidate_context_json}
+
+Candidate jobs:
+{jobs_json}
+
+For each candidate job, verify whether it is still a concrete open job page and give a fast fit score.
+
+Rules:
+- Keep the same URL unless a clear current canonical job URL is found.
+- isLiveJobPage means the current page is still a specific job detail page, not a generic careers/search page.
+- hasApplyEntry means the page exposes a visible apply/application route or a current ATS application flow.
+- fastFitScore is a rough 0-100 fit score for this candidate, not a final recommendation.
+- Return one object for every input job URL, including invalid or expired jobs.
+
+Return structured JSON only.

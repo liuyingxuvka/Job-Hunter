@@ -18,6 +18,13 @@ def _is_no_qualified_company_stop(details: object) -> bool:
     return str(details.get("stopReason") or "").strip() == "no_qualified_new_companies"
 
 
+def _load_cumulative_table_jobs(page, candidate_id: int) -> list:
+    jobs = page.runner.load_live_jobs(int(candidate_id))
+    if jobs:
+        return jobs
+    return page.runner.load_recommended_jobs(int(candidate_id))
+
+
 def toggle_search(page) -> None:
     session = page._search_session
     if page._is_search_running(page.current_candidate_id):
@@ -205,7 +212,7 @@ def run_search(page, candidate_id: int | None = None, *, run_busy_task_fn) -> No
         if getattr(result, "cancelled", False):
             if page._search_session.queued_for(int(target_candidate_id)):
                 return
-            jobs = page.runner.load_recommended_jobs(int(target_candidate_id))
+            jobs = _load_cumulative_table_jobs(page, int(target_candidate_id))
             page._render_jobs(jobs)
             page._refresh_results_stats_label()
             page._set_stopped_status(candidate.name)
@@ -229,7 +236,7 @@ def run_search(page, candidate_id: int | None = None, *, run_busy_task_fn) -> No
             )
             return
 
-        jobs = page.runner.load_recommended_jobs(int(target_candidate_id))
+        jobs = _load_cumulative_table_jobs(page, int(target_candidate_id))
         visible_count = page._render_jobs(jobs)
         page._refresh_results_stats_label()
         pending_after_run = page._main_pending_analysis_count(int(target_candidate_id))

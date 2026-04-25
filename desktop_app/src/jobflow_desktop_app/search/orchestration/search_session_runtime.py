@@ -226,6 +226,39 @@ def _run_company_discovery_stage(
     )
 
 
+def _run_direct_job_discovery_stage(
+    runtime: SearchSessionRuntime,
+    message: str,
+    start_event: str,
+) -> PythonStageRunResult | None:
+    if runtime.search_run_id is None or runtime.runner.runtime_mirror is None:
+        return None
+    timeout = _remaining_search_session_seconds(runtime)
+    if timeout <= 0:
+        return None
+    _set_stage(runtime, "direct_job_discovery")
+    runtime.write_progress(
+        status="running",
+        message=message,
+        last_event=start_event,
+    )
+    return PythonStageExecutor.run_direct_job_discovery_stage_for_runtime(
+        runtime_mirror=runtime.runner.runtime_mirror,
+        search_run_id=runtime.search_run_id,
+        candidate_id=runtime.candidate_id,
+        run_dir=runtime.run_dir,
+        config=runtime.current_main_runtime_config,
+        env=runtime.env,
+        timeout_seconds=timeout,
+        cancel_event=runtime.cancel_event,
+        progress_callback=lambda line: runtime.write_progress(
+            status="running",
+            message=message,
+            last_event=line,
+        ),
+    )
+
+
 def _run_company_selection_stage(
     runtime: SearchSessionRuntime,
     message: str,
@@ -340,6 +373,7 @@ __all__ = [
     "_StageResult",
     "_cancelled_outcome",
     "_combined_tail",
+    "_run_direct_job_discovery_stage",
     "_refresh_python_recommended_outputs",
     "_refresh_resume_pending_jobs",
     "_remaining_search_session_seconds",

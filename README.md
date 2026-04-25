@@ -4,8 +4,8 @@
   <img src="desktop_app/assets/app_icon.png" alt="Job Hunter app icon" width="96">
 </p>
 
-> 面向有经验求职者的本地优先岗位发现工作台。核心思路是：先找对公司，再找对岗位。  
-> A local-first job discovery workspace for experienced professionals. The core idea is simple: find the right companies before chasing the right roles.
+> 面向有经验求职者的本地优先岗位发现工作台。核心思路是：先识别高质量公司，再从公司脉络里持续发现岗位。  
+> A local-first job discovery workspace for experienced professionals. Core idea: build high-signal company memory first, then keep discovering roles through long-term company context.
 >
 > 本 README 先给中文，再给英文。普通用户请直接看 Windows 下载部分；开发者和协作者再看源码说明。  
 > This README starts with Chinese and ends with English. End users should go straight to the Windows download section; developers and collaborators can use the source instructions.
@@ -31,13 +31,18 @@ Screenshots are generated from the built-in demo candidate and public example li
 
 ### 项目定位
 
-Job Hunter 不是一个面向大众求职场景的职位推荐器。它更适合已经工作一段时间、拥有明确专业技能和职业方向的求职者：先从你的经验、目标方向和地域偏好出发，识别更值得跟踪的公司，再持续发现这些公司公开放出的岗位。
+Job Hunter 不是一个“短平快”岗位推荐器。它更适合已经工作、且有明确职业方向的用户：先从候选人的经历、目标方向和地域偏好出发，先建立值得持续跟踪的“目标公司池”。
 
-很多通用求职平台更擅长把热门职位推给大量用户，但对系统工程、验证测试、MBSE、可靠性、数字孪生、能源装备等细分方向来说，岗位名称、组织结构和招聘表达往往并不标准化。真正匹配的机会，经常藏在“公司需要这类能力，但岗位标题不完全一样”的场景里。
+很多通用平台在细分方向（如系统工程、验证测试、MBSE、数字孪生、可靠性、能源装备）上常常受限于岗位标题命名不统一、组织结构分散、岗位更新滞后。Job Hunter 的价值在于：不仅看单次搜索结果，而是把公司视为长期对象，持续跟踪公司与岗位的匹配变化。
 
-这个项目的核心思路是：先理解候选人已有的经验和可迁移能力，再推导哪些公司更可能需要这些能力，然后优先抓取公司官网、ATS 和有限的 Web 信号，最后把岗位匹配、状态维护和后续行动集中到一个本地工作台里。
+一句话总结：**岗位发现源于公司池，不是一次性匹配；它的作用是长期复利。**
 
-一句话总结：**先找对公司，再找对岗位。**
+### 我们的优势（与短期抓取相比）
+
+- 长期公司记忆：公司历史、匹配信号和岗位反馈会被持续积累，后续轮次能更快识别高质量机会。  
+- 双向成长：岗位评分结果会反哺公司池，反过来提升下轮公司发掘优先级。  
+- 低噪音跟踪：优先追踪重复出现、高相关度的企业线索，减少零散一次性“热度岗位”的干扰。  
+- 本地优先：候选人画像和状态在本地持续维护，不是每次开局都从零开始。
 
 ### 适合谁
 
@@ -45,6 +50,16 @@ Job Hunter 不是一个面向大众求职场景的职位推荐器。它更适合
 - 细分行业或专业岗位人群，如系统工程、验证测试、MBSE、数字孪生、可靠性、能源装备等方向
 - 希望跨行业迁移，但不想丢掉核心能力的人
 - 不满足于“职位平台推荐流”，更希望主动建立目标公司池的人
+
+### 核心架构（为什么是“长期复利”）
+
+1. 候选人画像：由用户维护的岗位方向、技能偏好、地域偏好形成搜索基线。  
+2. 公司池发现：基于方向做公司优先发现，建立公司侧评分与关注状态。  
+3. 岗位发现：优先从公司池公司抓取公开岗位，先做可行性/有效性再做匹配。  
+4. 结果闭环：把岗位评分、状态变化写回公司池与候选人看板。  
+5. 下一轮迭代：新岗位和新评分会提高公司后续优先级，系统持续变“聪明”。
+
+这套结构的关键不是单次命中更高，而是让每一轮搜索都能在“历史知识”上叠加，降低试错和重复劳动。
 
 ### 你应该从哪里开始
 
@@ -216,9 +231,9 @@ Job Hunter is not a generic job recommendation tool for mass-market job search. 
 
 Mainstream job platforms are often optimized for broad job discovery and high-volume recommendations. In specialized fields such as systems engineering, V&V, MBSE, reliability, digital twin, or energy equipment, job titles and hiring language are often inconsistent. Better opportunities are often hidden in companies that need the capability even when the role title does not match the resume exactly.
 
-The core idea is simple: understand the candidate's experience and transferable skills first, infer which companies are likely to value those skills, search company career pages and ATS sources before broad job boards, and then manage matching, review state, and follow-up actions in one local workspace.
+The core idea is simple: identify the most likely-fit companies first, then continuously discover roles through those company signals over repeated rounds. That turns search into a cumulative process instead of a one-time scrape.
 
-In one sentence: **find the right companies before chasing the right roles.**
+In one sentence: **find the right roles through a trusted company workflow, and improve that workflow with every round.**
 
 ### Who It's For
 
@@ -226,6 +241,16 @@ In one sentence: **find the right companies before chasing the right roles.**
 - Specialists in areas such as systems engineering, validation and verification, MBSE, digital twin, reliability, or energy equipment
 - People who want to move into adjacent industries without abandoning their core strengths
 - People who prefer building a focused target-company pipeline instead of relying on generic platform feeds
+
+### Core Architecture (compounding model)
+
+1. Candidate profile: role direction, transferable skills, and location preference become the baseline signal.  
+2. Company discovery: identify a target company set and maintain company-level state and score.  
+3. Job discovery: fetch roles primarily from those companies, validate availability first, then score fit.  
+4. Feedback loop: write role scores and state changes back to both the candidate view and the company context.  
+5. Next iteration: new roles and scores raise future company prioritization, so the system gets better with each cycle.
+
+The advantage is not only a higher single-shot match, but lower noise and repeated work because each run compounds on prior evidence.
 
 ### Where To Start
 

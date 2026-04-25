@@ -24,7 +24,9 @@ try:
         get_qapp,
         make_job,
         make_temp_context,
+        patch_run_busy_task_sync,
         process_events,
+        save_openai_settings,
         suppress_message_boxes,
     )
 except ImportError:  # pragma: no cover - unittest discover from tests dir
@@ -35,7 +37,9 @@ except ImportError:  # pragma: no cover - unittest discover from tests dir
         get_qapp,
         make_job,
         make_temp_context,
+        patch_run_busy_task_sync,
         process_events,
+        save_openai_settings,
         suppress_message_boxes,
     )
 
@@ -543,6 +547,56 @@ class SearchResultsRegressionTests(unittest.TestCase):
             )
             focus_combo = step.table.cellWidget(focus_row, 7)
             self.assertEqual(focus_combo.currentText(), "重点")
+
+    def test_search_completion_keeps_cumulative_table_instead_of_latest_recommended_only(self) -> None:
+        with make_temp_context() as context:
+            save_openai_settings(context)
+            candidate_id = self._make_candidate_bundle(
+                context,
+                candidate_name="Demo Candidate",
+                profile_name="Hydrogen Systems Engineer",
+                scope_profile="hydrogen_core",
+            )
+            fake_runner = FakeJobSearchRunner()
+            old_job = make_job(
+                title="Hydrogen Degradation Modeling Engineer",
+                company="Fuel Cell Co",
+                url="https://fuel.example/jobs/aging",
+                date_found="2026-04-16T10:00:00Z",
+            )
+            new_job = make_job(
+                title="Fuel Cell Validation Engineer",
+                company="Stack Labs",
+                url="https://stack.example/jobs/validation",
+                date_found="2026-04-16T11:00:00Z",
+            )
+            fake_runner.load_live_jobs = lambda _candidate_id: [old_job, new_job]  # type: ignore[method-assign]
+            fake_runner.load_recommended_jobs = lambda _candidate_id: [new_job]  # type: ignore[method-assign]
+            fake_runner.set_jobs(
+                [old_job, new_job],
+                stats=SearchStats(
+                    candidate_company_pool_count=2,
+                    main_discovered_job_count=2,
+                    main_scored_job_count=2,
+                    recommended_job_count=2,
+                    displayable_result_count=2,
+                    main_pending_analysis_count=0,
+                ),
+            )
+
+            step = self._make_step(context, fake_runner)
+            step.set_candidate(context.candidates.get(candidate_id))
+            process_events()
+
+            with patch_run_busy_task_sync(), suppress_message_boxes():
+                step._run_search()
+            process_events()
+
+            self.assertEqual(step.table.rowCount(), 2)
+            self.assertEqual(
+                {step.table.item(row, 0).text() for row in range(step.table.rowCount())},
+                {"Hydrogen Degradation Modeling Engineer", "Fuel Cell Validation Engineer"},
+            )
 
 
 if __name__ == "__main__":  # pragma: no cover

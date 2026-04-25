@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -23,6 +22,7 @@ from ..context import AppContext
 from ..theme import UI_COLORS
 from ..widgets.common import _t, make_card, styled_button
 from ..widgets.dialog_presenter import QtDialogPresenter
+from .candidate_avatar import candidate_avatar_icon
 
 class CandidateDirectoryPage(QWidget):
     def __init__(
@@ -217,7 +217,7 @@ class CandidateDirectoryPage(QWidget):
             role_text = _t(self.ui_language, f"{profile_count} 个目标岗位", f"{profile_count} roles")
             resume_text = _t(self.ui_language, f"简历：{resume_name}", f"Resume: {resume_name}")
             item = QListWidgetItem(f"{record.name}\n{resume_text}    ·    {role_text}")
-            item.setIcon(self._candidate_avatar_icon())
+            item.setIcon(candidate_avatar_icon())
             item.setSizeHint(QSize(0, 68))
             item.setData(Qt.UserRole, record.candidate_id)
             item.setToolTip(f"{record.name}\n{resume_text} · {role_text}")
@@ -254,41 +254,6 @@ class CandidateDirectoryPage(QWidget):
             return None
         candidate_id = current.data(Qt.UserRole)
         return int(candidate_id) if candidate_id is not None else None
-
-    @staticmethod
-    def _candidate_avatar_icon() -> QIcon:
-        icon = QIcon()
-        icon.addPixmap(
-            CandidateDirectoryPage._draw_candidate_avatar(
-                stroke=UI_COLORS["accent_secondary"],
-                fill="#e8f1f7",
-            ),
-            QIcon.Normal,
-        )
-        icon.addPixmap(
-            CandidateDirectoryPage._draw_candidate_avatar(
-                stroke=UI_COLORS["text_inverse"],
-                fill=QColor(255, 255, 255, 42),
-            ),
-            QIcon.Selected,
-        )
-        return icon
-
-    @staticmethod
-    def _draw_candidate_avatar(*, stroke: str, fill: str | QColor) -> QPixmap:
-        pixmap = QPixmap(34, 34)
-        pixmap.fill(Qt.transparent)
-
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QPen(QColor(stroke), 1.6))
-        painter.setBrush(QColor(fill) if isinstance(fill, str) else fill)
-        painter.drawEllipse(2, 2, 30, 30)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawEllipse(12, 8, 10, 10)
-        painter.drawArc(8, 17, 18, 12, 20 * 16, 140 * 16)
-        painter.end()
-        return pixmap
 
     def _on_candidate_selected(self, current: QListWidgetItem | None, _: QListWidgetItem | None) -> None:
         if current is None:

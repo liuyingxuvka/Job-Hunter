@@ -23,6 +23,7 @@ from ..context import AppContext
 from ..widgets.common import _t, make_card, make_scroll_area, styled_button
 from ..dialogs.ai_settings import AISettingsDialog
 from .candidate_basics import CandidateBasicsStep
+from .candidate_avatar import candidate_avatar_pixmap
 from .search_results_compact import SearchResultsCompactStep
 from .target_direction import TargetDirectionStep
 
@@ -203,6 +204,13 @@ class CandidateWorkspaceCompactPage(QWidget):
         layout = QHBoxLayout(hero)
         layout.setContentsMargins(14, 10, 14, 10)
         layout.setSpacing(10)
+
+        self.hero_avatar = QLabel()
+        self.hero_avatar.setObjectName("CompactWorkspaceAvatar")
+        self.hero_avatar.setFixedSize(38, 38)
+        self.hero_avatar.setAlignment(Qt.AlignCenter)
+        self.hero_avatar.setPixmap(candidate_avatar_pixmap(selected=True, size=34))
+        layout.addWidget(self.hero_avatar, 0, Qt.AlignVCenter)
 
         left = QVBoxLayout()
         left.setContentsMargins(0, 0, 0, 0)

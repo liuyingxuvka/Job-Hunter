@@ -38,6 +38,7 @@ COMPANY_DISCOVERY_REQUEST_TIMEOUT_SECONDS = 200
 COMPANY_SELECTION_REQUEST_TIMEOUT_SECONDS = 30
 RESUME_ANALYSIS_REQUEST_TIMEOUT_SECONDS = 45
 RESUME_POST_VERIFY_REQUEST_TIMEOUT_SECONDS = 30
+DIRECT_JOB_DISCOVERY_REQUEST_TIMEOUT_SECONDS = 600
 
 
 @dataclass(frozen=True)
@@ -366,6 +367,91 @@ class PythonStageExecutor:
             runtime_mirror=runtime_mirror,
             search_run_id=search_run_id,
             candidate_id=candidate_id,
+            config=config,
+            client_instance=client_instance,
+            progress_callback=progress_callback,
+        )
+
+    @classmethod
+    def run_direct_job_discovery_stage_for_runtime(
+        cls,
+        *,
+        runtime_mirror,
+        search_run_id: int,
+        candidate_id: int,
+        run_dir: Path,
+        config: dict[str, Any],
+        env: dict[str, str] | None = None,
+        timeout_seconds: int | None = None,
+        cancel_event: threading.Event | None = None,
+        progress_callback: Callable[[str], None] | None = None,
+        client: ResponseRequestClient | None = None,
+    ) -> PythonStageRunResult:
+        if cancel_event is not None and cancel_event.is_set():
+            return PythonStageRunResult(
+                success=False,
+                exit_code=-2,
+                message="Python direct job discovery stage cancelled before start.",
+                stdout_tail="",
+                stderr_tail="",
+                cancelled=True,
+            )
+        direct_job_discovery = _config_mapping(config, "directJobDiscovery")
+        if direct_job_discovery.get("enabled") is not True:
+            return PythonStageRunResult(
+                success=True,
+                exit_code=0,
+                message="Python direct job discovery stage skipped because it is disabled.",
+                stdout_tail="",
+                stderr_tail="",
+                payload={
+                    "rawJobs": 0,
+                    "skippedExisting": 0,
+                    "verifiedJobs": 0,
+                    "scoredJobs": 0,
+                    "recommendedJobs": 0,
+                    "upsertedCompanies": 0,
+                },
+            )
+        deadline = time.monotonic() + max(1, int(timeout_seconds)) if timeout_seconds else None
+        direct_timeout = max(
+            1,
+            int(direct_job_discovery.get("timeoutSeconds") or DIRECT_JOB_DISCOVERY_REQUEST_TIMEOUT_SECONDS),
+        )
+        try:
+            client_instance = client or _build_openai_client(
+                env=env,
+                timeout_seconds=min(_remaining_seconds(deadline), direct_timeout),
+            )
+        except Exception as exc:
+            return PythonStageRunResult(
+                success=True,
+                exit_code=0,
+                message=f"Python direct job discovery stage skipped because the client could not be initialized: {exc}",
+                stdout_tail="",
+                stderr_tail=str(exc),
+                payload={
+                    "rawJobs": 0,
+                    "skippedExisting": 0,
+                    "verifiedJobs": 0,
+                    "scoredJobs": 0,
+                    "recommendedJobs": 0,
+                    "upsertedCompanies": 0,
+                    "error": str(exc),
+                },
+            )
+        if isinstance(client_instance, OpenAIResponsesClient):
+            client_instance.timeout_seconds = max(
+                1,
+                min(_remaining_seconds(deadline), direct_timeout),
+            )
+        from .executor_direct_job_stage import run_direct_job_discovery_stage_db
+
+        return run_direct_job_discovery_stage_db(
+            runtime_mirror=runtime_mirror,
+            search_run_id=search_run_id,
+            candidate_id=candidate_id,
+            run_dir=run_dir,
             config=config,
             client_instance=client_instance,
             progress_callback=progress_callback,

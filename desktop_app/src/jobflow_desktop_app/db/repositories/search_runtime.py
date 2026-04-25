@@ -1166,10 +1166,12 @@ class SearchRunJobRepository:
                   date_found,
                   match_score,
                   analysis_completed,
+                  recommended,
+                  pending_resume,
                   job_json,
                   updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """,
                 [
                     (
@@ -1186,6 +1188,12 @@ class SearchRunJobRepository:
                         _text(row.get("date_found")),
                         row.get("match_score"),
                         1 if bool(row.get("analysis_completed")) else 0,
+                        1
+                        if bool(row.get("recommended", normalized_bucket == "recommended"))
+                        else 0,
+                        1
+                        if bool(row.get("pending_resume", normalized_bucket == "resume_pending"))
+                        else 0,
                         _text(row.get("job_json")),
                     )
                     for row in rows
@@ -1281,7 +1289,7 @@ class SearchRunJobRepository:
                       ELSE 0
                     END
                   ) AS jobs_scored_count,
-                  SUM(CASE WHEN job_bucket = 'recommended' THEN 1 ELSE 0 END) AS jobs_recommended_count
+                  COUNT(DISTINCT CASE WHEN recommended = 1 THEN job_key ELSE NULL END) AS jobs_recommended_count
                 FROM search_run_jobs
                 WHERE search_run_id = ?
                 """,

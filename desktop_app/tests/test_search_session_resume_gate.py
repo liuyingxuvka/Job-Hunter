@@ -61,6 +61,27 @@ class SearchSessionResumeGateTests(unittest.TestCase):
             self.assertIsNone(result.early_outcome)
             self.assertEqual(result.pending_after_round, 1)
             self.assertFalse(result.resume_phase_failed)
+
+    def test_run_initial_resume_gate_continues_when_resume_stage_fails(self) -> None:
+        with TemporaryDirectory() as temp_dir, patch(
+            "jobflow_desktop_app.search.orchestration.search_session_resume_gate._refresh_resume_pending_jobs",
+            side_effect=[2, 2],
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_resume_gate._run_resume_stage",
+            return_value=SimpleNamespace(
+                success=False,
+                exit_code=124,
+                message="resume timeout",
+                stdout_tail="",
+                stderr_tail="timeout",
+                cancelled=False,
+            ),
+        ):
+            runtime = self._make_runtime(Path(temp_dir))
+            result = run_initial_resume_gate(runtime, [], [], [])
+
+            self.assertIsNone(result.early_outcome)
+            self.assertEqual(result.pending_after_round, 2)
             self.assertFalse(result.resume_phase_failed)
 
     def test_run_initial_resume_gate_reports_remaining_queue_after_single_resume_pass(self) -> None:

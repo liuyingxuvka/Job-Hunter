@@ -28,37 +28,72 @@ def _latest_runtime_config(runner, candidate_id: int) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
-def load_recommended_jobs(runner, candidate_id: int, *, job_result_factory) -> list:
+def _merge_jobs_by_runtime_key(runner, jobs: list[dict]) -> list[dict]:
+    merged_jobs: dict[str, dict] = {}
+    for item in jobs:
+        if not isinstance(item, dict):
+            continue
+        key = runner._job_item_key(item)
+        if not key:
+            continue
+        existing = merged_jobs.get(key)
+        merged_jobs[key] = (
+            runner._merge_job_item(existing, item) if existing is not None else dict(item)
+        )
+    return list(merged_jobs.values())
+
+
+def _load_cumulative_bucket_jobs(
+    runner,
+    candidate_id: int,
+    *,
+    buckets: tuple[str, ...],
+) -> list[dict]:
     if runner.runtime_mirror is None:
         return []
-    config = _latest_runtime_config(runner, candidate_id)
-    jobs = runner.runtime_mirror.load_candidate_bucket_jobs_merged(
-        candidate_id=int(candidate_id),
-        job_bucket="recommended",
+    jobs: list[dict] = []
+    for bucket in buckets:
+        jobs.extend(
+            runner.runtime_mirror.load_candidate_bucket_jobs_merged(
+                candidate_id=int(candidate_id),
+                job_bucket=bucket,
+            )
+        )
+    return _merge_jobs_by_runtime_key(runner, jobs)
+
+
+def _load_cumulative_main_jobs(runner, candidate_id: int) -> list[dict]:
+    return _load_cumulative_bucket_jobs(
+        runner,
+        candidate_id,
+        buckets=("found", "all", "recommended"),
     )
-    jobs = [
+
+
+def _displayable_recommended_jobs(jobs: list[dict], *, config: dict) -> list[dict]:
+    materialized_jobs = [
         materialize_output_eligibility(item, config)
         for item in jobs
         if bool((item.get("analysis") or {}).get("recommend"))
     ]
-    jobs = job_search_runner_records.filter_displayable_recommended_jobs(
-        jobs,
+    return job_search_runner_records.filter_displayable_recommended_jobs(
+        materialized_jobs,
         config=config,
     )
-    if not jobs:
-        all_jobs = runner.runtime_mirror.load_candidate_bucket_jobs_merged(
-            candidate_id=int(candidate_id),
-            job_bucket="all",
-        )
-        recommended_in_all = [
-            materialize_output_eligibility(item, config)
-            for item in all_jobs
-            if bool((item.get("analysis") or {}).get("recommend"))
-        ]
-        jobs = job_search_runner_records.filter_displayable_recommended_jobs(
-            recommended_in_all,
-            config=config,
-        )
+
+
+def load_recommended_jobs(runner, candidate_id: int, *, job_result_factory) -> list:
+    if runner.runtime_mirror is None:
+        return []
+    config = _latest_runtime_config(runner, candidate_id)
+    jobs = _displayable_recommended_jobs(
+        _load_cumulative_bucket_jobs(
+            runner,
+            candidate_id,
+            buckets=("all", "recommended"),
+        ),
+        config=config,
+    )
     if not jobs:
         return []
     jobs = job_result_i18n.enrich_job_display_i18n(runner, candidate_id, jobs)
@@ -71,28 +106,13 @@ def load_recommended_jobs(runner, candidate_id: int, *, job_result_factory) -> l
 def load_live_jobs(runner, candidate_id: int, *, job_result_factory) -> list:
     if runner.runtime_mirror is None:
         return []
-    merged_jobs: dict[str, dict] = {}
-    for bucket in ("found", "all", "recommended"):
-        bucket_jobs = runner.runtime_mirror.load_candidate_bucket_jobs_merged(
-            candidate_id=int(candidate_id),
-            job_bucket=bucket,
-        )
-        for item in bucket_jobs:
-            if not isinstance(item, dict):
-                continue
-            key = runner._job_item_key(item)
-            if not key:
-                continue
-            existing = merged_jobs.get(key)
-            merged_jobs[key] = (
-                runner._merge_job_item(existing, item) if existing is not None else dict(item)
-            )
-    if not merged_jobs:
+    jobs = _load_cumulative_main_jobs(runner, candidate_id)
+    if not jobs:
         return []
     merged_job_list = job_result_i18n.enrich_job_display_i18n(
         runner,
         candidate_id,
-        list(merged_jobs.values()),
+        jobs,
     )
     return job_search_runner_records.build_job_records(
         job_search_runner_records.filter_live_review_jobs(
@@ -106,34 +126,11 @@ def load_search_stats(runner, candidate_id: int) -> SearchStats:
     if runner.runtime_mirror is None:
         return SearchStats()
     config = _latest_runtime_config(runner, candidate_id)
-    found_jobs = runner.runtime_mirror.load_latest_bucket_jobs(
-        candidate_id=int(candidate_id),
-        job_bucket="found",
-    )
-    all_jobs = runner.runtime_mirror.load_latest_bucket_jobs(
-        candidate_id=int(candidate_id),
-        job_bucket="all",
-    )
-    recommended_jobs = runner.runtime_mirror.load_latest_bucket_jobs(
-        candidate_id=int(candidate_id),
-        job_bucket="recommended",
-    )
+    main_jobs = _load_cumulative_main_jobs(runner, candidate_id)
     pending_jobs = runner.runtime_mirror.load_latest_bucket_jobs(
         candidate_id=int(candidate_id),
         job_bucket="resume_pending",
     )
-    merged_jobs: dict[str, dict] = {}
-    for item in [*found_jobs, *all_jobs, *recommended_jobs]:
-        if not isinstance(item, dict):
-            continue
-        key = runner._job_item_key(item)
-        if not key:
-            continue
-        existing = merged_jobs.get(key)
-        merged_jobs[key] = (
-            runner._merge_job_item(existing, item) if existing is not None else dict(item)
-        )
-    main_jobs = list(merged_jobs.values())
     candidate_company_pool_count = runner.runtime_mirror.count_candidate_company_pool(
         int(candidate_id)
     )
@@ -143,20 +140,7 @@ def load_search_stats(runner, candidate_id: int) -> SearchStats:
         if str(item.get("company") or "").strip()
     }
     scored_jobs = job_search_runner_records.filter_live_review_jobs(main_jobs)
-    materialized_recommended_jobs = [
-        item
-        for item in (
-            materialize_output_eligibility(item, config)
-            for item in recommended_jobs
-            if bool((item.get("analysis") or {}).get("recommend"))
-        )
-    ]
-    displayable_result_count = len(
-        job_search_runner_records.filter_displayable_recommended_jobs(
-            materialized_recommended_jobs,
-            config=config,
-        )
-    )
+    displayable_result_count = len(_displayable_recommended_jobs(main_jobs, config=config))
     return SearchStats(
         discovered_job_count=len(main_jobs),
         discovered_company_count=len(discovered_companies),

@@ -353,7 +353,7 @@ class SearchRuntimeMirrorTests(unittest.TestCase):
 
             self.assertEqual(int(search_run["jobs_found_count"]), 1)
             self.assertEqual(int(search_run["jobs_scored_count"]), 1)
-            self.assertEqual(int(search_run["jobs_recommended_count"]), 0)
+            self.assertEqual(int(search_run["jobs_recommended_count"]), 1)
             self.assertEqual(
                 [(str(row["job_bucket"]), int(row["total"])) for row in bucket_rows],
                 [("all", 2), ("found", 1)],
@@ -442,7 +442,7 @@ class SearchRuntimeMirrorTests(unittest.TestCase):
 
             self.assertEqual(int(search_run["jobs_found_count"]), 1)
             self.assertEqual(int(search_run["jobs_scored_count"]), 1)
-            self.assertEqual(int(search_run["jobs_recommended_count"]), 0)
+            self.assertEqual(int(search_run["jobs_recommended_count"]), 1)
             self.assertEqual(
                 [(str(row["job_bucket"]), int(row["total"])) for row in bucket_rows],
                 [("all", 2), ("found", 1)],

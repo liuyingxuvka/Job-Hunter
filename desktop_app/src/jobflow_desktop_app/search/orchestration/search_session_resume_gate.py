@@ -42,6 +42,7 @@ def _run_resume_queue_gate(
     stage_stdout: list[tuple[str, str]],
     stage_stderr: list[tuple[str, str]],
     stage_notes: list[str],
+    block_on_failure: bool,
 ) -> tuple[int, bool, SearchSessionOutcome | None]:
     phase_failed = False
     if pending_after_round <= 0:
@@ -82,7 +83,11 @@ def _run_resume_queue_gate(
         stage_notes.append(
             f"{failure_note} (exit {phase_result.exit_code})."
         )
-        phase_failed = True
+        phase_failed = bool(block_on_failure)
+        try:
+            pending_after_round = _refresh_resume_pending_jobs(runtime)
+        except Exception:
+            pass
         return pending_after_round, phase_failed, None
     try:
         next_pending = _refresh_resume_pending_jobs(runtime)
@@ -148,11 +153,12 @@ def run_initial_resume_gate(
         start_event="Starting resume phase.",
         cancel_message="Search cancelled while resuming unfinished jobs.",
         failure_note="Resume phase failed; discovery did not start",
-        stalled_note="Resume queue did not shrink further after repeated passes; discovery did not start.",
-        retry_note="Resume queue did not shrink on this pass; retrying once before discovery stays blocked.",
+        stalled_note="Resume queue did not shrink on this pass; discovery will continue with queued jobs left.",
+        retry_note="Resume queue shrank on this pass; discovery will continue with queued jobs left.",
         stage_stdout=stage_stdout,
         stage_stderr=stage_stderr,
         stage_notes=stage_notes,
+        block_on_failure=False,
     )
     if cancelled_outcome is not None:
         return ResumeGateResult(
@@ -210,11 +216,12 @@ def run_finalize_resume_gate(
         start_event="Starting finalize phase.",
         cancel_message="Search cancelled while finalizing unfinished jobs.",
         failure_note="Finalize phase failed; remaining unfinished jobs stay queued",
-        stalled_note="Finalize queue did not shrink further after repeated passes.",
-        retry_note="Finalize queue did not shrink on this pass; retrying once.",
+        stalled_note="Finalize queue did not shrink on this pass; continuing only if the round made other progress.",
+        retry_note="Finalize queue shrank on this pass; continuing while time remains.",
         stage_stdout=stage_stdout,
         stage_stderr=stage_stderr,
         stage_notes=stage_notes,
+        block_on_failure=False,
     )
     if cancelled_outcome is not None:
         return FinalizeGateResult(

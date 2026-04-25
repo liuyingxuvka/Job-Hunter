@@ -147,12 +147,53 @@ class SearchRuntimeRepositoryTests(unittest.TestCase):
                     }
                 ],
             )
+            run_jobs.replace_bucket(
+                search_run_id=search_run_id,
+                candidate_id=candidate_id,
+                job_bucket="resume_pending",
+                rows=[
+                    {
+                        "job_key": "job-2",
+                        "title": "Battery Engineer",
+                        "analysis_completed": False,
+                        "pending_resume": True,
+                        "job_json": '{"title":"Battery Engineer"}',
+                    }
+                ],
+            )
 
             counts = run_jobs.summarize_bucket_counts(search_run_id=search_run_id)
+            with context.database.session() as connection:
+                row_flags = connection.execute(
+                    """
+                    SELECT job_bucket, recommended, pending_resume
+                    FROM search_run_jobs
+                    WHERE search_run_id = ? AND job_key IN (?, ?)
+                    ORDER BY job_bucket
+                    """,
+                    (search_run_id, "job-1", "job-2"),
+                ).fetchall()
 
             self.assertEqual(counts.jobs_found_count, 1)
             self.assertEqual(counts.jobs_scored_count, 1)
             self.assertEqual(counts.jobs_recommended_count, 1)
+            self.assertEqual(
+                [
+                    (
+                        str(row["job_bucket"]),
+                        int(row["recommended"] or 0),
+                        int(row["pending_resume"] or 0),
+                    )
+                    for row in row_flags
+                ],
+                [
+                    ("all", 1, 0),
+                    ("all", 0, 0),
+                    ("found", 1, 0),
+                    ("recommended", 1, 0),
+                    ("resume_pending", 0, 1),
+                ],
+            )
 
     def test_search_run_repository_recent_for_candidate_returns_newest_first(self) -> None:
         with make_temp_context() as context:

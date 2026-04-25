@@ -483,6 +483,91 @@ class SearchSessionOrchestratorTests(unittest.TestCase):
                 ),
             )
 
+    def test_run_discovery_round_runs_direct_jobs_before_company_pool(self) -> None:
+        events: list[str] = []
+
+        def direct_stage(*args, **kwargs):
+            del args
+            del kwargs
+            events.append("direct")
+            return PythonStageRunResult(
+                success=True,
+                exit_code=0,
+                message="direct ok",
+                stdout_tail="direct stdout",
+                stderr_tail="",
+                payload={"scoredJobs": 1, "upsertedCompanies": 1},
+            )
+
+        def company_discovery_stage(*args, **kwargs):
+            del args
+            del kwargs
+            events.append("company_discovery")
+            return PythonStageRunResult(
+                success=True,
+                exit_code=0,
+                message="company discovery ok",
+                stdout_tail="",
+                stderr_tail="",
+            )
+
+        with TemporaryDirectory() as temp_dir, patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._run_direct_job_discovery_stage",
+            side_effect=direct_stage,
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._run_company_discovery_stage",
+            side_effect=company_discovery_stage,
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._run_company_selection_stage",
+            return_value=PythonStageRunResult(
+                success=True,
+                exit_code=0,
+                message="selection ok",
+                stdout_tail="",
+                stderr_tail="",
+                payload={"selectedCompanies": []},
+            ),
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._refresh_resume_pending_jobs",
+            return_value=0,
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._refresh_round_outputs",
+            return_value=None,
+        ):
+            runtime = self._make_runtime(Path(temp_dir))
+            runtime.search_run_id = 777
+            before = SimpleNamespace(
+                candidate_company_pool_count=0,
+                main_discovered_job_count=0,
+                main_pending_analysis_count=0,
+                recommended_job_count=0,
+            )
+            after_direct = SimpleNamespace(
+                candidate_company_pool_count=1,
+                main_discovered_job_count=1,
+                main_pending_analysis_count=0,
+                recommended_job_count=1,
+            )
+            runtime.runner.load_search_stats.side_effect = [after_direct, after_direct]
+            stage_notes: list[str] = []
+            stage_stdout: list[tuple[str, str]] = []
+            stage_stderr: list[tuple[str, str]] = []
+
+            outcome = _run_discovery_round(
+                runtime,
+                round_number=1,
+                search_stats_before_round=before,
+                unresolved_company_rankings_before_round=0,
+                stage_notes=stage_notes,
+                stage_stdout=stage_stdout,
+                stage_stderr=stage_stderr,
+            )
+
+            self.assertTrue(outcome.main_result.success)
+            self.assertEqual(events[:2], ["direct", "company_discovery"])
+            self.assertEqual(outcome.round_progress.job_growth, 1)
+            self.assertEqual(outcome.round_progress.recommended_job_growth, 1)
+
     def test_run_discovery_round_defers_discovery_and_sources_while_company_ranking_pending(self) -> None:
         with TemporaryDirectory() as temp_dir, patch(
             "jobflow_desktop_app.search.orchestration.search_session_orchestrator._run_company_discovery_stage",
@@ -848,9 +933,9 @@ class SearchSessionOrchestratorTests(unittest.TestCase):
                 ),
                 pending_after_round=2,
                 round_progress=RoundProgress(
-                    company_pool_growth=1,
+                    company_pool_growth=0,
                     company_ranking_drop=0,
-                    job_growth=1,
+                    job_growth=0,
                     pending_drop=0,
                     recommended_job_growth=0,
                 ),
@@ -870,6 +955,75 @@ class SearchSessionOrchestratorTests(unittest.TestCase):
             self.assertTrue(outcome.success)
             self.assertIn("Pending jobs remain queued for a later manual session (2 job(s)).", outcome.message)
             runtime.runner._clear_resume_pending_jobs.assert_not_called()
+
+    def test_run_search_session_continues_when_pending_remains_but_round_makes_progress(self) -> None:
+        with TemporaryDirectory() as temp_dir, patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator.run_initial_resume_gate",
+            return_value=ResumeGateResult(
+                pending_after_round=0,
+                resume_phase_failed=False,
+                early_outcome=None,
+            ),
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._write_main_runtime_config",
+            side_effect=lambda runtime, rotation_seed: runtime.current_main_runtime_config,
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._run_discovery_round",
+            side_effect=[
+                DiscoveryRoundOutcome(
+                    main_result=PythonStageRunResult(
+                        success=True,
+                        exit_code=0,
+                        message="round 1 ok",
+                        stdout_tail="",
+                        stderr_tail="",
+                    ),
+                    pending_after_round=2,
+                    round_progress=RoundProgress(
+                        company_pool_growth=1,
+                        company_ranking_drop=0,
+                        job_growth=1,
+                        pending_drop=0,
+                        recommended_job_growth=0,
+                    ),
+                    attempted_query_discovery=True,
+                    finalize_phase_failed=False,
+                    finalize_status="incomplete",
+                ),
+                DiscoveryRoundOutcome(
+                    main_result=PythonStageRunResult(
+                        success=True,
+                        exit_code=0,
+                        message="round 2 ok",
+                        stdout_tail="",
+                        stderr_tail="",
+                    ),
+                    pending_after_round=0,
+                    round_progress=RoundProgress(0, 0, 0, 0, 0),
+                    attempted_query_discovery=True,
+                    finalize_phase_failed=False,
+                    finalize_status="cleared",
+                ),
+            ],
+        ) as run_discovery_round, patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._has_ready_companies_for_sources",
+            return_value=False,
+        ), patch(
+            "jobflow_desktop_app.search.orchestration.search_session_orchestrator._refresh_python_recommended_outputs",
+            return_value=0,
+        ):
+            runtime = self._make_runtime(Path(temp_dir))
+            runtime.search_session_deadline = 10**12
+
+            outcome = run_search_session(runtime)
+
+            self.assertTrue(outcome.success)
+            self.assertEqual(run_discovery_round.call_count, 2)
+            self.assertIn(
+                "Pending jobs remain after this round, but the session made progress; continuing while time remains.",
+                outcome.message,
+            )
+            runtime.runner._clear_resume_pending_jobs.assert_called_once_with(runtime.run_dir)
 
     def test_refresh_resume_pending_jobs_reconciles_company_pending_counts(self) -> None:
         with TemporaryDirectory() as temp_dir:

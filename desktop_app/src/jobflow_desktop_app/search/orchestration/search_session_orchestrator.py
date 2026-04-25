@@ -22,6 +22,7 @@ from .search_session_runtime import (
     _run_company_discovery_stage,
     _run_company_selection_stage,
     _run_company_sources_stage,
+    _run_direct_job_discovery_stage,
     _run_resume_stage,
     _set_stage,
     _write_main_runtime_config,
@@ -189,6 +190,51 @@ def _round_message(round_number: int, *, first: str, later: str) -> str:
     return first if round_number <= 1 else later.format(round_number=round_number)
 
 
+def _measure_round_progress(
+    runtime: SearchSessionRuntime,
+    *,
+    search_stats_before_round,
+    unresolved_company_rankings_before_round: int,
+) -> RoundProgress:
+    search_stats_after_round = runtime.runner.load_search_stats(runtime.candidate_id)
+    unresolved_company_rankings_after_round = 0
+    if runtime.runner.runtime_mirror is not None:
+        companies_after_round = runtime.runner.runtime_mirror.load_candidate_company_pool(
+            candidate_id=runtime.candidate_id,
+        )
+        unresolved_company_rankings_after_round = unresolved_company_ranking_count(
+            companies_after_round,
+            current_run_id=runtime.search_run_id,
+        )
+    return RoundProgress(
+        company_pool_growth=max(
+            0,
+            search_stats_after_round.candidate_company_pool_count
+            - search_stats_before_round.candidate_company_pool_count,
+        ),
+        company_ranking_drop=max(
+            0,
+            unresolved_company_rankings_before_round
+            - unresolved_company_rankings_after_round,
+        ),
+        job_growth=max(
+            0,
+            search_stats_after_round.main_discovered_job_count
+            - search_stats_before_round.main_discovered_job_count,
+        ),
+        pending_drop=max(
+            0,
+            search_stats_before_round.main_pending_analysis_count
+            - search_stats_after_round.main_pending_analysis_count,
+        ),
+        recommended_job_growth=max(
+            0,
+            search_stats_after_round.recommended_job_count
+            - search_stats_before_round.recommended_job_count,
+        ),
+    )
+
+
 def _main_result_from_remaining_selected_companies(
     *,
     round_number: int,
@@ -298,12 +344,8 @@ def _run_company_round(
             and isinstance(company_discovery_result.payload, dict)
             and bool(company_discovery_result.payload.get("noQualifiedNewCompanies"))
         ):
-            return CompanyRoundOutcome(
-                main_result=_skip_company_sources_result(
-                    "Company discovery did not produce qualified new companies in this session. Try again later."
-                ),
-                discovery_stage_attempted=discovery_stage_attempted,
-                session_details={"stopReason": "no_qualified_new_companies"},
+            stage_notes.append(
+                "Company discovery did not produce qualified new companies in this round; continuing with existing company-pool work."
             )
 
     company_selection_result = _run_company_selection_stage(
@@ -448,15 +490,68 @@ def _run_discovery_round(
     stage_stdout: list[tuple[str, str]],
     stage_stderr: list[tuple[str, str]],
 ) -> DiscoveryRoundOutcome:
+    direct_job_result = _run_direct_job_discovery_stage(
+        runtime,
+        _round_message(
+            round_number,
+            first="Searching direct job opportunities before company round 1.",
+            later="Searching direct job opportunities before company round {round_number}.",
+        ),
+        _round_message(
+            round_number,
+            first="Starting Python direct job discovery round 1.",
+            later="Starting Python direct job discovery round {round_number}.",
+        ),
+    )
+    direct_cancelled_outcome = _run_round_stage(
+        runtime,
+        direct_job_result,
+        stage_label=_round_stage_label("direct_job_discovery", round_number),
+        cancel_message="Search cancelled while running direct job discovery.",
+        stage_stdout=stage_stdout,
+        stage_stderr=stage_stderr,
+    )
+    if direct_cancelled_outcome is not None:
+        return DiscoveryRoundOutcome(
+            main_result=_StageResult(
+                success=False,
+                exit_code=-2,
+                message="Search cancelled while running direct job discovery.",
+                stdout_tail=direct_job_result.stdout_tail if direct_job_result is not None else "",
+                stderr_tail=direct_job_result.stderr_tail if direct_job_result is not None else "",
+                cancelled=True,
+            ),
+            pending_after_round=search_stats_before_round.main_pending_analysis_count,
+            round_progress=RoundProgress(0, 0, 0, 0, 0),
+            attempted_query_discovery=False,
+            cancelled_outcome=direct_cancelled_outcome,
+        )
+    if direct_job_result is not None and not direct_job_result.success:
+        stage_notes.append(
+            "Python direct job discovery failed; continuing with the existing company-pool flow."
+        )
+
+    search_stats_before_company_round = search_stats_before_round
+    unresolved_company_rankings_for_company_round = unresolved_company_rankings_before_round
+    if direct_job_result is not None:
+        search_stats_before_company_round = runtime.runner.load_search_stats(runtime.candidate_id)
+    if direct_job_result is not None and runtime.runner.runtime_mirror is not None:
+        companies_before_company_round = runtime.runner.runtime_mirror.load_candidate_company_pool(
+            candidate_id=runtime.candidate_id,
+        )
+        unresolved_company_rankings_for_company_round = unresolved_company_ranking_count(
+            companies_before_company_round,
+            current_run_id=runtime.search_run_id,
+        )
     ready_companies_for_sources_before_round = (
-        unresolved_company_rankings_before_round <= 0
+        unresolved_company_rankings_for_company_round <= 0
         and _has_ready_companies_for_sources(runtime)
     )
     company_round_outcome = _run_company_round(
         runtime,
         round_number=round_number,
-        company_pool_before_round=search_stats_before_round.candidate_company_pool_count,
-        unresolved_company_rankings_before_round=unresolved_company_rankings_before_round,
+        company_pool_before_round=search_stats_before_company_round.candidate_company_pool_count,
+        unresolved_company_rankings_before_round=unresolved_company_rankings_for_company_round,
         ready_companies_for_sources_before_round=ready_companies_for_sources_before_round,
         stage_notes=stage_notes,
         stage_stdout=stage_stdout,
@@ -540,7 +635,11 @@ def _run_discovery_round(
             return DiscoveryRoundOutcome(
                 main_result=main_result,
                 pending_after_round=pending_after_round,
-                round_progress=RoundProgress(0, 0, 0, 0, 0),
+                round_progress=_measure_round_progress(
+                    runtime,
+                    search_stats_before_round=search_stats_before_round,
+                    unresolved_company_rankings_before_round=unresolved_company_rankings_before_round,
+                ),
                 attempted_query_discovery=attempted_query_discovery,
                 finalize_phase_failed=finalize_phase_failed,
                 finalize_status=finalize_status,
@@ -552,45 +651,13 @@ def _run_discovery_round(
         config_override=runtime.current_main_runtime_config,
         failure_note="Python recommended output refresh skipped after discovery round",
     )
-    search_stats_after_round = runtime.runner.load_search_stats(runtime.candidate_id)
-    unresolved_company_rankings_after_round = 0
-    if runtime.runner.runtime_mirror is not None:
-        companies_after_round = runtime.runner.runtime_mirror.load_candidate_company_pool(
-            candidate_id=runtime.candidate_id,
-        )
-        unresolved_company_rankings_after_round = unresolved_company_ranking_count(
-            companies_after_round,
-            current_run_id=runtime.search_run_id,
-        )
     return DiscoveryRoundOutcome(
         main_result=main_result,
         pending_after_round=pending_after_round,
-        round_progress=RoundProgress(
-            company_pool_growth=max(
-                0,
-                search_stats_after_round.candidate_company_pool_count
-                - search_stats_before_round.candidate_company_pool_count,
-            ),
-            company_ranking_drop=max(
-                0,
-                unresolved_company_rankings_before_round
-                - unresolved_company_rankings_after_round,
-            ),
-            job_growth=max(
-                0,
-                search_stats_after_round.main_discovered_job_count
-                - search_stats_before_round.main_discovered_job_count,
-            ),
-            pending_drop=max(
-                0,
-                search_stats_before_round.main_pending_analysis_count
-                - search_stats_after_round.main_pending_analysis_count,
-            ),
-            recommended_job_growth=max(
-                0,
-                search_stats_after_round.recommended_job_count
-                - search_stats_before_round.recommended_job_count,
-            ),
+        round_progress=_measure_round_progress(
+            runtime,
+            search_stats_before_round=search_stats_before_round,
+            unresolved_company_rankings_before_round=unresolved_company_rankings_before_round,
         ),
         attempted_query_discovery=attempted_query_discovery,
         finalize_phase_failed=finalize_phase_failed,
@@ -714,7 +781,14 @@ def run_search_session(runtime: SearchSessionRuntime) -> SearchSessionOutcome:
             completed_pending_finalize_count += 1
         elif round_outcome.finalize_status == "incomplete":
             incomplete_pending_finalize_count += 1
-        if finalize_phase_failed or pending_after_round > 0:
+        if finalize_phase_failed:
+            break
+        if pending_after_round > 0:
+            if round_outcome.round_progress.made_progress:
+                stage_notes.append(
+                    "Pending jobs remain after this round, but the session made progress; continuing while time remains."
+                )
+                continue
             break
 
         if (

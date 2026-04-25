@@ -35,6 +35,12 @@ DEFAULT_RUNTIME_CONFIG: dict[str, object] = {
     "companyDiscovery": {
         "model": "gpt-4o-mini",
     },
+    "directJobDiscovery": {
+        "enabled": False,
+        "maxJobsPerRound": 10,
+        "timeoutSeconds": 600,
+        "companyUpsertMinScore": 60,
+    },
     "adaptiveSearch": {
         "companyBatchSize": 4,
         "discoveryBreadth": 4,

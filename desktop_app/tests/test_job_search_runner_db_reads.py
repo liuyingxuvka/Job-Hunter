@@ -272,6 +272,102 @@ class JobSearchRunnerDbReadsTests(unittest.TestCase):
                 },
             )
 
+    def test_load_recommended_jobs_merges_output_bucket_with_recommended_all_jobs(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context, name="Recommended Merge Candidate")
+            profile_id = create_profile(
+                context,
+                candidate_id,
+                name="Hydrogen Systems Engineer",
+                scope_profile="hydrogen_core",
+                is_active=True,
+            )
+            runner, first_run_id = self._seed_run(context, candidate_id)
+            second_run_id = runner.runtime_mirror.create_run(
+                candidate_id=candidate_id,
+                run_dir=context.paths.runtime_dir / "search_runs" / f"candidate_{candidate_id}",
+                status="success",
+                current_stage="done",
+                started_at="2026-04-16T11:00:00+00:00",
+            )
+            runner.runtime_mirror.update_configs(
+                second_run_id,
+                runtime_config=self._default_runtime_config(),
+            )
+
+            all_only_job = {
+                "title": "Hydrogen Degradation Modeling Engineer",
+                "company": "Fuel Cell Co",
+                "location": "Berlin",
+                "url": "https://fuel.example/jobs/aging",
+                "canonicalUrl": "https://fuel.example/jobs/aging",
+                "dateFound": "2026-04-16T10:00:00Z",
+                "jd": {"applyUrl": "https://fuel.example/jobs/aging/apply"},
+                "analysis": {
+                    "overallScore": 79,
+                    "fitLevelCn": "高推荐",
+                    "fitTrack": "hydrogen_core",
+                    "recommend": True,
+                    "boundTargetRole": {
+                        "profileId": profile_id,
+                        "roleId": f"profile:{profile_id}",
+                        "nameEn": "Hydrogen Systems Engineer",
+                        "displayName": "Hydrogen Systems Engineer",
+                        "targetRoleText": "Hydrogen Systems Engineer",
+                        "score": 79,
+                    },
+                },
+            }
+            output_bucket_job = {
+                "title": "Fuel Cell Validation Engineer",
+                "company": "Stack Labs",
+                "location": "Munich",
+                "url": "https://stack.example/jobs/validation",
+                "canonicalUrl": "https://stack.example/jobs/validation",
+                "dateFound": "2026-04-16T11:00:00Z",
+                "jd": {"applyUrl": "https://stack.example/jobs/validation/apply"},
+                "analysis": {
+                    "overallScore": 84,
+                    "fitLevelCn": "高推荐",
+                    "fitTrack": "hydrogen_core",
+                    "recommend": True,
+                    "boundTargetRole": {
+                        "profileId": profile_id,
+                        "roleId": f"profile:{profile_id}",
+                        "nameEn": "Hydrogen Systems Engineer",
+                        "displayName": "Hydrogen Systems Engineer",
+                        "targetRoleText": "Hydrogen Systems Engineer",
+                        "score": 84,
+                    },
+                },
+            }
+
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=first_run_id,
+                candidate_id=candidate_id,
+                job_bucket="all",
+                jobs=[all_only_job],
+            )
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=second_run_id,
+                candidate_id=candidate_id,
+                job_bucket="recommended",
+                jobs=[output_bucket_job],
+            )
+
+            recommended_jobs = runner.load_recommended_jobs(candidate_id)
+            stats = runner.load_search_stats(candidate_id)
+
+            self.assertEqual(
+                {job.title for job in recommended_jobs},
+                {
+                    "Hydrogen Degradation Modeling Engineer",
+                    "Fuel Cell Validation Engineer",
+                },
+            )
+            self.assertEqual(stats.recommended_job_count, 2)
+            self.assertEqual(stats.displayable_result_count, 2)
+
     def test_load_live_jobs_generates_and_persists_display_i18n_fields(self) -> None:
         with make_temp_context() as context:
             candidate_id = create_candidate(context, name="Display I18N Candidate")

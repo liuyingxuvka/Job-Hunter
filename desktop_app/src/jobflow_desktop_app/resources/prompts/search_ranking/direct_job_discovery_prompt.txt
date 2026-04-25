@@ -1,0 +1,13 @@
+Candidate context:
+{candidate_context_json}
+
+Find up to {max_jobs} concrete, currently open public job detail pages for this candidate.
+
+Rules:
+- Search directly from the candidate profile and target roles; do not first invent a separate query plan.
+- Prefer employer/ATS job detail pages over aggregators.
+- Do not return generic career landing pages, search result pages, job alert pages, or expired-looking pages.
+- Return only roles that are plausible enough to deserve a live check and fit score.
+- If unsure whether a page is still live, include it only when the source has a credible current-open signal.
+
+Return structured JSON only.

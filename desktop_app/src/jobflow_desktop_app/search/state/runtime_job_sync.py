@@ -93,6 +93,10 @@ def build_runtime_bucket_rows(
         key = job_item_key(item) or job_identity_key(item)
         if not key:
             continue
+        analysis = item.get("analysis")
+        is_recommended = bucket == "recommended" or (
+            isinstance(analysis, dict) and bool(analysis.get("recommend"))
+        )
         rows.append(
             {
                 "job_id": job_ids.get(key),
@@ -103,8 +107,10 @@ def build_runtime_bucket_rows(
                 "company_name": str(item.get("company") or "").strip(),
                 "location_text": str(item.get("location") or "").strip(),
                 "date_found": str(item.get("dateFound") or "").strip(),
-                "match_score": extract_match_score(item.get("analysis")),
-                "analysis_completed": analysis_completed(item.get("analysis")),
+                "match_score": extract_match_score(analysis),
+                "analysis_completed": analysis_completed(analysis),
+                "recommended": is_recommended,
+                "pending_resume": bucket == "resume_pending",
                 "job_json": json.dumps(item, ensure_ascii=False),
             }
         )

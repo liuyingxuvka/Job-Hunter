@@ -66,6 +66,7 @@ class RuntimeConfigSections:
     sources: dict
     output: dict
     company_discovery: dict
+    direct_job_discovery: dict
     analysis: dict
     translation: dict
     adaptive_search: dict
@@ -205,6 +206,7 @@ def runtime_config_sections(config: dict) -> RuntimeConfigSections:
         sources=ensure_dict(config, "sources"),
         output=ensure_dict(config, "output"),
         company_discovery=ensure_dict(config, "companyDiscovery"),
+        direct_job_discovery=ensure_dict(config, "directJobDiscovery"),
         analysis=ensure_dict(config, "analysis"),
         translation=ensure_dict(config, "translation"),
         adaptive_search=ensure_dict(config, "adaptiveSearch"),
@@ -772,7 +774,7 @@ def populate_runtime_config_common(
     return resolved_candidate_context
 
 
-def apply_runtime_config_resume_pending_stage(*, sources_config: dict, company_discovery_config: dict, analysis_config: dict, output_config: dict) -> None:
+def apply_runtime_config_resume_pending_stage(*, sources_config: dict, company_discovery_config: dict, direct_job_discovery_config: dict, analysis_config: dict, output_config: dict) -> None:
     update_section(
         sources_config,
         {
@@ -787,6 +789,12 @@ def apply_runtime_config_resume_pending_stage(*, sources_config: dict, company_d
         },
     )
     update_section(
+        direct_job_discovery_config,
+        {
+            "enabled": False,
+        },
+    )
+    update_section(
         analysis_config,
         {
             "scoringUseWebSearch": False,
@@ -797,7 +805,7 @@ def apply_runtime_config_resume_pending_stage(*, sources_config: dict, company_d
             "postVerifyRequireChecked": False,
         },
     )
-def apply_runtime_config_main_stage(*, search_config: dict, sources_config: dict, company_discovery_config: dict, analysis_config: dict, translation_config: dict, adaptive_search_config: dict, fetch_config: dict, output_config: dict) -> None:
+def apply_runtime_config_main_stage(*, search_config: dict, sources_config: dict, company_discovery_config: dict, direct_job_discovery_config: dict, analysis_config: dict, translation_config: dict, adaptive_search_config: dict, fetch_config: dict, output_config: dict) -> None:
     adaptive_strategy = runtime_strategy.derive_adaptive_runtime_strategy(adaptive_search_config)
     update_section(
         sources_config,
@@ -815,6 +823,25 @@ def apply_runtime_config_main_stage(*, search_config: dict, sources_config: dict
         {
             "enableAutoDiscovery": True,
             "maxCompaniesPerCall": 5,
+        },
+    )
+    update_section(
+        direct_job_discovery_config,
+        {
+            "enabled": True,
+            "maxJobsPerRound": runtime_strategy.positive_int(
+                direct_job_discovery_config.get("maxJobsPerRound"),
+                10,
+            ),
+            "timeoutSeconds": runtime_strategy.positive_int(
+                direct_job_discovery_config.get("timeoutSeconds"),
+                600,
+            ),
+            "companyUpsertMinScore": runtime_strategy.positive_int(
+                direct_job_discovery_config.get("companyUpsertMinScore"),
+                60,
+                minimum=0,
+            ),
         },
     )
     update_section(search_config, {"maxJobsPerQuery": adaptive_strategy["max_jobs_per_query"]})
@@ -889,6 +916,7 @@ def build_runtime_config(
         apply_runtime_config_resume_pending_stage(
             sources_config=sections.sources,
             company_discovery_config=sections.company_discovery,
+            direct_job_discovery_config=sections.direct_job_discovery,
             analysis_config=sections.analysis,
             output_config=sections.output,
         )
@@ -898,6 +926,7 @@ def build_runtime_config(
         search_config=sections.search,
         sources_config=sections.sources,
         company_discovery_config=sections.company_discovery,
+        direct_job_discovery_config=sections.direct_job_discovery,
         analysis_config=sections.analysis,
         translation_config=sections.translation,
         adaptive_search_config=sections.adaptive_search,

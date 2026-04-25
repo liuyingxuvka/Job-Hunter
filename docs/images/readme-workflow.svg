@@ -1,11 +1,11 @@
 <svg width="1400" height="238" viewBox="0 0 1400 238" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
-  <title id="title">Job Hunter workflow</title>
-  <desc id="desc">A simple four-step workflow showing how Job Hunter moves from candidate profile to company-first discovery and result tracking.</desc>
+  <title id="title">Job Hunter search loop</title>
+  <desc id="desc">A simple four-step workflow showing how Job Hunter moves from candidate profile to verified roles, reusable company memory, and result tracking.</desc>
 
   <rect x="16" y="16" width="1368" height="206" rx="28" fill="#F4F8FC" stroke="#D4E1EB" stroke-width="2"/>
 
-  <text x="44" y="58" fill="#123456" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="700">Company-first search flow</text>
-  <text x="44" y="88" fill="#486581" font-family="Segoe UI, Arial, sans-serif" font-size="16">Find the right companies before chasing the right roles.</text>
+  <text x="44" y="58" fill="#123456" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="700">Search feedback loop</text>
+  <text x="44" y="88" fill="#486581" font-family="Segoe UI, Arial, sans-serif" font-size="16">Verified roles improve the company pool; company memory improves future search.</text>
 
   <rect x="44" y="120" width="250" height="68" rx="18" fill="#FFFFFF" stroke="#D4E1EB" stroke-width="2"/>
   <circle cx="82" cy="152" r="18" fill="#123456"/>
@@ -19,8 +19,8 @@
   <rect x="388" y="120" width="250" height="68" rx="18" fill="#FFFFFF" stroke="#D4E1EB" stroke-width="2"/>
   <circle cx="426" cy="152" r="18" fill="#1F6F8B"/>
   <text x="420" y="158" fill="#FFFFFF" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="700">2</text>
-  <text x="456" y="145" fill="#123456" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="700">Target Roles</text>
-  <text x="456" y="167" fill="#486581" font-family="Segoe UI, Arial, sans-serif" font-size="13">Set a clear search direction</text>
+  <text x="456" y="145" fill="#123456" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="700">Discover Roles</text>
+  <text x="456" y="167" fill="#486581" font-family="Segoe UI, Arial, sans-serif" font-size="13">Find and verify concrete openings</text>
 
   <path d="M660 152H706" stroke="#9FB3C8" stroke-width="4" stroke-linecap="round"/>
   <path d="M696 142L712 152L696 162" stroke="#9FB3C8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
@@ -28,8 +28,8 @@
   <rect x="732" y="120" width="250" height="68" rx="18" fill="#FFFFFF" stroke="#D4E1EB" stroke-width="2"/>
   <circle cx="770" cy="152" r="18" fill="#147D64"/>
   <text x="764" y="158" fill="#FFFFFF" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="700">3</text>
-  <text x="800" y="145" fill="#123456" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="700">Find Companies</text>
-  <text x="800" y="167" fill="#486581" font-family="Segoe UI, Arial, sans-serif" font-size="13">Employer-first discovery</text>
+  <text x="800" y="145" fill="#123456" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="700">Learn Sources</text>
+  <text x="800" y="167" fill="#486581" font-family="Segoe UI, Arial, sans-serif" font-size="13">Save strong companies for later</text>
 
   <path d="M1004 152H1050" stroke="#9FB3C8" stroke-width="4" stroke-linecap="round"/>
   <path d="M1040 142L1056 152L1040 162" stroke="#9FB3C8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>

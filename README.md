@@ -4,10 +4,11 @@
   <img src="desktop_app/assets/app_icon.png" alt="Job Hunter app icon" width="96">
 </p>
 
-> 面向有经验求职者的本地优先岗位发现工作台。核心思路是：先识别高质量公司，再从公司脉络里持续发现岗位。  
-> A local-first job discovery workspace for experienced professionals. Core idea: build high-signal company memory first, then keep discovering roles through long-term company context.
+> 面向有经验求职者的本地优先岗位发现工作台：不是一次性搜职位，而是把值得跟踪的公司、岗位和判断持续沉淀下来。
 >
-> 本 README 先给中文，再给英文。普通用户请直接看 Windows 下载部分；开发者和协作者再看源码说明。  
+> A local-first job discovery workspace for experienced professionals: not a one-shot job search, but a persistent place to build company memory, role evidence, and follow-up state over time.
+>
+> 本 README 先给中文，再给英文。普通用户请直接看 Windows 下载部分；开发者和协作者再看源码说明。
 > This README starts with Chinese and ends with English. End users should go straight to the Windows download section; developers and collaborators can use the source instructions.
 
 ## Product Preview / 产品预览
@@ -23,7 +24,7 @@ Screenshots are generated from the built-in demo candidate and public example li
 
 ![Job Hunter search workspace](docs/images/readme-screenshot-search-results.png)
 
-### Company-first Workflow / 公司优先流程
+### Search Feedback Loop / 搜索闭环
 
 ![Job Hunter workflow](docs/images/readme-workflow.svg)
 
@@ -31,18 +32,19 @@ Screenshots are generated from the built-in demo candidate and public example li
 
 ### 项目定位
 
-Job Hunter 不是一个“短平快”岗位推荐器。它更适合已经工作、且有明确职业方向的用户：先从候选人的经历、目标方向和地域偏好出发，先建立值得持续跟踪的“目标公司池”。
+Job Hunter 不是又一个职位列表工具。它解决的是一个更长期的问题：当你不是随便跳槽，而是在认真寻找更值得投入的长期方向时，单次搜索很快会失效。你需要记住哪些公司值得盯、哪些岗位已经看过、哪些方向反复出现、哪些线索只是噪音。
 
-很多通用平台在细分方向（如系统工程、验证测试、MBSE、数字孪生、可靠性、能源装备）上常常受限于岗位标题命名不统一、组织结构分散、岗位更新滞后。Job Hunter 的价值在于：不仅看单次搜索结果，而是把公司视为长期对象，持续跟踪公司与岗位的匹配变化。
+所以 Job Hunter 的核心不是“今天帮你抓一批岗位”，而是把每一轮搜索变成积累：先发现和验证具体岗位，再把高质量岗位背后的公司、招聘入口和匹配理由写回本地公司池。下一轮搜索会基于这些历史判断继续推进，而不是重新从零开始。
 
-一句话总结：**岗位发现源于公司池，不是一次性匹配；它的作用是长期复利。**
+一句话总结：**短期可以用搜索引擎找岗位；长期需要一个会积累公司判断的求职工作台。**
 
-### 我们的优势（与短期抓取相比）
+### 为什么值得长期用
 
-- 长期公司记忆：公司历史、匹配信号和岗位反馈会被持续积累，后续轮次能更快识别高质量机会。  
-- 双向成长：岗位评分结果会反哺公司池，反过来提升下轮公司发掘优先级。  
-- 低噪音跟踪：优先追踪重复出现、高相关度的企业线索，减少零散一次性“热度岗位”的干扰。  
-- 本地优先：候选人画像和状态在本地持续维护，不是每次开局都从零开始。
+- 不用每次重新解释自己：候选人画像、目标方向、地域偏好和结果状态都保存在本地。
+- 不重复看同一批岗位：系统会保留已发现、已分析和已处理的岗位记录。
+- 不只追热门职位标题：它会跟踪公司、招聘入口和历史匹配信号，更适合专业型、跨领域或命名不标准的岗位。
+- 好岗位会反哺公司池：当某家公司出现高匹配岗位，它会成为后续轮次更值得关注的来源。
+- 结果可持续维护：关注、投递、放弃、Offer 等状态都在同一个工作台里跟进。
 
 ### 适合谁
 
@@ -51,15 +53,16 @@ Job Hunter 不是一个“短平快”岗位推荐器。它更适合已经工作
 - 希望跨行业迁移，但不想丢掉核心能力的人
 - 不满足于“职位平台推荐流”，更希望主动建立目标公司池的人
 
-### 核心架构（为什么是“长期复利”）
+### 搜索逻辑
 
-1. 候选人画像：由用户维护的岗位方向、技能偏好、地域偏好形成搜索基线。  
-2. 公司池发现：基于方向做公司优先发现，建立公司侧评分与关注状态。  
-3. 岗位发现：优先从公司池公司抓取公开岗位，先做可行性/有效性再做匹配。  
-4. 结果闭环：把岗位评分、状态变化写回公司池与候选人看板。  
-5. 下一轮迭代：新岗位和新评分会提高公司后续优先级，系统持续变“聪明”。
+1. 读取候选人画像和目标岗位方向。
+2. 先发现新的具体岗位，去重并验证岗位是否仍然有效。
+3. 对有效岗位做匹配评分和推荐判断。
+4. 将高质量岗位对应的公司写入或激活公司池。
+5. 再基于公司池继续发现公司官网、ATS 和公开招聘入口。
+6. 把岗位结果、公司信号和用户后续状态写回本地数据库，供下一轮继续使用。
 
-这套结构的关键不是单次命中更高，而是让每一轮搜索都能在“历史知识”上叠加，降低试错和重复劳动。
+这套流程仍然保持单线、可解释、可调试；区别在于它不是只消费公司池，也会从好岗位反向补强公司池。
 
 ### 你应该从哪里开始
 
@@ -140,14 +143,14 @@ python -m venv .venv
 
 ### 当前仓库能做什么
 
-当前仓库主要包含一个正在持续迭代的本地桌面工作台，以及一套 Python 原生的公司优先搜索执行链路。
+当前仓库主要包含一个正在持续迭代的本地桌面工作台，以及一套 Python 原生的岗位发现、公司池维护和结果管理链路。
 
 已落地能力包括：
 
 - 本地候选人管理：维护姓名、邮箱、当前所在地、目标地区、备注和简历路径
 - AI 目标岗位设立：辅助生成更具体的岗位方向，并维护中英文岗位名称和说明
 - 本地 AI 设置：支持直接填写 API Key 或绑定环境变量，并验证模型可用性
-- 公司优先的岗位发现流程：根据候选人的岗位方向和偏好，由 Python 搜索主线完成公司发现、公司筛选与岗位抓取
+- 岗位发现与公司池闭环：先发现和验证具体岗位，再将高质量岗位背后的公司写入公司池，后续继续跟踪
 - 搜索结果工作台：查看匹配结果，并维护关注、投递、Offer、放弃等状态
 - 本地优先数据存储：以 SQLite 作为候选人、搜索配置、结果状态和运行数据的主存储；`desktop_app/runtime/search_runs/` 只保留按候选人划分的临时工作目录
 
@@ -155,7 +158,7 @@ python -m venv .venv
 
 1. 创建候选人档案，导入简历，填写当前所在地、目标地区和补充说明。
 2. 通过 AI 推荐或手动补充方式，建立真正值得追踪的目标岗位方向。
-3. 基于这些岗位方向生成搜索上下文，优先发现相关公司，再抓取公司官网或 ATS 的公开职位。
+3. 基于这些岗位方向生成搜索上下文，发现并验证具体岗位，同时维护可复用的目标公司池。
 4. 对岗位进行匹配分析和结果整理，在工作台里持续维护关注、投递和反馈状态。
 
 ### 仓库结构
@@ -227,13 +230,11 @@ python -m venv .venv
 
 ### Project Positioning
 
-Job Hunter is not a generic job recommendation tool for mass-market job search. It is designed for professionals with real domain experience: start from your existing skills, career direction, and location preferences, identify companies that are more likely to need that expertise, and then discover open roles worth tracking.
+Job Hunter is not another job-list tool. It is built for a longer search problem: when you are not casually browsing, but trying to find a better long-term direction, one-shot search results age quickly. You need to remember which companies are worth tracking, which roles were already reviewed, which patterns keep appearing, and which leads were noise.
 
-Mainstream job platforms are often optimized for broad job discovery and high-volume recommendations. In specialized fields such as systems engineering, V&V, MBSE, reliability, digital twin, or energy equipment, job titles and hiring language are often inconsistent. Better opportunities are often hidden in companies that need the capability even when the role title does not match the resume exactly.
+The product turns each search round into accumulated evidence. It discovers and verifies concrete roles, scores fit, then writes strong role signals back into a local company pool. The next round starts from that history instead of starting from zero.
 
-The core idea is simple: identify the most likely-fit companies first, then continuously discover roles through those company signals over repeated rounds. That turns search into a cumulative process instead of a one-time scrape.
-
-In one sentence: **find the right roles through a trusted company workflow, and improve that workflow with every round.**
+In one sentence: **search engines are useful for today; Job Hunter is for building a reusable job-search workspace over time.**
 
 ### Who It's For
 
@@ -242,15 +243,24 @@ In one sentence: **find the right roles through a trusted company workflow, and 
 - People who want to move into adjacent industries without abandoning their core strengths
 - People who prefer building a focused target-company pipeline instead of relying on generic platform feeds
 
-### Core Architecture (compounding model)
+### Why Use It Repeatedly
 
-1. Candidate profile: role direction, transferable skills, and location preference become the baseline signal.  
-2. Company discovery: identify a target company set and maintain company-level state and score.  
-3. Job discovery: fetch roles primarily from those companies, validate availability first, then score fit.  
-4. Feedback loop: write role scores and state changes back to both the candidate view and the company context.  
-5. Next iteration: new roles and scores raise future company prioritization, so the system gets better with each cycle.
+- You do not re-explain yourself every time: candidate profile, target direction, location preferences, and result state stay local.
+- You do not repeatedly review the same roles: discovered, analyzed, and handled jobs are tracked.
+- You are not limited to popular job titles: the app follows companies, career endpoints, and historical match signals.
+- Good jobs improve the company pool: a strong role can make its company a better future source.
+- Follow-up stays in one place: interest, applied, offer, rejected, and dropped states are maintained in the workspace.
 
-The advantage is not only a higher single-shot match, but lower noise and repeated work because each run compounds on prior evidence.
+### Search Logic
+
+1. Read the candidate profile and target role directions.
+2. Discover new concrete roles, deduplicate them, and verify that they are still open.
+3. Score verified roles and decide whether they are worth recommending.
+4. Write strong role sources back into the company pool.
+5. Continue from that company pool through company career pages, ATS sources, and public hiring signals.
+6. Save role results, company evidence, and user follow-up state locally for the next round.
+
+The flow stays sequential and inspectable. The difference is that it can learn from both directions: companies lead to jobs, and good jobs strengthen the company pool.
 
 ### Where To Start
 
@@ -331,14 +341,14 @@ Those details stay in a separate document instead of being expanded on the GitHu
 
 ### What The Repository Can Do Today
 
-Today the repository contains an evolving local desktop workspace plus a Python-native search pipeline that powers company-first discovery and result maintenance.
+Today the repository contains an evolving local desktop workspace plus a Python-native search pipeline for role discovery, company-pool maintenance, and result tracking.
 
 Current implemented capabilities include:
 
 - Local candidate management for names, contact info, location preferences, notes, and resume paths
 - AI-assisted target-role setup with bilingual role names and descriptions
 - Local AI settings with API key handling, environment-variable support, and model validation
-- Company-first job discovery through the Python search pipeline based on candidate direction and preferences
+- Role discovery plus company-pool feedback, where strong verified roles can improve the future source set
 - A results workspace for reviewing matches and maintaining focus, applied, offer, rejected, or dropped states
 - Local-first persistence with SQLite as the primary store for candidate data, search settings, review states, and runtime data; `desktop_app/runtime/search_runs/` is only a per-candidate transient workspace
 
@@ -346,7 +356,7 @@ Current implemented capabilities include:
 
 1. Create a candidate profile, attach a resume, and set current location, preferred locations, and notes.
 2. Use AI suggestions or manual input to define role directions that are actually worth tracking.
-3. Build search context from those role directions, prioritize relevant companies, and then search official career pages or ATS listings.
+3. Build search context from those role directions, discover and verify concrete roles, and maintain a reusable company pool.
 4. Review job matches, organize results, and maintain interest, application, and outcome states inside the workspace.
 
 ### Repository Structure

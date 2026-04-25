@@ -8,11 +8,11 @@ This file is not an automatically consumed GitHub configuration file. It is a pr
 
 中文：
 
-面向有专业经验者的本地化岗位发现工作台：先从经验匹配公司，再发现更合适的公开岗位。
+面向有专业经验者的本地化岗位发现工作台：持续沉淀公司、岗位和判断，而不是一次性搜职位。
 
 English:
 
-Local-first Windows job discovery workspace for experienced professionals. Find the right companies before chasing the right roles.
+Local-first Windows job discovery workspace for experienced professionals. Build reusable company memory instead of doing one-shot job search.
 
 ## README 首屏建议 / README Above-The-Fold Guidance
 
@@ -62,13 +62,13 @@ Topics that are not recommended by default yet:
 如果后面要补仓库社交预览图，建议文案尽量短，突出：
 
 - 面向专业型人才
-- 先找公司，再找岗位
+- 长期沉淀公司和岗位判断
 - 本地工作台
 
 If you later add a social preview image, keep the message short and emphasize:
 
 - specialist-oriented job discovery
-- find the right companies before the right roles
+- reusable company and role memory
 - local workspace
 
 ## Homepage 建议 / Homepage Guidance

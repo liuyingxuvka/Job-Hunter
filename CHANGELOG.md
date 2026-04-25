@@ -10,6 +10,10 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+### Changed
+
+- Polished the public README positioning around reusable company memory, verified role discovery, and the long-term job-search workspace model.
+
 ## [0.8.3] - 2026-04-25
 
 ### Changed

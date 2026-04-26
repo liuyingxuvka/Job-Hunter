@@ -10,8 +10,17 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-04-26
+
+### Fixed
+
+- Fixed Jobflow Desktop search cancellation so stopped searches are persisted as cancelled/done and cannot be overwritten back into a running state by late worker callbacks.
+- Fixed recommendation output consistency by requiring concrete final/apply job URLs for recommendation output and by materializing current `outputEligibility` stamps after append-mode historical recommendation merges.
+- Fixed recommendation deduplication to prefer confirmed canonical job URLs, reducing repeated entries from generic source/search pages.
+
 ### Changed
 
+- Simplified AI scoring context around factual career and education history, so prompt-based scoring can down-rank unsuitable intern, postdoc, and generic pages without adding brittle hard filters.
 - Polished the public README positioning around reusable company memory, verified role discovery, and the long-term job-search workspace model.
 
 ## [0.8.3] - 2026-04-25

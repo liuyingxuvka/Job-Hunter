@@ -15,6 +15,7 @@ from jobflow_desktop_app.ai.role_recommendations import (  # noqa: E402
 )
 from jobflow_desktop_app.db.repositories.profiles import SearchProfileRecord  # noqa: E402
 from jobflow_desktop_app.search.orchestration.job_search_runner import JobSearchRunner
+from jobflow_desktop_app.search.output.final_output import materialize_output_eligibility
 from jobflow_desktop_app.search.runtime_strategy import derive_adaptive_runtime_strategy
 
 
@@ -42,6 +43,9 @@ class JobSearchRunnerUnitTests(unittest.TestCase):
 
     def _make_runner(self, context) -> JobSearchRunner:
         return JobSearchRunner(context.paths.runtime_dir.parent)
+
+    def _stamp_for_output(self, job: dict) -> dict:
+        return materialize_output_eligibility(job, self._default_runtime_config())
 
     def _run_dir(self, context, candidate_id: int) -> Path:
         run_dir = context.paths.runtime_dir / "search_runs" / f"candidate_{candidate_id}"
@@ -117,18 +121,33 @@ class JobSearchRunnerUnitTests(unittest.TestCase):
                     "overallScore": 100,
                 },
             }
+            unstamped_legacy = {
+                "title": "Legacy Unstamped Recommendation",
+                "company": "Acme Robotics",
+                "url": "https://example.com/jobs/legacy",
+                "dateFound": "2026-04-14T12:03:00Z",
+                "jd": {"applyUrl": "https://example.com/jobs/legacy/apply"},
+                "analysis": {
+                    "recommend": True,
+                    "overallScore": 90,
+                },
+            }
+
+            low_score = self._stamp_for_output(low_score)
+            high_score = self._stamp_for_output(high_score)
+            skipped = self._stamp_for_output(skipped)
 
             runner.runtime_mirror.replace_bucket_jobs(
                 search_run_id=search_run_id,
                 candidate_id=candidate_id,
                 job_bucket="recommended",
-                jobs=[low_score, high_score],
+                jobs=[low_score, high_score, unstamped_legacy],
             )
             runner.runtime_mirror.replace_bucket_jobs(
                 search_run_id=search_run_id,
                 candidate_id=candidate_id,
                 job_bucket="all",
-                jobs=[low_score, high_score, skipped],
+                jobs=[low_score, high_score, skipped, unstamped_legacy],
             )
 
             loaded = runner.load_recommended_jobs(candidate_id)
@@ -178,6 +197,9 @@ class JobSearchRunnerUnitTests(unittest.TestCase):
                     "overallScore": 49,
                 },
             }
+
+            found_a = self._stamp_for_output(found_a)
+            low_recommended = self._stamp_for_output(low_recommended)
 
             runner.runtime_mirror.replace_candidate_company_pool(
                 candidate_id=candidate_id,
@@ -330,6 +352,63 @@ class JobSearchRunnerUnitTests(unittest.TestCase):
             self.assertEqual(len(recommended_jobs), 1)
             self.assertEqual(recommended_jobs[0]["company"], "Acme Hydrogen")
             self.assertTrue((run_dir / "jobs_recommended.xlsx").exists())
+
+    def test_refresh_python_recommended_output_writes_explicit_run_not_latest(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context, name="Demo Candidate")
+            create_profile(context, candidate_id, name="Systems Engineer", is_active=True)
+            runner, run_dir, old_run_id = self._seed_run(context, candidate_id)
+            new_run_id = runner.runtime_mirror.create_run(
+                candidate_id=candidate_id,
+                run_dir=run_dir,
+                status="running",
+                current_stage="preparing",
+                started_at="2026-04-16T10:05:00+00:00",
+            )
+            job = {
+                "title": "Fuel Cell Reliability Engineer",
+                "company": "Acme Hydrogen",
+                "location": "Berlin, Germany",
+                "url": "https://acme.example.com/careers/jobs/12345",
+                "dateFound": "2026-04-14T12:00:00Z",
+                "summary": "Hydrogen durability diagnostics role.",
+                "sourceType": "company",
+                "jd": {
+                    "applyUrl": "https://acme.example.com/careers/jobs/12345/apply",
+                    "finalUrl": "https://acme.example.com/careers/jobs/12345",
+                    "status": 200,
+                    "ok": True,
+                    "rawText": "Responsibilities Qualifications Apply now",
+                },
+                "analysis": {
+                    "recommend": True,
+                    "overallScore": 74,
+                    "matchScore": 74,
+                    "fitTrack": "hydrogen_core",
+                },
+            }
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=old_run_id,
+                candidate_id=candidate_id,
+                job_bucket="all",
+                jobs=[job],
+            )
+
+            count = runner._refresh_python_recommended_output_json(
+                run_dir,
+                self._default_runtime_config(),
+                search_run_id=old_run_id,
+            )
+
+            self.assertEqual(count, 1)
+            self.assertEqual(
+                len(runner.runtime_mirror.load_run_bucket_jobs(search_run_id=old_run_id, job_bucket="recommended")),
+                1,
+            )
+            self.assertEqual(
+                runner.runtime_mirror.load_run_bucket_jobs(search_run_id=new_run_id, job_bucket="recommended"),
+                [],
+            )
 
     def test_refresh_python_recommended_output_keeps_localization_target_role_binding(self) -> None:
         with make_temp_context() as context:
@@ -535,6 +614,48 @@ class JobSearchRunnerUnitTests(unittest.TestCase):
                 job_bucket="resume_pending",
             )
             self.assertEqual(current_pending, [])
+
+    def test_write_resume_pending_jobs_writes_explicit_run_not_latest(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context, name="Resume Pending Candidate")
+            create_profile(context, candidate_id, name="Systems Engineer", is_active=True)
+            runner, run_dir, old_run_id = self._seed_run(context, candidate_id)
+            new_run_id = runner.runtime_mirror.create_run(
+                candidate_id=candidate_id,
+                run_dir=run_dir,
+                status="running",
+                current_stage="preparing",
+                started_at="2026-04-21T10:05:00+00:00",
+            )
+            pending_job = {
+                "title": "Fuel Cell Validation Engineer",
+                "company": "Acme",
+                "url": "https://acme.example/jobs/fuel-cell-validation",
+                "dateFound": "2026-04-21T10:00:00Z",
+                "analysis": {},
+            }
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=old_run_id,
+                candidate_id=candidate_id,
+                job_bucket="resume_pending",
+                jobs=[pending_job],
+            )
+
+            count = runner._write_resume_pending_jobs(
+                run_dir,
+                include_found_fallback=True,
+                current_run_id=old_run_id,
+            )
+
+            self.assertEqual(count, 1)
+            self.assertEqual(
+                len(runner.runtime_mirror.load_run_bucket_jobs(search_run_id=old_run_id, job_bucket="resume_pending")),
+                1,
+            )
+            self.assertEqual(
+                runner.runtime_mirror.load_run_bucket_jobs(search_run_id=new_run_id, job_bucket="resume_pending"),
+                [],
+            )
 
 
 if __name__ == "__main__":  # pragma: no cover

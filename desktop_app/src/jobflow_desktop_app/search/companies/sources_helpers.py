@@ -442,11 +442,15 @@ def dedupe_jobs_by_normalized_url(jobs: list[Mapping[str, Any]]) -> list[dict[st
     seen_urls: set[str] = set()
     for job in jobs:
         normalized_url = normalize_job_url(job.get("url") or "")
-        if not normalized_url or normalized_url in seen_urls:
+        canonical_url = canonical_job_url(job)
+        dedupe_url = canonical_url or normalized_url
+        if not dedupe_url or dedupe_url in seen_urls:
             continue
-        seen_urls.add(normalized_url)
+        seen_urls.add(dedupe_url)
         normalized_job = dict(job)
-        normalized_job["url"] = normalized_url
+        normalized_job["url"] = normalized_url or dedupe_url
+        if canonical_url and (str(job.get("canonicalUrl") or "").strip() or canonical_url != normalized_url):
+            normalized_job["canonicalUrl"] = canonical_url
         deduped.append(normalized_job)
     return deduped
 

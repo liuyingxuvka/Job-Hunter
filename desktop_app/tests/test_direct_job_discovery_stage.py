@@ -12,6 +12,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from jobflow_desktop_app.search.stages.executor_direct_job_stage import (  # noqa: E402
+    _normalize_verified_job,
     run_direct_job_discovery_stage_db,
 )
 
@@ -75,6 +76,23 @@ class _Mirror:
 
 
 class DirectJobDiscoveryStageTests(unittest.TestCase):
+    def test_verified_direct_job_requires_confirmed_final_url(self) -> None:
+        normalized = _normalize_verified_job(
+            {
+                "title": "Fuel Cell Modeling Engineer",
+                "company": "Existing Co",
+                "location": "Aachen",
+                "url": "https://existing.example/careers",
+                "finalUrl": "",
+                "summary": "Model PEM fuel cell degradation and lifetime.",
+                "isLiveJobPage": True,
+                "hasApplyEntry": True,
+            },
+            config={},
+        )
+
+        self.assertEqual(normalized, {})
+
     def test_direct_stage_dedupes_scores_and_reactivates_company(self) -> None:
         mirror = _Mirror()
         config = {

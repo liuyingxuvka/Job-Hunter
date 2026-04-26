@@ -182,13 +182,13 @@ class AnalysisLlmTests(unittest.TestCase):
         self.assertEqual(result.best_role.role_id, "profile:1")
         self.assertFalse(result.evaluations[1].recommend)
 
-    def test_normalize_post_verify_payload_preserves_final_url(self) -> None:
+    def test_normalize_post_verify_payload_requires_confirmed_final_url(self) -> None:
         normalized = normalize_post_verify_payload(
             {"isValidJobPage": True, "recommend": False, "location": "Remote", "finalUrl": ""},
             job_url=self.job["url"],
         )
         self.assertTrue(normalized["isValidJobPage"])
-        self.assertEqual(normalized["finalUrl"], self.job["url"])
+        self.assertEqual(normalized["finalUrl"], "")
 
     def test_target_role_binding_min_score_reads_analysis_override(self) -> None:
         self.assertEqual(target_role_binding_min_score(self.config), 45)

@@ -33,6 +33,7 @@ class RoleRecommendationsProfileTests(unittest.TestCase):
         payload = """
         {
           "summary": "  Focused on energy systems and reliability.  ",
+          "career_and_education_history": "  PhD-level energy systems researcher with industry validation experience.  ",
           "company_discovery_primary_anchors": ["fuel cell durability", "electrolyzer reliability"],
           "company_discovery_secondary_anchors": ["industrial gas decarbonization"],
           "job_fit_core_terms": ["energy systems", "energy systems", " validation ", "fuel cell systems"],
@@ -59,6 +60,10 @@ class RoleRecommendationsProfileTests(unittest.TestCase):
             profile.company_discovery_primary_anchors,
             ("fuel cell durability", "electrolyzer reliability"),
         )
+        self.assertEqual(
+            profile.career_and_education_history,
+            "PhD-level energy systems researcher with industry validation experience.",
+        )
 
     def test_signature_and_cache_round_trip(self) -> None:
         candidate = self._candidate()
@@ -69,6 +74,7 @@ class RoleRecommendationsProfileTests(unittest.TestCase):
         profile = CandidateSemanticProfile(
             source_signature=signature,
             summary="Energy systems focus",
+            career_and_education_history="Graduate education and industry energy systems work.",
             company_discovery_primary_anchors=("hydrogen systems",),
             job_fit_core_terms=("fuel cell systems",),
         )

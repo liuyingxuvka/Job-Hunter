@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ...ai.role_recommendations import CandidateSemanticProfile
-from ..output.final_output import materialize_output_eligibility, rebuild_recommended_output_payload
+from ..output.final_output import rebuild_recommended_output_payload
 from ..output.manual_tracking_store import overlay_manual_fields_onto_jobs
 from ..output.tracker_xlsx import write_tracker_xlsx
 from ..state.runtime_run_locator import (
@@ -71,13 +71,12 @@ def _load_cumulative_main_jobs(runner, candidate_id: int) -> list[dict]:
 
 
 def _displayable_recommended_jobs(jobs: list[dict], *, config: dict) -> list[dict]:
-    materialized_jobs = [
-        materialize_output_eligibility(item, config)
-        for item in jobs
-        if bool((item.get("analysis") or {}).get("recommend"))
-    ]
     return job_search_runner_records.filter_displayable_recommended_jobs(
-        materialized_jobs,
+        [
+            item
+            for item in jobs
+            if isinstance(item, dict) and bool((item.get("analysis") or {}).get("recommend"))
+        ],
         config=config,
     )
 
@@ -189,11 +188,12 @@ def refresh_python_recommended_output_json(
     runner,
     run_dir: Path,
     config: dict | None,
+    *,
+    search_run_id: int | None = None,
 ) -> int:
     candidate_id = candidate_id_from_run_dir(run_dir)
     runtime_mirror = getattr(runner, "runtime_mirror", None)
-    search_run_id = None
-    if runtime_mirror is not None and candidate_id is not None:
+    if search_run_id is None and runtime_mirror is not None and candidate_id is not None:
         latest_run = runtime_mirror.latest_run(candidate_id)
         if latest_run is not None:
             search_run_id = latest_run.search_run_id

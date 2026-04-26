@@ -73,12 +73,18 @@ def stop_search(page) -> None:
             page.search_duration_combo.setEnabled(True)
         return
     cancel_event.set()
+    search_results_runtime_state.cancel_running_searches_for_candidate(
+        page,
+        page.current_candidate_id,
+        message="Search cancelled by the user.",
+        last_event="User clicked Stop Search in the desktop app.",
+    )
     search_results_runtime_state.request_search_stop(page)
     page._clear_queued_search_restart()
-    page._reset_search_countdown_state()
+    page._reset_search_runtime_state()
     page._set_search_button_running(False)
     page.search_duration_combo.setEnabled(True)
-    page._set_stop_requested_status()
+    page._set_stopped_status(page.current_candidate_name)
 
 
 def queue_search_restart(page) -> None:
@@ -168,14 +174,16 @@ def run_search(page, candidate_id: int | None = None, *, run_busy_task_fn) -> No
         page._search_session.queued_for(int(target_candidate_id))
     )
     visible_owner = page.current_candidate_id == int(target_candidate_id)
+    cancel_event = threading.Event()
     search_results_runtime_state.begin_search_session(
         page,
         int(target_candidate_id),
-        cancel_event=threading.Event(),
+        cancel_event=cancel_event,
         duration_seconds=selected_duration_seconds,
         started_monotonic=time.monotonic(),
         preserve_started=queued_restart,
     )
+    session_token = page._search_session.session_token
     if visible_owner:
         page._set_search_button_running(True)
         page.refresh_button.setEnabled(True)
@@ -196,10 +204,18 @@ def run_search(page, candidate_id: int | None = None, *, run_busy_task_fn) -> No
             settings=effective_settings,
             api_base_url=page.context.settings.get_openai_base_url(),
             timeout_seconds=selected_duration_seconds,
-            cancel_event=page._search_session.cancel_event,
+            cancel_event=cancel_event,
+        )
+
+    def _is_current_session() -> bool:
+        return (
+            page._search_session.session_token == session_token
+            and page._search_session.owner_candidate_id == int(target_candidate_id)
         )
 
     def _on_success(result: Any) -> None:
+        if not _is_current_session():
+            return
         if page.current_candidate_id != int(target_candidate_id):
             return
         if not hasattr(result, "success"):
@@ -289,6 +305,8 @@ def run_search(page, candidate_id: int | None = None, *, run_busy_task_fn) -> No
         )
 
     def _on_error(exc: Exception) -> None:
+        if not _is_current_session():
+            return
         if page.current_candidate_id == int(target_candidate_id):
             page._set_failed_status(str(exc), candidate.name)
             page._refresh_results_stats_label()
@@ -299,6 +317,8 @@ def run_search(page, candidate_id: int | None = None, *, run_busy_task_fn) -> No
         )
 
     def _on_finally() -> None:
+        if not _is_current_session():
+            return
         page._stop_live_results_updates()
         queued_restart = (
             page._search_session.queued_for(int(target_candidate_id))

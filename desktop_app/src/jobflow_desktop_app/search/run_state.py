@@ -1,8 +1,41 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .state.work_unit_state import is_abandoned, is_suspended_for_run, normalize_work_unit_state
+
+
+def normalize_job_key_url(raw_url: object) -> str:
+    text = str(raw_url or "").strip()
+    if not text:
+        return ""
+    if not re.match(r"^[a-z][a-z0-9+.-]*://", text, flags=re.IGNORECASE):
+        return ""
+    try:
+        parts = urlsplit(text)
+    except Exception:
+        return ""
+    scheme = (parts.scheme or "https").lower()
+    netloc = (parts.netloc or "").lower()
+    if not netloc:
+        return ""
+    path = parts.path or "/"
+    if not path.startswith("/"):
+        path = f"/{path}"
+    path = re.sub(r"/{2,}", "/", path)
+    query_items = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if not key.lower().startswith(("utm_", "fbclid", "gclid"))
+    ]
+    query = urlencode(query_items, doseq=True)
+    return urlunsplit((scheme, netloc, path.rstrip("/") or "/", query, ""))
+
+
+def canonical_job_item_url(item: dict) -> str:
+    return normalize_job_key_url(item.get("canonicalUrl")) or normalize_job_key_url(item.get("url"))
 
 
 def job_identity_key(item: dict) -> str:
@@ -13,7 +46,7 @@ def job_identity_key(item: dict) -> str:
 
 
 def job_item_key(item: dict) -> str:
-    url = str(item.get("url") or item.get("canonicalUrl") or "").strip()
+    url = canonical_job_item_url(item)
     if url:
         return url.casefold()
     return job_identity_key(item)
@@ -116,7 +149,7 @@ def _collect_resume_pending_jobs_from_job_lists(
         if not isinstance(item, dict):
             continue
         job = dict(item)
-        job_url = str(job.get("url") or job.get("canonicalUrl") or "").strip()
+        job_url = canonical_job_item_url(job)
         if not job_url:
             continue
         job["url"] = job_url
@@ -166,6 +199,7 @@ def merge_resume_pending_job_lists(
 
 __all__ = [
     "analysis_completed",
+    "canonical_job_item_url",
     "collect_resume_pending_jobs_from_job_lists",
     "extract_overall_score",
     "extract_match_score",

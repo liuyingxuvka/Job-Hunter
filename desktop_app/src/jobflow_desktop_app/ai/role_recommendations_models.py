@@ -81,6 +81,7 @@ class ResumeReadResult:
 class CandidateSemanticProfile:
     source_signature: str = ""
     summary: str = ""
+    career_and_education_history: str = ""
     company_discovery_primary_anchors: tuple[str, ...] = ()
     company_discovery_secondary_anchors: tuple[str, ...] = ()
     job_fit_core_terms: tuple[str, ...] = ()
@@ -100,6 +101,7 @@ class CandidateSemanticProfile:
         return {
             "source_signature": self.source_signature,
             "summary": self.summary,
+            "career_and_education_history": self.career_and_education_history,
             "company_discovery_primary_anchors": list(self.company_discovery_primary_anchors),
             "company_discovery_secondary_anchors": list(self.company_discovery_secondary_anchors),
             "job_fit_core_terms": list(self.job_fit_core_terms),

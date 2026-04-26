@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from ..analysis.scoring_contract import overall_score, passes_unified_recommenda
 
 
 Job = dict[str, Any]
+OUTPUT_ELIGIBILITY_RULE_VERSION = 1
 
 TRACK_CLUSTER_LABEL = {
     "direct_fit": "Direct-Fit",
@@ -131,6 +133,16 @@ def _config_value(config: Mapping[str, Any] | None, *path: str, default: Any = N
     return default if current is None else current
 
 
+def _config_int(config: Mapping[str, Any] | None, *path: str, default: int) -> int:
+    value = _config_value(config, *path, default=default)
+    if isinstance(value, bool):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def normalize_job_url(raw_url: object) -> str:
     text = str(raw_url or "").strip()
     if not text:
@@ -202,7 +214,7 @@ def canonical_job_url(job: Mapping[str, Any]) -> str:
         _config_value(job, "analysis", "postVerify", "finalUrl", default="")
         or _config_value(job, "jd", "finalUrl", default="")
         or _config_value(job, "postVerify", "finalUrl", default="")
-        or job.get("url")
+        or job.get("canonicalUrl")
         or ""
     )
     return normalize_job_url(final_url)
@@ -341,7 +353,46 @@ def has_explicit_unavailable_job_signal(job: Mapping[str, Any]) -> bool:
     return has_unavailable_signal(job_availability_text(job))
 
 
+def output_eligibility_policy_key(config: Mapping[str, Any] | None) -> str:
+    policy = {
+        "analysis": {
+            "postVerifyEnabled": _config_bool(config, "analysis", "postVerifyEnabled", default=False),
+            "postVerifyRequireChecked": _config_bool(config, "analysis", "postVerifyRequireChecked", default=True),
+            "recommendScoreThreshold": _config_int(config, "analysis", "recommendScoreThreshold", default=50),
+        },
+        "filters": {
+            "excludeUnavailableLinks": _config_bool(config, "filters", "excludeUnavailableLinks", default=True),
+            "excludeAggregatorLinks": _config_bool(config, "filters", "excludeAggregatorLinks", default=True),
+        },
+        "search": {
+            "allowPlatformListings": _config_bool(config, "search", "allowPlatformListings", default=False),
+            "platformListingDomains": sorted(
+                str(item).strip().casefold()
+                for item in (_config_value(config, "search", "platformListingDomains", default=[]) or [])
+                if str(item).strip()
+            ),
+        },
+    }
+    return json.dumps(policy, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def normalize_output_link_evidence(job: Mapping[str, Any]) -> Job:
+    normalized = copy.deepcopy(dict(job))
+    jd = normalized.get("jd")
+    normalized_jd = dict(jd) if isinstance(jd, Mapping) else {}
+    top_level_apply_url = normalize_job_url(normalized.get("applyUrl") or "")
+    top_level_final_url = normalize_job_url(normalized.get("finalUrl") or "")
+    if top_level_apply_url and not normalize_job_url(normalized_jd.get("applyUrl") or ""):
+        normalized_jd["applyUrl"] = top_level_apply_url
+    if top_level_final_url and not normalize_job_url(normalized_jd.get("finalUrl") or ""):
+        normalized_jd["finalUrl"] = top_level_final_url
+    if normalized_jd:
+        normalized["jd"] = normalized_jd
+    return normalized
+
+
 def choose_output_job_url(job: Mapping[str, Any], config: Mapping[str, Any] | None) -> str:
+    job = normalize_output_link_evidence(job)
     post_verify_enabled = _config_bool(config, "analysis", "postVerifyEnabled", default=False)
     verified = _config_value(job, "analysis", "postVerify", default={})
     verified_final_url = ""
@@ -352,7 +403,6 @@ def choose_output_job_url(job: Mapping[str, Any], config: Mapping[str, Any] | No
         _config_value(job, "jd", "applyUrl", default=""),
         _config_value(job, "jd", "finalUrl", default=""),
         job.get("canonicalUrl") or "",
-        job.get("url") or "",
     ]
     for candidate in candidates:
         normalized = normalize_job_url(candidate)
@@ -367,6 +417,7 @@ def choose_output_job_url(job: Mapping[str, Any], config: Mapping[str, Any] | No
 
 
 def is_applyable_job_page(job: Mapping[str, Any]) -> bool:
+    job = normalize_output_link_evidence(job)
     if _config_value(job, "analysis", "postVerify", "isValidJobPage", default=False):
         return True
     apply_url = normalize_job_url(_config_value(job, "jd", "applyUrl", default=""))
@@ -380,6 +431,7 @@ def is_applyable_job_page(job: Mapping[str, Any]) -> bool:
 
 
 def has_reliable_output_link(job: Mapping[str, Any], config: Mapping[str, Any] | None) -> bool:
+    job = normalize_output_link_evidence(job)
     output_url = choose_output_job_url(job, config)
     if not output_url:
         return False
@@ -494,17 +546,53 @@ def is_output_eligible(job: Mapping[str, Any], config: Mapping[str, Any] | None)
     return eligible
 
 
+def _materialized_output_rule_version(job: Mapping[str, Any]) -> int | None:
+    analysis = job.get("analysis")
+    if not isinstance(analysis, Mapping):
+        return None
+    value = analysis.get("outputEligibilityRuleVersion")
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def has_current_output_eligibility(
+    job: Mapping[str, Any],
+    config: Mapping[str, Any] | None = None,
+) -> bool:
+    analysis = job.get("analysis")
+    return (
+        isinstance(analysis, Mapping)
+        and "eligibleForOutput" in analysis
+        and _materialized_output_rule_version(job) == OUTPUT_ELIGIBILITY_RULE_VERSION
+        and str(analysis.get("outputEligibilityPolicyKey") or "") == output_eligibility_policy_key(config)
+    )
+
+
 def materialize_output_eligibility(
     job: Mapping[str, Any],
     config: Mapping[str, Any] | None,
 ) -> Job:
-    normalized = copy.deepcopy(dict(job))
+    normalized = normalize_output_link_evidence(job)
     analysis = normalized.get("analysis")
     normalized_analysis = dict(analysis) if isinstance(analysis, Mapping) else {}
     normalized["analysis"] = normalized_analysis
     eligible, reason = evaluate_output_eligibility(normalized, config)
     normalized_analysis["eligibleForOutput"] = eligible
     normalized_analysis["outputEligibilityReason"] = reason
+    normalized_analysis["outputEligibilityRuleVersion"] = OUTPUT_ELIGIBILITY_RULE_VERSION
+    normalized_analysis["outputEligibilityPolicyKey"] = output_eligibility_policy_key(config)
+    output_url = choose_output_job_url(normalized, config)
+    if output_url:
+        normalized["outputUrl"] = output_url
+    else:
+        normalized.pop("outputUrl", None)
+    canonical_url = canonical_job_url(normalized)
+    if canonical_url:
+        normalized["canonicalUrl"] = canonical_url
     return normalized
 
 
@@ -643,7 +731,7 @@ def build_final_output_dedupe_key(job: Mapping[str, Any], config: Mapping[str, A
     canonical = canonical_job_url(job)
     if canonical:
         return canonical
-    return build_job_dedupe_key(job) or normalize_job_url(job.get("url") or "")
+    return build_job_dedupe_key(job)
 
 
 def _analysis_with_derived_defaults(job: Mapping[str, Any]) -> dict[str, Any]:
@@ -657,10 +745,10 @@ def _analysis_with_derived_defaults(job: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def enrich_recommended_job(job: Mapping[str, Any], config: Mapping[str, Any] | None) -> Job:
-    normalized = copy.deepcopy(dict(job))
+    normalized = normalize_output_link_evidence(job)
     normalized["analysis"] = _analysis_with_derived_defaults(normalized)
-    normalized["outputUrl"] = choose_output_job_url(normalized, config) or normalize_job_url(normalized.get("url") or "")
-    normalized["canonicalUrl"] = canonical_job_url(normalized) or normalize_job_url(normalized.get("url") or "")
+    normalized["outputUrl"] = choose_output_job_url(normalized, config)
+    normalized["canonicalUrl"] = canonical_job_url(normalized)
     normalized["sourceQuality"] = str(normalized.get("sourceQuality") or infer_source_quality(normalized, config))
     normalized["regionTag"] = str(normalized.get("regionTag") or infer_region_tag(normalized))
     existing_tags = normalized.get("listTags")
@@ -700,6 +788,21 @@ class RecommendedOutputRebuildResult:
     pruned_recent_invalid_rows: int = 0
 
 
+def _materialize_final_recommended_jobs(
+    jobs: list[Mapping[str, Any]],
+    config: Mapping[str, Any] | None,
+) -> list[Job]:
+    materialized_jobs: list[Job] = []
+    for job in jobs:
+        if not isinstance(job, Mapping):
+            continue
+        stamped = materialize_output_eligibility(enrich_recommended_job(job, config), config)
+        analysis = stamped.get("analysis")
+        if isinstance(analysis, Mapping) and analysis.get("eligibleForOutput") is True:
+            materialized_jobs.append(stamped)
+    return materialized_jobs
+
+
 def rebuild_recommended_output_payload(
     *,
     all_jobs: list[Mapping[str, Any]],
@@ -717,12 +820,13 @@ def rebuild_recommended_output_payload(
     recommended_only_jobs = [
         job
         for job in prepared_all_jobs
-        if is_output_eligible(job, config)
+        if isinstance(job.get("analysis"), Mapping)
+        and job["analysis"].get("eligibleForOutput") is True
     ]
 
     combined_map: dict[str, Job] = {}
     for job in recommended_only_jobs:
-        key = build_final_output_dedupe_key(job, config) or normalize_job_url(job.get("url") or "")
+        key = build_final_output_dedupe_key(job, config)
         if not key:
             continue
         current = combined_map.get(key)
@@ -742,9 +846,9 @@ def rebuild_recommended_output_payload(
     if recommended_mode == "append":
         tracker_today = to_human_date(timestamp)
         all_jobs_by_key = {
-            build_final_output_dedupe_key(job, config) or normalize_job_url(job.get("url") or ""): job
+            build_final_output_dedupe_key(job, config): job
             for job in prepared_all_jobs
-            if build_final_output_dedupe_key(job, config) or normalize_job_url(job.get("url") or "")
+            if build_final_output_dedupe_key(job, config)
         }
         historical_jobs = [
             job
@@ -775,7 +879,7 @@ def rebuild_recommended_output_payload(
             row_to_job=lambda row: enrich_recommended_job(row.get("job") or {}, config)
             if isinstance(row.get("job"), Mapping)
             else None,
-            key_for_job=lambda job: build_final_output_dedupe_key(job, config) or normalize_job_url(job.get("url") or ""),
+            key_for_job=lambda job: build_final_output_dedupe_key(job, config),
             passes_unified_threshold=lambda job: is_output_eligible(job, config),
             passes_final_output_check=lambda job: is_output_eligible(job, config),
             has_manual_tracking=has_manual_tracking,
@@ -789,6 +893,8 @@ def rebuild_recommended_output_payload(
         pruned_recent_invalid_rows = merge_result.pruned_recent_invalid_rows
     else:
         unified_recommended_jobs = sort_jobs_for_append_merge(unified_recommended_jobs)
+
+    unified_recommended_jobs = _materialize_final_recommended_jobs(unified_recommended_jobs, config)
 
     return RecommendedOutputRebuildResult(
         payload={

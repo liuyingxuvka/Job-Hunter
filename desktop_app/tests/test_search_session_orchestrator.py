@@ -1023,7 +1023,10 @@ class SearchSessionOrchestratorTests(unittest.TestCase):
                 "Pending jobs remain after this round, but the session made progress; continuing while time remains.",
                 outcome.message,
             )
-            runtime.runner._clear_resume_pending_jobs.assert_called_once_with(runtime.run_dir)
+            runtime.runner._clear_resume_pending_jobs.assert_called_once_with(
+                runtime.run_dir,
+                current_run_id=None,
+            )
 
     def test_refresh_resume_pending_jobs_reconciles_company_pending_counts(self) -> None:
         with TemporaryDirectory() as temp_dir:

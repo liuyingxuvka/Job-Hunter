@@ -228,6 +228,16 @@ class PythonStageExecutor:
                         job=merged_job,
                         data_availability_note=data_availability_note,
                     )
+                if cancel_event is not None and cancel_event.is_set():
+                    persist_outputs()
+                    return PythonStageRunResult(
+                        success=False,
+                        exit_code=-2,
+                        message="Python resume stage cancelled after scoring an unfinished job.",
+                        stdout_tail=_tail_lines(stdout_lines),
+                        stderr_tail=_tail_lines(stderr_lines),
+                        cancelled=True,
+                    )
                 with _temporary_client_timeout(
                     client_instance,
                     timeout_seconds=_capped_remaining_seconds(deadline, RESUME_ANALYSIS_REQUEST_TIMEOUT_SECONDS),
@@ -238,6 +248,16 @@ class PythonStageExecutor:
                         candidate_profile=candidate_profile,
                         job=merged_job,
                         analysis=analysis,
+                    )
+                if cancel_event is not None and cancel_event.is_set():
+                    persist_outputs()
+                    return PythonStageRunResult(
+                        success=False,
+                        exit_code=-2,
+                        message="Python resume stage cancelled before saving an unfinished job.",
+                        stdout_tail=_tail_lines(stdout_lines),
+                        stderr_tail=_tail_lines(stderr_lines),
+                        cancelled=True,
                     )
                 analysis_payload = JobAnalysisService.prepare_analysis_for_storage(
                     analysis,
@@ -454,6 +474,7 @@ class PythonStageExecutor:
             run_dir=run_dir,
             config=config,
             client_instance=client_instance,
+            cancel_event=cancel_event,
             progress_callback=progress_callback,
         )
 

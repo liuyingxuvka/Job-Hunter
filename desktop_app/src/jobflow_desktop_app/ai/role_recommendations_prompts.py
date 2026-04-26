@@ -67,6 +67,7 @@ def semantic_profile_prompt_lines(profile: CandidateSemanticProfile | None) -> l
         return []
     sections: list[tuple[str, tuple[str, ...] | str, int | None]] = [
         ("AI semantic summary:", profile.summary, None),
+        ("Career and education history:", profile.career_and_education_history, None),
         ("AI extracted company-discovery primary anchors:", profile.company_discovery_primary_anchors, 10),
         ("AI extracted company-discovery secondary anchors:", profile.company_discovery_secondary_anchors, 8),
         ("AI extracted job-fit core terms:", profile.job_fit_core_terms, 16),
@@ -109,6 +110,8 @@ def compact_role_recommendation_semantic_profile_lines(
     lines: list[str] = []
     if profile.summary:
         lines.extend(["AI semantic summary:", profile.summary])
+    if profile.career_and_education_history:
+        lines.extend(["Career and education history:", profile.career_and_education_history])
 
     sections: list[tuple[str, tuple[str, ...], int]] = [
         ("AI extracted company-discovery primary anchors:", profile.company_discovery_primary_anchors, 8),

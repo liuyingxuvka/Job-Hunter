@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QFrame, QLabel, QProgressDialog, QVBoxLayout, QWidget
 
+from ...search.state.runtime_db_mirror import SearchRuntimeMirror
+from ...search.state.runtime_recovery import recover_interrupted_search_runs
 from . import search_results_controls_state
 from ..theme import TOAST_LEVEL_COLORS, UI_COLORS
 
@@ -13,6 +15,7 @@ from ..theme import TOAST_LEVEL_COLORS, UI_COLORS
 @dataclass
 class SearchSessionState:
     phase: str = "idle"
+    session_token: int = 0
     owner_candidate_id: int | None = None
     worker_thread: QThread | None = None
     cancel_event: threading.Event | None = None
@@ -53,6 +56,7 @@ def begin_search_session(
     preserve_started: bool = False,
 ) -> None:
     session = page._search_session
+    session.session_token += 1
     session.owner_candidate_id = int(candidate_id)
     session.cancel_event = cancel_event
     session.duration_seconds = max(0, int(duration_seconds))
@@ -104,6 +108,7 @@ def reset_search_countdown_state(page) -> None:
 
 def reset_search_runtime_state(page) -> None:
     reset_search_countdown_state(page)
+    page._search_session.session_token += 1
     page._search_session.stop_requested = False
     page._search_session.cancel_event = None
     page._search_session.owner_candidate_id = None
@@ -213,14 +218,44 @@ def shutdown_background_work(page, wait_ms: int = 8000) -> None:
     page._notification_timer.stop()
     hide_notification_toast(page)
     cancel_event = page._search_session.cancel_event
+    owner_candidate_id = page._search_session.owner_candidate_id
     if cancel_event is not None:
         cancel_event.set()
-    running_thread = page._search_session.worker_thread
-    if isinstance(running_thread, QThread) and running_thread.isRunning():
-        running_thread.wait(max(0, int(wait_ms)))
+    cancel_running_searches_for_candidate(
+        page,
+        owner_candidate_id,
+        message="Search cancelled because the desktop app closed before this search finished.",
+        last_event="Desktop app closed while the search was running.",
+    )
+    page._search_session.session_token += 1
     page._search_session.cancel_event = None
     page._search_session.worker_thread = None
     clear_queued_search_restart(page)
+
+
+def cancel_running_searches_for_candidate(
+    page,
+    candidate_id: int | None,
+    *,
+    message: str,
+    last_event: str,
+) -> list[int]:
+    if candidate_id is None:
+        return []
+    context = getattr(page, "context", None)
+    database = getattr(context, "database", None)
+    if database is None:
+        return []
+    try:
+        runtime_mirror = SearchRuntimeMirror(database)
+        return recover_interrupted_search_runs(
+            runtime_mirror,
+            candidate_id=int(candidate_id),
+            message=message,
+            last_event=last_event,
+        )
+    except Exception:
+        return []
 
 
 __all__ = [
@@ -233,6 +268,7 @@ __all__ = [
     "reset_search_countdown_state",
     "reset_search_runtime_state",
     "request_search_stop",
+    "cancel_running_searches_for_candidate",
     "selected_search_duration_label",
     "selected_search_duration_seconds",
     "set_search_phase",

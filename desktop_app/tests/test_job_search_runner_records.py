@@ -10,9 +10,27 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from jobflow_desktop_app.search.orchestration import job_search_runner_records
+from jobflow_desktop_app.search.output.final_output import materialize_output_eligibility
 
 
 class JobSearchRunnerRecordsTests(unittest.TestCase):
+    def _config(self) -> dict:
+        return {
+            "search": {
+                "allowPlatformListings": False,
+                "platformListingDomains": ["linkedin.com"],
+            },
+            "filters": {
+                "excludeUnavailableLinks": True,
+                "excludeAggregatorLinks": True,
+            },
+            "analysis": {
+                "postVerifyEnabled": False,
+                "postVerifyRequireChecked": True,
+                "recommendScoreThreshold": 50,
+            },
+        }
+
     def test_resolve_job_links_prefers_verified_apply_final_then_source(self) -> None:
         verified = {
             "url": "https://example.com/source",
@@ -43,7 +61,7 @@ class JobSearchRunnerRecordsTests(unittest.TestCase):
             ("https://example.com/source", "https://example.com/source", "source"),
         )
 
-    def test_filter_displayable_recommended_jobs_requires_score_and_threshold(self) -> None:
+    def test_filter_displayable_recommended_jobs_requires_current_output_stamp(self) -> None:
         jobs = [
             {
                 "title": "Skip",
@@ -63,9 +81,23 @@ class JobSearchRunnerRecordsTests(unittest.TestCase):
                 "analysis": {"recommend": True},
                 "jd": {"applyUrl": "https://example.com/jobs/no-score/apply"},
             },
+            {
+                "title": "Legacy Unstamped",
+                "url": "https://example.com/jobs/legacy",
+                "analysis": {"recommend": True, "overallScore": 90},
+                "jd": {"applyUrl": "https://example.com/jobs/legacy/apply"},
+            },
+        ]
+        stamped_jobs = [
+            materialize_output_eligibility(item, self._config())
+            for item in jobs
+            if item["title"] != "Legacy Unstamped"
         ]
 
-        filtered = job_search_runner_records.filter_displayable_recommended_jobs(jobs)
+        filtered = job_search_runner_records.filter_displayable_recommended_jobs(
+            [*stamped_jobs, jobs[-1]],
+            config=self._config(),
+        )
 
         self.assertEqual([item["title"] for item in filtered], ["Keep"])
 
@@ -79,7 +111,12 @@ class JobSearchRunnerRecordsTests(unittest.TestCase):
             }
         ]
 
-        filtered = job_search_runner_records.filter_displayable_recommended_jobs(jobs)
+        stamped_jobs = [materialize_output_eligibility(item, self._config()) for item in jobs]
+
+        filtered = job_search_runner_records.filter_displayable_recommended_jobs(
+            stamped_jobs,
+            config=self._config(),
+        )
 
         self.assertEqual(filtered, [])
 

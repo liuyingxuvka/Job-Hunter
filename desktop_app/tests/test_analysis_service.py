@@ -93,6 +93,8 @@ class AnalysisServiceTests(unittest.TestCase):
         self.assertNotIn("overallMatchScore", analysis)
         self.assertTrue(analysis["recommend"])
         self.assertEqual(client.requests[0]["text"]["format"]["name"], "job_fit_score_lite")
+        self.assertIn("岗位证据上下文", client.requests[0]["input"])
+        self.assertIn("negativeEvidenceCn", client.requests[0]["text"]["format"]["schema"]["properties"])
 
     def test_evaluate_target_roles_for_job_calls_model_for_single_role_case(self) -> None:
         config = {

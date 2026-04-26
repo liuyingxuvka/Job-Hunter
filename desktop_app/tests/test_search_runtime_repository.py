@@ -13,6 +13,9 @@ from jobflow_desktop_app.db.repositories.search_runtime import (
     SearchRunJobRepository,
     SearchRunRepository,
 )
+from jobflow_desktop_app.app.pages.search_results_runtime_state import (
+    cancel_running_searches_for_candidate,
+)
 from jobflow_desktop_app.search.state.runtime_db_mirror import SearchRuntimeMirror
 from jobflow_desktop_app.search.state.runtime_recovery import (
     INTERRUPTED_SEARCH_EVENT,
@@ -288,6 +291,78 @@ class SearchRuntimeRepositoryTests(unittest.TestCase):
             self.assertEqual(latest.last_message, INTERRUPTED_SEARCH_MESSAGE)
             self.assertEqual(latest.last_event, INTERRUPTED_SEARCH_EVENT)
             self.assertEqual(latest.jobs_found_count, 1)
+
+    def test_cancel_running_searches_marks_owner_running_run_cancelled(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context)
+            mirror = SearchRuntimeMirror(context.database)
+            run_id = mirror.create_run(
+                candidate_id=candidate_id,
+                run_dir=context.paths.runtime_dir / "search_runs" / "candidate_test",
+                status="running",
+                current_stage="direct_job_discovery",
+                started_at="2026-04-26T10:00:00+00:00",
+            )
+
+            class _Page:
+                pass
+
+            page = _Page()
+            page.context = context
+
+            recovered = cancel_running_searches_for_candidate(
+                page,
+                candidate_id,
+                message="Search cancelled by the user.",
+                last_event="User clicked Stop Search.",
+            )
+            latest = SearchRunRepository(context.database).get(run_id)
+
+            self.assertEqual(recovered, [run_id])
+            self.assertIsNotNone(latest)
+            assert latest is not None
+            self.assertEqual(latest.status, "cancelled")
+            self.assertEqual(latest.current_stage, "done")
+            self.assertIn("cancelled by the user", latest.last_message)
+
+    def test_terminal_search_run_status_is_not_overwritten_by_late_worker_progress(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context)
+            runs = SearchRunRepository(context.database)
+            run_id = runs.create_run(
+                candidate_id=candidate_id,
+                run_dir="runtime/search_runs/candidate_test",
+                status="running",
+                current_stage="direct_job_discovery",
+            )
+
+            runs.update_progress(
+                run_id,
+                status="cancelled",
+                current_stage="done",
+                last_message="Search cancelled by the user.",
+                last_event="User clicked Stop Search.",
+            )
+            runs.update_progress(
+                run_id,
+                status="running",
+                current_stage="company_sources",
+                last_message="Late worker progress.",
+            )
+            runs.update_progress(
+                run_id,
+                status="success",
+                current_stage="done",
+                last_message="Late worker success.",
+            )
+
+            latest = runs.get(run_id)
+
+            self.assertIsNotNone(latest)
+            assert latest is not None
+            self.assertEqual(latest.status, "cancelled")
+            self.assertEqual(latest.current_stage, "done")
+            self.assertEqual(latest.last_message, "Search cancelled by the user.")
 
     def test_job_review_state_repository_resolves_job_id_by_newest_run_id(self) -> None:
         with make_temp_context() as context:

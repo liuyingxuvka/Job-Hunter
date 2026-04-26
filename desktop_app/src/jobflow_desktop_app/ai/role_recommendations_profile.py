@@ -11,7 +11,7 @@ from .role_recommendations_models import CandidateSemanticProfile, ResumeReadRes
 from .role_recommendations_resume import manual_background_summary
 
 
-SEMANTIC_PROFILE_SCHEMA_VERSION = 4
+SEMANTIC_PROFILE_SCHEMA_VERSION = 6
 
 
 def _normalize_semantic_list(
@@ -90,6 +90,11 @@ def parse_candidate_semantic_profile(
     profile = CandidateSemanticProfile(
         source_signature=str(payload.get("source_signature") or source_signature or "").strip(),
         summary=summary,
+        career_and_education_history=re.sub(
+            r"\s+",
+            " ",
+            str(payload.get("career_and_education_history") or "").strip(),
+        )[:600],
         company_discovery_primary_anchors=_normalize_semantic_list(
             payload.get("company_discovery_primary_anchors"),
             max_items=12,
@@ -114,6 +119,7 @@ def parse_candidate_semantic_profile(
         profile = CandidateSemanticProfile(
             source_signature=source_signature,
             summary=profile.summary,
+            career_and_education_history=profile.career_and_education_history,
             company_discovery_primary_anchors=profile.company_discovery_primary_anchors,
             company_discovery_secondary_anchors=profile.company_discovery_secondary_anchors,
             job_fit_core_terms=profile.job_fit_core_terms,

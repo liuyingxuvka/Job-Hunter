@@ -11,7 +11,9 @@ if str(SRC_ROOT) not in sys.path:
 
 from jobflow_desktop_app.search.output.final_output import (  # noqa: E402
     build_final_output_dedupe_key,
+    has_current_output_eligibility,
     is_output_eligible,
+    materialize_output_eligibility,
     passes_final_output_check,
     rebuild_recommended_output_payload,
 )
@@ -160,6 +162,29 @@ class FinalOutputTests(unittest.TestCase):
             by_key,
         )
 
+    def test_append_mode_materializes_existing_only_recommendation_stamp(self) -> None:
+        existing_job = self._job(
+            title="Fuel Cell Reliability Engineer",
+            url="https://acme.example.com/careers/jobs/12345",
+            apply_url="https://acme.example.com/careers/jobs/12345/apply",
+            score=72,
+            date_found="2026-04-01T09:00:00Z",
+        )
+        existing_job["interest"] = "感兴趣"
+
+        result = rebuild_recommended_output_payload(
+            all_jobs=[],
+            existing_recommended_jobs=[existing_job],
+            config=self._config(mode="append"),
+            generated_at="2026-04-14T12:30:00Z",
+        )
+
+        jobs = result.payload["jobs"]
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]["dateFound"], "2026-04-01T09:00:00Z")
+        self.assertEqual(jobs[0]["interest"], "感兴趣")
+        self.assertTrue(has_current_output_eligibility(jobs[0], self._config(mode="append")))
+
     def test_post_verify_gate_can_block_unchecked_recommendations(self) -> None:
         unchecked = self._job(
             title="Hydrogen Diagnostics Engineer",
@@ -251,6 +276,74 @@ class FinalOutputTests(unittest.TestCase):
         )
 
         self.assertTrue(passes_final_output_check(job, self._config(mode="replace")))
+
+    def test_source_url_alone_is_not_enough_for_recommended_output(self) -> None:
+        job = self._job(
+            title="Fuel Cell Reliability Engineer",
+            url="https://acme.example.com/careers/jobs/12345",
+            apply_url="",
+            final_url="",
+            score=72,
+        )
+
+        result = rebuild_recommended_output_payload(
+            all_jobs=[job],
+            existing_recommended_jobs=[],
+            config=self._config(mode="replace"),
+            generated_at="2026-04-14T12:30:00Z",
+        )
+
+        self.assertEqual(result.payload["jobs"], [])
+
+    def test_rebuild_materializes_current_output_stamp(self) -> None:
+        job = self._job(
+            title="Fuel Cell Reliability Engineer",
+            url="https://acme.example.com/careers/jobs/12345",
+            apply_url="https://acme.example.com/careers/jobs/12345/apply",
+            score=72,
+        )
+
+        result = rebuild_recommended_output_payload(
+            all_jobs=[job],
+            existing_recommended_jobs=[],
+            config=self._config(mode="replace"),
+            generated_at="2026-04-14T12:30:00Z",
+        )
+
+        [stamped] = result.payload["jobs"]
+        self.assertTrue(stamped["analysis"]["eligibleForOutput"])
+        self.assertEqual(stamped["analysis"]["outputEligibilityReason"], "eligible")
+        self.assertIn("outputEligibilityRuleVersion", stamped["analysis"])
+        self.assertIn("outputEligibilityPolicyKey", stamped["analysis"])
+        self.assertTrue(has_current_output_eligibility(stamped, self._config(mode="replace")))
+
+    def test_current_output_stamp_requires_matching_policy(self) -> None:
+        job = self._job(
+            title="Fuel Cell Reliability Engineer",
+            url="https://acme.example.com/careers/jobs/12345",
+            apply_url="https://acme.example.com/careers/jobs/12345/apply",
+            score=72,
+        )
+        stamped = materialize_output_eligibility(job, self._config(mode="replace"))
+        stricter_config = self._config(mode="replace")
+        stricter_config["analysis"]["recommendScoreThreshold"] = 80
+
+        self.assertTrue(has_current_output_eligibility(stamped, self._config(mode="replace")))
+        self.assertFalse(has_current_output_eligibility(stamped, stricter_config))
+
+    def test_top_level_apply_url_counts_as_link_evidence_when_materialized(self) -> None:
+        job = self._job(
+            title="Fuel Cell Reliability Engineer",
+            url="https://acme.example.com/careers/jobs/12345",
+            apply_url="",
+            score=72,
+        )
+        job["applyUrl"] = "https://acme.example.com/careers/jobs/12345/apply"
+
+        stamped = materialize_output_eligibility(job, self._config(mode="replace"))
+
+        self.assertTrue(stamped["analysis"]["eligibleForOutput"])
+        self.assertEqual(stamped["jd"]["applyUrl"], "https://acme.example.com/careers/jobs/12345/apply")
 
     def test_is_output_eligible_recomputes_instead_of_trusting_cached_flag(self) -> None:
         job = self._job(

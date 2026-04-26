@@ -5,6 +5,7 @@ from typing import Any
 
 from ..run_state import (
     analysis_completed,
+    canonical_job_item_url,
     extract_match_score,
     job_identity_key,
     job_item_key,
@@ -101,7 +102,7 @@ def build_runtime_bucket_rows(
             {
                 "job_id": job_ids.get(key),
                 "job_key": key,
-                "canonical_url": str(item.get("canonicalUrl") or item.get("url") or "").strip(),
+                "canonical_url": canonical_job_item_url(item),
                 "source_url": str(item.get("url") or "").strip(),
                 "title": str(item.get("title") or "").strip(),
                 "company_name": str(item.get("company") or "").strip(),

@@ -296,8 +296,8 @@ def write_tracker_xlsx(
         manual = _manual_for_job(job, manual_by_url)
         source_quality = str(job.get("sourceQuality") or infer_source_quality(job, config))
         region_tag = str(job.get("regionTag") or infer_region_tag(job))
-        canonical_url = canonical_job_url(job) or normalize_job_url(job.get("url") or "")
-        final_job_url = choose_output_job_url(job, config) or canonical_url or normalize_job_url(job.get("url") or "")
+        canonical_url = canonical_job_url(job)
+        final_job_url = choose_output_job_url(job, config) or canonical_url
         tracker_date = to_human_date(job.get("dateFound") or "")
 
         row_values: dict[str, Any] = {

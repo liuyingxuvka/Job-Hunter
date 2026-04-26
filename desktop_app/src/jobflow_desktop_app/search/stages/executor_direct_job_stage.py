@@ -17,7 +17,13 @@ from ..companies.company_sources_enrichment import (
 from ..companies.discovery import build_company_identity_keys, merge_unique_strings, normalize_url
 from ..companies.pool_store import merge_companies_into_master
 from ..companies.sources_helpers import dedupe_jobs_by_normalized_url, has_job_signal
-from ..output.final_output import canonical_job_url, infer_region_tag, infer_source_quality, normalize_job_url
+from ..output.final_output import (
+    canonical_job_url,
+    infer_region_tag,
+    infer_source_quality,
+    is_specific_job_detail_url,
+    normalize_job_url,
+)
 from ..run_state import (
     analysis_completed,
     collect_resume_pending_jobs_from_job_lists,
@@ -126,7 +132,8 @@ def run_direct_job_discovery_stage_db(
     run_dir,
     config: dict,
     client_instance: ResponseRequestClient,
-    progress_callback: Callable[[str], None] | None,
+    cancel_event: Any | None = None,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> PythonStageRunResult:
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
@@ -145,6 +152,12 @@ def run_direct_job_discovery_stage_db(
             config=config,
             max_jobs=max_jobs,
         )
+        if _cancel_requested(cancel_event):
+            return _direct_cancelled_result(
+                message="Python direct job discovery stage cancelled after discovery.",
+                stdout_lines=stdout_lines,
+                stderr_lines=stderr_lines,
+            )
         _relay_progress(
             f"Python direct job discovery found {len(discovered_jobs)} candidate job(s).",
             stdout_lines,
@@ -177,6 +190,15 @@ def run_direct_job_discovery_stage_db(
             seen_keys=job_state.seen_keys,
             limit=max_jobs,
         )
+        if _cancel_requested(cancel_event):
+            return _direct_cancelled_result(
+                message="Python direct job discovery stage cancelled after verification.",
+                stdout_lines=stdout_lines,
+                stderr_lines=stderr_lines,
+                raw_jobs=len(discovered_jobs),
+                skipped_existing=skipped_existing,
+                verified_jobs=len(live_jobs),
+            )
         _relay_progress(
             f"Python direct job verification kept {len(live_jobs)} live new job(s).",
             stdout_lines,
@@ -189,7 +211,18 @@ def run_direct_job_discovery_stage_db(
             run_dir=run_dir,
             search_run_id=search_run_id,
             jobs=live_jobs,
+            cancel_event=cancel_event,
         )
+        if _cancel_requested(cancel_event):
+            return _direct_cancelled_result(
+                message="Python direct job discovery stage cancelled before saving scored jobs.",
+                stdout_lines=stdout_lines,
+                stderr_lines=stderr_lines,
+                raw_jobs=len(discovered_jobs),
+                skipped_existing=skipped_existing,
+                verified_jobs=len(live_jobs),
+                scored_jobs=len(scored_jobs),
+            )
         _write_direct_job_buckets(
             runtime_mirror,
             job_state=job_state,
@@ -276,6 +309,43 @@ def _direct_stage_result(
     )
 
 
+def _direct_cancelled_result(
+    *,
+    message: str,
+    stdout_lines: list[str],
+    stderr_lines: list[str],
+    raw_jobs: int = 0,
+    skipped_existing: int = 0,
+    verified_jobs: int = 0,
+    scored_jobs: int = 0,
+) -> PythonStageRunResult:
+    stdout_lines.append(message)
+    result = _direct_stage_result(
+        success=False,
+        exit_code=-2,
+        message=message,
+        stdout_lines=stdout_lines,
+        stderr_lines=stderr_lines,
+        raw_jobs=raw_jobs,
+        skipped_existing=skipped_existing,
+        verified_jobs=verified_jobs,
+        scored_jobs=scored_jobs,
+    )
+    return PythonStageRunResult(
+        success=result.success,
+        exit_code=result.exit_code,
+        message=result.message,
+        stdout_tail=result.stdout_tail,
+        stderr_tail=result.stderr_tail,
+        cancelled=True,
+        payload=result.payload,
+    )
+
+
+def _cancel_requested(cancel_event: Any | None) -> bool:
+    return bool(cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)())
+
+
 def _load_direct_stage_job_state(
     runtime_mirror,
     *,
@@ -332,12 +402,15 @@ def _score_live_direct_jobs(
     run_dir,
     search_run_id: int,
     jobs: list[Mapping[str, Any]],
+    cancel_event: Any | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     candidate_profile = _load_candidate_profile_payload(config, run_dir)
     data_availability_note = _build_data_availability_note(candidate_profile)
     scored_jobs: list[dict[str, Any]] = []
     scoring_failures = 0
     for job in jobs:
+        if _cancel_requested(cancel_event):
+            break
         scored_job = _score_direct_job(
             client,
             config=config,
@@ -522,15 +595,17 @@ def _normalize_direct_candidate(raw_job: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_verified_job(raw_job: Mapping[str, Any], *, config: Mapping[str, Any]) -> dict[str, Any]:
-    url = normalize_job_url(raw_job.get("finalUrl") or raw_job.get("url") or "")
-    if not url:
+    final_url = normalize_job_url(raw_job.get("finalUrl") or "")
+    if not final_url or not is_specific_job_detail_url(final_url):
+        return {}
+    if not bool(raw_job.get("isLiveJobPage")) or not bool(raw_job.get("hasApplyEntry")):
         return {}
     job = {
         "title": str(raw_job.get("title") or "").strip(),
         "company": str(raw_job.get("company") or "").strip(),
         "location": str(raw_job.get("location") or "").strip(),
-        "url": url,
-        "canonicalUrl": canonical_job_url({"url": url}) or url,
+        "url": final_url,
+        "canonicalUrl": final_url,
         "datePosted": str(raw_job.get("datePosted") or "").strip(),
         "dateFound": _now_iso(),
         "summary": str(raw_job.get("summary") or "").strip(),
@@ -741,7 +816,7 @@ def _job_keys(job: Mapping[str, Any]) -> list[str]:
     key = job_item_key(dict(job)) or job_identity_key(dict(job))
     if key:
         keys.append(key.casefold())
-    normalized_url = normalize_job_url(job.get("url") or job.get("canonicalUrl") or "")
+    normalized_url = normalize_job_url(job.get("canonicalUrl") or job.get("url") or "")
     if normalized_url:
         keys.append(normalized_url.casefold())
     identity = _title_company_location_key(job)
@@ -810,6 +885,10 @@ def _candidate_context_payload(config: Mapping[str, Any]) -> dict[str, Any]:
                 target_roles.append(text)
     return {
         "summary": _truncate_text(semantic.get("summary"), 600),
+        "careerAndEducationHistory": _truncate_text(
+            semantic.get("career_and_education_history"),
+            600,
+        ),
         "targetRoles": target_roles[:8],
         "scopeProfiles": _trim_text_list(candidate.get("scopeProfiles"), limit=8),
         "locationPreference": str(candidate.get("locationPreference") or "").strip(),

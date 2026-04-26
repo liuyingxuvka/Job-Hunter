@@ -186,6 +186,9 @@ def build_lite_scoring_schema() -> dict[str, Any]:
             "fitTrack": {"type": "string"},
             "transferableScore": {"type": "integer", "minimum": 0, "maximum": 100},
             "primaryEvidenceCn": {"type": "string"},
+            "jobPostingEvidenceCn": {"type": "string"},
+            "recommendReasonCn": {"type": "string"},
+            "negativeEvidenceCn": {"type": "string"},
         },
         "required": [
             "matchScore",
@@ -195,6 +198,9 @@ def build_lite_scoring_schema() -> dict[str, Any]:
             "fitTrack",
             "transferableScore",
             "primaryEvidenceCn",
+            "jobPostingEvidenceCn",
+            "recommendReasonCn",
+            "negativeEvidenceCn",
         ],
     }
 
@@ -214,6 +220,7 @@ def build_full_scoring_schema() -> dict[str, Any]:
             "fitTrack": {"type": "string", "enum": list(FIT_TRACK_VALUES)},
             "transferableScore": {"type": "integer", "minimum": 0, "maximum": 100},
             "primaryEvidenceCn": {"type": "string"},
+            "negativeEvidenceCn": {"type": "string"},
             "summaryCn": {"type": "string"},
             "reasonsCn": {"type": "array", "items": {"type": "string"}},
             "gapsCn": {"type": "array", "items": {"type": "string"}},
@@ -231,6 +238,7 @@ def build_full_scoring_schema() -> dict[str, Any]:
             "fitTrack",
             "transferableScore",
             "primaryEvidenceCn",
+            "negativeEvidenceCn",
             "summaryCn",
             "reasonsCn",
             "gapsCn",
@@ -280,6 +288,47 @@ def build_post_verify_schema() -> dict[str, Any]:
     }
 
 
+def _nested_mapping(value: object) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _job_context_payload(job: Mapping[str, Any]) -> dict[str, Any]:
+    jd = _nested_mapping(job.get("jd"))
+    direct_verification = _nested_mapping(job.get("directJobVerification"))
+    post_verify = _nested_mapping(job.get("postVerify"))
+    analysis = _nested_mapping(job.get("analysis"))
+    analysis_post_verify = _nested_mapping(analysis.get("postVerify"))
+    return {
+        "canonicalUrl": _string_value(job, "canonicalUrl"),
+        "datePosted": _string_value(job, "datePosted"),
+        "dateFound": _string_value(job, "dateFound"),
+        "sourceType": _string_value(job, "sourceType"),
+        "sourceQuality": _string_value(job, "sourceQuality"),
+        "availabilityHint": _string_value(job, "availabilityHint"),
+        "applyUrl": _string_value(job, "applyUrl"),
+        "aiPreRankReason": _string_value(job, "aiPreRankReason"),
+        "jd": {
+            "finalUrl": str(jd.get("finalUrl") or "").strip(),
+            "status": jd.get("status", ""),
+            "contentType": str(jd.get("contentType") or "").strip(),
+            "redirected": bool(jd.get("redirected")),
+        },
+        "directJobVerification": {
+            "isLiveJobPage": bool(direct_verification.get("isLiveJobPage")),
+            "hasApplyEntry": bool(direct_verification.get("hasApplyEntry")),
+            "reason": str(direct_verification.get("reason") or "").strip(),
+        },
+        "postVerify": {
+            "finalUrl": str(
+                analysis_post_verify.get("finalUrl")
+                or post_verify.get("finalUrl")
+                or ""
+            ).strip(),
+            "isValidJobPage": analysis_post_verify.get("isValidJobPage", post_verify.get("isValidJobPage", "")),
+        },
+    }
+
+
 def build_lite_scoring_prompt(
     *,
     config: Mapping[str, Any],
@@ -292,8 +341,8 @@ def build_lite_scoring_prompt(
     recommend_threshold = unified_recommend_threshold(config)
     return (
         "你是招聘筛选器。请做“低token极简评估”，输出JSON字段："
-        "matchScore、recommend、isJobPosting、location、fitTrack、transferableScore、primaryEvidenceCn。\n"
-        "不要输出任何理由、解释、列表、额外文字。\n\n"
+        "matchScore、recommend、isJobPosting、location、fitTrack、transferableScore、primaryEvidenceCn、jobPostingEvidenceCn、recommendReasonCn、negativeEvidenceCn。\n"
+        "不要输出 schema 之外的字段、Markdown、列表或额外文字。\n\n"
         "候选人画像（JSON）：\n"
         f"{_json_block(candidate_profile or {})}\n\n"
         "候选人目标方向：\n"
@@ -306,6 +355,8 @@ def build_lite_scoring_prompt(
         f"Company: {_string_value(job, 'company')}\n"
         f"Location: {_string_value(job, 'location')}\n"
         f"URL: {_string_value(job, 'url')}\n"
+        "岗位证据上下文（JSON）：\n"
+        f"{_json_block(_job_context_payload(job))}\n"
         "Search Summary:\n"
         f"{_truncate_text(_string_value(job, 'summary'), 1200)}\n"
         "JD:\n"
@@ -316,6 +367,8 @@ def build_lite_scoring_prompt(
         f"{fit_track_prompt_note()}\n"
         "- transferableScore 0-100，仅作为辅助观察字段，不决定最终 recommend\n"
         "- primaryEvidenceCn 用一句中文给出主匹配证据\n"
+        "- jobPostingEvidenceCn 用一句中文说明该链接是不是具体、当前可投递岗位页\n"
+        "- negativeEvidenceCn 用一句中文列出主要扣分证据；没有就返回空字符串\n"
         "只输出 JSON。"
     )
 
@@ -332,7 +385,7 @@ def build_full_scoring_prompt(
 ) -> str:
     return (
         "你是岗位招聘复核器。\n"
-        "必须使用 web_search 访问该岗位 URL（以及必要的公司招聘入口），结合网页内容与提供的 JD 文本，做出结构化评估。\n"
+        "如果 web_search 工具可用，应访问该岗位 URL（以及必要的公司招聘入口）；否则只能依据提供的岗位证据、摘要和 JD 文本，做出结构化评估。\n"
         "注意：必须用中文输出；公司名/产品名/缩写保持英文。\n"
         f"{unified_overall_scoring_rubric(recommend_threshold=recommend_threshold, role_focus_note='优先看岗位主体职责是否与候选人画像中的目标方向、核心能力、背景关键词和相邻方向整体一致。')}\n\n"
         "候选人画像（JSON）：\n"
@@ -345,6 +398,8 @@ def build_full_scoring_prompt(
         f"Company: {_string_value(job, 'company')}\n"
         f"Location: {_string_value(job, 'location')}\n"
         f"URL: {_string_value(job, 'url')}\n"
+        "岗位证据上下文（JSON）：\n"
+        f"{_json_block(_job_context_payload(job))}\n"
         "Search Summary:\n"
         f"{_truncate_text(_string_value(job, 'summary'), 1500)}\n"
         "JD text:\n"
@@ -360,6 +415,7 @@ def build_full_scoring_prompt(
         f"{fit_track_prompt_note()}\n"
         "- transferableScore: 0-100，可迁移能力匹配强度\n"
         "- primaryEvidenceCn: 主匹配证据（中文一句）\n"
+        "- negativeEvidenceCn: 主要扣分证据（中文一句；没有就返回空字符串）\n"
         "- summaryCn: 该岗位一句话中文总结\n"
         "- reasonsCn: 匹配点（中文）\n"
         "- gapsCn: 主要差距（中文）\n"
@@ -432,6 +488,8 @@ def build_target_role_binding_prompt(
         f"Company: {_string_value(job, 'company')}\n"
         f"Location: {_string_value(job, 'location')}\n"
         f"URL: {_string_value(job, 'url')}\n"
+        "岗位证据上下文（JSON）：\n"
+        f"{_json_block(_job_context_payload(job))}\n"
         "Search Summary:\n"
         f"{_truncate_text(_string_value(job, 'summary'), 1400)}\n"
         "JD text:\n"
@@ -466,6 +524,8 @@ def build_post_verify_prompt(
         f"Company: {_string_value(job, 'company')}\n"
         f"Location: {_string_value(job, 'location')}\n"
         f"URL: {_string_value(job, 'url')}\n"
+        "岗位证据上下文（JSON）：\n"
+        f"{_json_block(_job_context_payload(job))}\n"
         "JD:\n"
         f"{_truncate_text(jd_text, jd_limit)}\n\n"
         "判定规则：\n"
@@ -613,17 +673,21 @@ def normalize_lite_scoring_payload(
     is_job_posting = payload.get("isJobPosting") is True
     return _apply_overall_scoring_contract(
         {
-        "matchScore": score,
+            "matchScore": score,
             "isJobPosting": is_job_posting,
-            "jobPostingEvidenceCn": "低token模式判定为岗位JD页面。"
-            if is_job_posting
-            else "低token模式判定为非岗位JD页面。",
+            "jobPostingEvidenceCn": str(payload.get("jobPostingEvidenceCn") or "").strip()
+            or (
+                "低token模式判定为岗位JD页面。"
+                if is_job_posting
+                else "低token模式判定为非岗位JD页面。"
+            ),
             "recommend": bool(payload.get("recommend") is True and is_job_posting and score >= recommend_threshold),
-            "recommendReasonCn": "",
+            "recommendReasonCn": str(payload.get("recommendReasonCn") or "").strip(),
             "location": str(payload.get("location") or "").strip(),
             "fitTrack": _normalize_fit_track(payload.get("fitTrack")),
             "transferableScore": normalize_score(payload.get("transferableScore")),
             "primaryEvidenceCn": str(payload.get("primaryEvidenceCn") or "").strip(),
+            "negativeEvidenceCn": str(payload.get("negativeEvidenceCn") or "").strip(),
             "summaryCn": "",
             "reasonsCn": [],
             "gapsCn": [],
@@ -656,6 +720,7 @@ def normalize_full_scoring_payload(
             "fitTrack": _normalize_fit_track(payload.get("fitTrack")),
             "transferableScore": normalize_score(payload.get("transferableScore")),
             "primaryEvidenceCn": str(payload.get("primaryEvidenceCn") or "").strip(),
+            "negativeEvidenceCn": str(payload.get("negativeEvidenceCn") or "").strip(),
             "summaryCn": str(payload.get("summaryCn") or "").strip(),
             "reasonsCn": _normalize_string_list(payload.get("reasonsCn")),
             "gapsCn": _normalize_string_list(payload.get("gapsCn")),
@@ -716,7 +781,7 @@ def normalize_post_verify_payload(payload: Mapping[str, Any], *, job_url: str = 
         "isValidJobPage": payload.get("isValidJobPage") is True,
         "recommend": payload.get("recommend") is True,
         "location": str(payload.get("location") or "").strip(),
-        "finalUrl": str(payload.get("finalUrl") or job_url or "").strip(),
+        "finalUrl": str(payload.get("finalUrl") or "").strip(),
     }
 
 

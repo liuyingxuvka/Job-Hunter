@@ -139,6 +139,7 @@ class SearchSessionRuntimeTests(unittest.TestCase):
             runner._refresh_python_recommended_output_json.assert_called_once_with(
                 run_dir,
                 {"output": {"recommendedMode": "replace"}},
+                search_run_id=None,
             )
 
     def test_combined_tail_and_cancelled_outcome_preserve_labels_and_progress(self) -> None:

@@ -105,7 +105,9 @@ def _record_stage_result_or_cancel(
         stage_stdout.append((stage_label, stage_result.stdout_tail))
     if stage_result.stderr_tail:
         stage_stderr.append((stage_label, stage_result.stderr_tail))
-    if not stage_result.cancelled:
+    if not stage_result.cancelled and not (
+        runtime.cancel_event is not None and runtime.cancel_event.is_set()
+    ):
         return None
     return _cancelled_outcome(
         runtime,
@@ -822,7 +824,10 @@ def run_search_session(runtime: SearchSessionRuntime) -> SearchSessionOutcome:
         else:
             message = "Timed search session completed."
         if pending_after_round <= 0:
-            runtime.runner._clear_resume_pending_jobs(runtime.run_dir)
+            runtime.runner._clear_resume_pending_jobs(
+                runtime.run_dir,
+                current_run_id=runtime.search_run_id,
+            )
     else:
         message = (main_result.message if main_result is not None else "") or (
             "Timed search session failed."

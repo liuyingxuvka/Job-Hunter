@@ -150,6 +150,7 @@ class SearchRunRepository:
                     END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
+                  AND COALESCE(status, '') NOT IN ('success', 'error', 'cancelled')
                 """,
                 (
                     normalized_status,

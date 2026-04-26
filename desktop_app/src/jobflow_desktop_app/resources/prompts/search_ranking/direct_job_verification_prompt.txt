@@ -7,10 +7,12 @@ Candidate jobs:
 For each candidate job, verify whether it is still a concrete open job page and give a fast fit score.
 
 Rules:
-- Keep the same URL unless a clear current canonical job URL is found.
+- finalUrl must be the confirmed employer/ATS/platform job detail or application URL.
+- If you only find a careers home page, search result page, generic recruiting page, expired page, or cannot confirm a concrete final job URL, set finalUrl to an empty string and isLiveJobPage=false.
 - isLiveJobPage means the current page is still a specific job detail page, not a generic careers/search page.
 - hasApplyEntry means the page exposes a visible apply/application route or a current ATS application flow.
 - fastFitScore is a rough 0-100 fit score for this candidate, not a final recommendation.
 - Return one object for every input job URL, including invalid or expired jobs.
+- A page can be live but still score low when it is internship/student, technician/operator, postdoc/fellowship, a generic recruiting page, or an old PDF without a current apply signal for this candidate.
 
 Return structured JSON only.

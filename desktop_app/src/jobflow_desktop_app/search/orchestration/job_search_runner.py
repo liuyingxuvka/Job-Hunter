@@ -146,11 +146,14 @@ class JobSearchRunner:
         self,
         run_dir: Path,
         config: dict | None,
+        *,
+        search_run_id: int | None = None,
     ) -> int:
         return job_search_runner_runtime_io.refresh_python_recommended_output_json(
             self,
             run_dir,
             config,
+            search_run_id=search_run_id,
         )
 
     @staticmethod
@@ -236,9 +239,15 @@ class JobSearchRunner:
         current_run_id: int | None = None,
     ) -> list[dict]:
         candidate_id, runtime_mirror, latest_run = cls._search_run_context_for_run_dir(run_dir)
-        if runtime_mirror is None or latest_run is None or candidate_id is None:
+        if runtime_mirror is None or candidate_id is None:
             return []
         source_run = latest_run
+        if current_run_id is not None and hasattr(runtime_mirror.search_runs, "get"):
+            explicit_run = runtime_mirror.search_runs.get(int(current_run_id))
+            if explicit_run is not None:
+                source_run = explicit_run
+        if source_run is None:
+            return []
         pending_jobs = runtime_mirror.load_run_bucket_jobs(
             search_run_id=source_run.search_run_id,
             job_bucket="resume_pending",
@@ -325,9 +334,10 @@ class JobSearchRunner:
             current_run_id=current_run_id,
         )
         candidate_id, runtime_mirror, latest_run = cls._search_run_context_for_run_dir(run_dir)
-        if runtime_mirror is not None and latest_run is not None and candidate_id is not None:
+        target_run_id = current_run_id or (latest_run.search_run_id if latest_run is not None else None)
+        if runtime_mirror is not None and target_run_id is not None and candidate_id is not None:
             runtime_mirror.replace_bucket_jobs(
-                search_run_id=latest_run.search_run_id,
+                search_run_id=target_run_id,
                 candidate_id=candidate_id,
                 job_bucket="resume_pending",
                 jobs=pending_jobs,
@@ -335,12 +345,13 @@ class JobSearchRunner:
         return len(pending_jobs)
 
     @classmethod
-    def _clear_resume_pending_jobs(cls, run_dir: Path) -> None:
+    def _clear_resume_pending_jobs(cls, run_dir: Path, *, current_run_id: int | None = None) -> None:
         candidate_id, runtime_mirror, latest_run = cls._search_run_context_for_run_dir(run_dir)
-        if runtime_mirror is None or latest_run is None or candidate_id is None:
+        target_run_id = current_run_id or (latest_run.search_run_id if latest_run is not None else None)
+        if runtime_mirror is None or target_run_id is None or candidate_id is None:
             return
         runtime_mirror.replace_bucket_jobs(
-            search_run_id=latest_run.search_run_id,
+            search_run_id=target_run_id,
             candidate_id=candidate_id,
             job_bucket="resume_pending",
             jobs=[],

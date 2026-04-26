@@ -161,8 +161,7 @@ class SearchResultsControlsTests(unittest.TestCase):
                 self.assertEqual(step.refresh_button.text(), "开始搜索")
                 self.assertTrue(step.refresh_button.isEnabled())
                 self.assertTrue(step.search_duration_combo.isEnabled())
-                self.assertIn("已请求停止", step.results_meta_label.text())
-                self.assertIn("后台收尾", step.results_progress_label.text())
+                self.assertIn("后台搜索已停止", step.results_meta_label.text())
 
                 QTest.mouseClick(step.refresh_button, Qt.LeftButton)
                 process_events()
@@ -170,20 +169,18 @@ class SearchResultsControlsTests(unittest.TestCase):
                 self.assertEqual(step.refresh_button.text(), "停止搜索")
                 self.assertTrue(step.refresh_button.isEnabled())
                 self.assertFalse(step.search_duration_combo.isEnabled())
-                self.assertIn("下一轮搜索已排队", step.results_meta_label.text())
-                self.assertIn("下一轮已排队", step.results_progress_label.text())
-                self.assertGreaterEqual(len(controller.calls), 1)
+                self.assertIn("后台搜索岗位", step.results_meta_label.text())
+                self.assertGreaterEqual(len(controller.calls), 2)
 
                 controller.finish_last_success()
                 process_events()
                 process_events()
 
                 self.assertGreaterEqual(len(controller.calls), 2)
-                self.assertEqual(step.refresh_button.text(), "停止搜索")
+                self.assertEqual(step.refresh_button.text(), "开始搜索")
                 self.assertTrue(step.refresh_button.isEnabled())
-                self.assertFalse(step.search_duration_combo.isEnabled())
-                self.assertIn("正在后台搜索岗位", step.results_meta_label.text())
-                self.assertIn("后台进度", step.results_progress_label.text())
+                self.assertTrue(step.search_duration_combo.isEnabled())
+                self.assertIn("本轮搜索已结束", step.results_meta_label.text())
 
     def test_successful_early_stop_due_to_no_new_companies_shows_information_popup(self) -> None:
         controller = _BusyTaskController()

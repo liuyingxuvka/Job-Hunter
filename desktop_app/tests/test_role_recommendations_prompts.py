@@ -44,6 +44,7 @@ class RoleRecommendationsPromptsTests(unittest.TestCase):
     def test_build_role_recommendation_prompt_includes_compact_semantic_profile_lines(self) -> None:
         profile = CandidateSemanticProfile(
             summary="Hydrogen systems focus",
+            career_and_education_history="Graduate education and industry energy systems work.",
             company_discovery_primary_anchors=("hydrogen systems",),
             job_fit_core_terms=("fuel cell systems",),
             job_fit_support_terms=("systems integration", "requirements traceability"),
@@ -57,6 +58,9 @@ class RoleRecommendationsPromptsTests(unittest.TestCase):
         )
 
         self.assertIn("AI semantic summary:", compact_lines)
+        self.assertIn("Career and education history:", compact_lines)
+        self.assertNotIn("preferred role levels", "\n".join(compact_lines))
+        self.assertNotIn("role types to downgrade", "\n".join(compact_lines))
         self.assertIn("existing roles (must not repeat):", prompt)
         self.assertIn("Fuel Cell Systems Engineer", prompt)
         self.assertIn("hydrogen systems", prompt)

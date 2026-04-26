@@ -155,6 +155,7 @@ def _refresh_python_recommended_outputs(
     count = runtime.runner._refresh_python_recommended_output_json(
         runtime.run_dir,
         active_config,
+        search_run_id=runtime.search_run_id,
     )
     return count
 

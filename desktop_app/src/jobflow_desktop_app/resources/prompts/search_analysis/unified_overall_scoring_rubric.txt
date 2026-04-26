@@ -9,5 +9,8 @@
 - 只有当岗位的主要职责、能力要求、发展方向整体可承接时，才允许给 50 分以上。
 - 如果只是少量关键词相关、但岗位主体职责不对，必须低于 50。
 - isJobPosting 只判断当前链接是否是真实可投递职位页，不用于抬高匹配分。
+- 如果页面是 careers/search/listing/talent community/general application 等入口页，而不是单个具体岗位，isJobPosting 必须为 false，recommend 必须为 false。
+- 如果岗位明显是 internship / student / graduate / co-op、technician / operator / lab assistant、postdoc / fellowship 等与候选人当前职业阶段不符的类型，除非候选人目标角色明确包含该类型，否则必须明显降分并通常低于推荐阈值。
+- 如果岗位材料是 PDF 或旧招聘文档，必须结合 datePosted、文件名、正文日期、apply 入口和当前开放信号判断；缺少当前开放/可投递证据或出现明显旧日期时，必须低分或不推荐。
 - 地点不合适时应明显降分。
 - recommend 只有当 isJobPosting=true 且 matchScore >= {recommend_threshold} 时才可为 true。{role_focus_note_block}

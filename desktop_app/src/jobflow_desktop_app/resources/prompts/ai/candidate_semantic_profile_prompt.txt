@@ -25,18 +25,22 @@ Rules:
 14. `job_fit_support_terms` should contain weaker but still useful supporting signals such as adjacent themes, methods, or concrete capabilities.
 15. `job_fit_support_terms` should not duplicate `job_fit_core_terms`.
 16. `avoid_business_areas` should list misleading directions that might be over-inferred from isolated tools or weak signals.
-17. Keep the overall field set compact and high-signal. Avoid near-duplicate arrays.
-18. Phrase-count targets:
+17. `career_and_education_history` should be one concise factual paragraph summarizing education level, relevant work/research history, approximate experience evidence when present, and current search context when present.
+18. Do not use `career_and_education_history` to prescribe preferred role levels or excluded role types. State evidence only.
+19. Do not invent dates, years of experience, degrees, employers, or job levels that are not present in the candidate context.
+20. Keep the overall field set compact and high-signal. Avoid near-duplicate arrays.
+21. Phrase-count targets:
     - `company_discovery_primary_anchors`: up to 12
     - `company_discovery_secondary_anchors`: up to 8
     - `job_fit_core_terms`: up to 24
     - `job_fit_support_terms`: up to 16
     - `avoid_business_areas`: up to 10
-19. Do not output Chinese search phrases.
+22. Do not output Chinese search phrases.
 
 JSON format:
 {
   "summary": "One short paragraph.",
+  "career_and_education_history": "One concise factual paragraph.",
   "company_discovery_primary_anchors": ["..."],
   "company_discovery_secondary_anchors": ["..."],
   "job_fit_core_terms": ["..."],

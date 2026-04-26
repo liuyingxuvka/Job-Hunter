@@ -9,6 +9,7 @@ except ImportError:  # pragma: no cover - unittest discover from tests dir
     from _helpers import create_candidate, create_profile, make_temp_context, save_openai_settings  # type: ignore
 
 from jobflow_desktop_app.search.orchestration.job_search_runner import JobSearchRunner
+from jobflow_desktop_app.search.output.final_output import materialize_output_eligibility
 
 
 class JobSearchRunnerDbReadsTests(unittest.TestCase):
@@ -50,11 +51,22 @@ class JobSearchRunnerDbReadsTests(unittest.TestCase):
         )
         return runner, search_run_id
 
+    def _stamp_for_output(self, job: dict) -> dict:
+        return materialize_output_eligibility(job, self._default_runtime_config())
+
     def test_load_search_progress_prefers_sqlite_mirror(self) -> None:
         with make_temp_context() as context:
             candidate_id = create_candidate(context, name="DB Mirror Candidate")
             create_profile(context, candidate_id, name="Hydrogen Engineer", is_active=True)
-            runner, search_run_id = self._seed_run(context, candidate_id)
+            runner, _previous_run_id = self._seed_run(context, candidate_id)
+            run_dir = context.paths.runtime_dir / "search_runs" / f"candidate_{candidate_id}"
+            search_run_id = runner.runtime_mirror.create_run(
+                candidate_id=candidate_id,
+                run_dir=run_dir,
+                status="running",
+                current_stage="preparing",
+                started_at="2026-04-16T10:00:00+00:00",
+            )
 
             runner.runtime_mirror.update_progress(
                 search_run_id,
@@ -116,10 +128,13 @@ class JobSearchRunnerDbReadsTests(unittest.TestCase):
                 "analysis": {},
             }
 
+            analyzed_job = self._stamp_for_output(analyzed_job)
+
             runner.runtime_mirror.replace_candidate_company_pool(
                 candidate_id=candidate_id,
                 companies=[{"name": "Acme Hydrogen", "website": "https://acme.example"}],
             )
+
             runner.runtime_mirror.replace_bucket_jobs(
                 search_run_id=search_run_id,
                 candidate_id=candidate_id,
@@ -228,6 +243,9 @@ class JobSearchRunnerDbReadsTests(unittest.TestCase):
                     },
                 },
             }
+
+            first_job = self._stamp_for_output(first_job)
+            second_job = self._stamp_for_output(second_job)
 
             runner.runtime_mirror.replace_bucket_jobs(
                 search_run_id=first_run_id,
@@ -341,6 +359,9 @@ class JobSearchRunnerDbReadsTests(unittest.TestCase):
                     },
                 },
             }
+
+            all_only_job = self._stamp_for_output(all_only_job)
+            output_bucket_job = self._stamp_for_output(output_bucket_job)
 
             runner.runtime_mirror.replace_bucket_jobs(
                 search_run_id=first_run_id,

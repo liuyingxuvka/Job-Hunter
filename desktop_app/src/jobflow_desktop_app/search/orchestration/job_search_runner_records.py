@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from ..output.final_output import is_output_eligible
+from ..output.final_output import has_current_output_eligibility
 from ..run_state import extract_overall_score as state_extract_overall_score
 from . import runtime_config_builder
 from .job_result_i18n import normalize_display_i18n
@@ -75,10 +75,11 @@ def passes_displayable_recommendation_threshold(
         return False
     if not bool(analysis.get("recommend")):
         return False
-    if "eligibleForOutput" in analysis:
-        return bool(analysis.get("eligibleForOutput"))
     eligibility_config = config or {"analysis": {"recommendScoreThreshold": threshold}}
-    return is_output_eligible(item, eligibility_config)
+    return bool(analysis.get("eligibleForOutput")) and has_current_output_eligibility(
+        item,
+        eligibility_config,
+    )
 
 
 def filter_displayable_recommended_jobs(

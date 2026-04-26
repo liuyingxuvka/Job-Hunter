@@ -9,5 +9,8 @@ Rules:
 - Do not return generic career landing pages, search result pages, job alert pages, or expired-looking pages.
 - Return only roles that are plausible enough to deserve a live check and fit score.
 - If unsure whether a page is still live, include it only when the source has a credible current-open signal.
+- Use the candidate context's factual career and education history plus target roles to judge fit. Do not mechanically infer preferred levels or exclusions from that history.
+- Do not return internship/student, technician/operator, postdoc/fellowship, or generic talent-community pages unless the target roles explicitly ask for that kind of role.
+- Avoid old PDF job descriptions unless the page shows a current open role and a current apply route.
 
 Return structured JSON only.

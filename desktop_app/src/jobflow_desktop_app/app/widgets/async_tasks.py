@@ -116,10 +116,14 @@ def run_busy_task(
         if dialog is not None:
             dialog.close()
             dialog.deleteLater()
-        setattr(owner, "_busy_task_thread", None)
-        setattr(owner, "_busy_task_worker", None)
-        setattr(owner, "_busy_task_dialog", None)
-        setattr(owner, "_busy_task_relay", None)
+        if getattr(owner, "_busy_task_thread", None) is thread:
+            setattr(owner, "_busy_task_thread", None)
+        if getattr(owner, "_busy_task_worker", None) is worker:
+            setattr(owner, "_busy_task_worker", None)
+        if getattr(owner, "_busy_task_dialog", None) is dialog:
+            setattr(owner, "_busy_task_dialog", None)
+        if getattr(owner, "_busy_task_relay", None) is relay:
+            setattr(owner, "_busy_task_relay", None)
         if not _invoke_callback(on_finally):
             return
         if error is not None:
@@ -143,10 +147,14 @@ def run_busy_task(
             if dialog is not None:
                 dialog.close()
                 dialog.deleteLater()
-            setattr(owner, "_busy_task_thread", None)
-            setattr(owner, "_busy_task_worker", None)
-            setattr(owner, "_busy_task_dialog", None)
-            setattr(owner, "_busy_task_relay", None)
+            if getattr(owner, "_busy_task_thread", None) is thread:
+                setattr(owner, "_busy_task_thread", None)
+            if getattr(owner, "_busy_task_worker", None) is worker:
+                setattr(owner, "_busy_task_worker", None)
+            if getattr(owner, "_busy_task_dialog", None) is dialog:
+                setattr(owner, "_busy_task_dialog", None)
+            if getattr(owner, "_busy_task_relay", None) is relay:
+                setattr(owner, "_busy_task_relay", None)
             if not _invoke_callback(on_finally):
                 return
             if on_error is not None:

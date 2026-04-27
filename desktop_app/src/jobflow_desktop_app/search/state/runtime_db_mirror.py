@@ -11,7 +11,6 @@ from ...db.repositories.search_runtime import (
     CandidateSemanticProfileRepository,
     JobAnalysisRepository,
     JobRepository,
-    SearchRunJobRepository,
     SearchRunRepository,
 )
 from ...paths import _resolve_schema_path
@@ -28,7 +27,6 @@ class SearchRuntimeMirror:
         self.semantic_profiles = CandidateSemanticProfileRepository(database)
         self.jobs = JobRepository(database)
         self.analyses = JobAnalysisRepository(database)
-        self.run_jobs = SearchRunJobRepository(database)
         self.candidate_jobs = CandidateJobPoolRepository(database)
         self.run_state = SearchRunStateStore(
             search_runs=self.search_runs,
@@ -42,7 +40,6 @@ class SearchRuntimeMirror:
             candidate_companies=self.candidate_companies,
             jobs=self.jobs,
             analyses=self.analyses,
-            run_jobs=self.run_jobs,
             candidate_jobs=self.candidate_jobs,
         )
 
@@ -255,6 +252,12 @@ class SearchRuntimeMirror:
         self.artifacts.persist_job_display_i18n(
             candidate_id=candidate_id,
             updates=updates,
+        )
+
+    def mark_recommended_output_set(self, *, candidate_id: int, job_keys: set[str]) -> None:
+        self.artifacts.mark_recommended_output_set(
+            candidate_id=candidate_id,
+            job_keys=job_keys,
         )
 
 

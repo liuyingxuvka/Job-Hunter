@@ -6,9 +6,9 @@ from jobflow_desktop_app.db.repositories.search_runtime import (
     CandidateCompanyRepository,
     JobAnalysisRepository,
     JobRepository,
-    SearchRunJobRepository,
     SearchRunRepository,
 )
+from jobflow_desktop_app.db.repositories.pools import CandidateJobPoolRepository
 from jobflow_desktop_app.search.state.runtime_run_artifacts import SearchRunArtifactsStore
 
 try:
@@ -28,7 +28,7 @@ class RuntimeRunArtifactsTests(unittest.TestCase):
                 candidate_companies=CandidateCompanyRepository(context.database),
                 jobs=JobRepository(context.database),
                 analyses=JobAnalysisRepository(context.database),
-                run_jobs=SearchRunJobRepository(context.database),
+                candidate_jobs=CandidateJobPoolRepository(context.database),
             )
             search_run_id = search_runs.create_run(
                 candidate_id=candidate_id,

@@ -65,13 +65,6 @@ class JobReviewStateRecord:
     updated_at: str
 
 
-@dataclass(frozen=True)
-class SearchRunJobBucketCounts:
-    jobs_found_count: int = 0
-    jobs_scored_count: int = 0
-    jobs_recommended_count: int = 0
-
-
 class SearchRunRepository:
     def __init__(self, database: Database) -> None:
         self.database = database
@@ -1229,15 +1222,19 @@ class JobReviewStateRepository:
             row = connection.execute(
                 """
                 SELECT
-                  srj.job_id,
-                  srj.job_json
-                FROM search_run_jobs srj
-                JOIN search_runs sr ON sr.id = srj.search_run_id
-                WHERE srj.candidate_id = ? AND srj.job_key = ?
-                ORDER BY sr.id DESC, srj.updated_at DESC, srj.id DESC
+                  job_id,
+                  job_json
+                FROM candidate_jobs
+                WHERE candidate_id = ?
+                  AND (
+                    job_key = ?
+                    OR canonical_url = ?
+                    OR source_url = ?
+                  )
+                ORDER BY updated_at DESC, id DESC
                 LIMIT 1
                 """,
-                (int(candidate_id), _text(job_key)),
+                (int(candidate_id), _text(job_key), _text(job_key), _text(job_key)),
             ).fetchone()
         if row is not None and row["job_id"] is not None:
             return int(row["job_id"])
@@ -1296,180 +1293,6 @@ class JobReviewStateRepository:
         return bool(_text(state.get("status_code")) or bool(state.get("hidden")) or cls._row_has_manual_state(state))
 
 
-class SearchRunJobRepository:
-    def __init__(self, database: Database) -> None:
-        self.database = database
-
-    def replace_bucket(
-        self,
-        *,
-        search_run_id: int,
-        candidate_id: int,
-        job_bucket: str,
-        rows: list[dict[str, Any]],
-    ) -> None:
-        normalized_bucket = _text(job_bucket) or "jobs"
-        with self.database.session() as connection:
-            connection.execute(
-                "DELETE FROM search_run_jobs WHERE search_run_id = ? AND job_bucket = ?",
-                (int(search_run_id), normalized_bucket),
-            )
-            if not rows:
-                return
-            connection.executemany(
-                """
-                INSERT INTO search_run_jobs (
-                  search_run_id,
-                  candidate_id,
-                  job_id,
-                  job_key,
-                  job_bucket,
-                  canonical_url,
-                  source_url,
-                  title,
-                  company_name,
-                  location_text,
-                  date_found,
-                  match_score,
-                  analysis_completed,
-                  recommended,
-                  pending_resume,
-                  job_json,
-                  updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                """,
-                [
-                    (
-                        int(search_run_id),
-                        int(candidate_id),
-                        row.get("job_id"),
-                        _text(row.get("job_key")),
-                        normalized_bucket,
-                        _text(row.get("canonical_url")),
-                        _text(row.get("source_url")),
-                        _text(row.get("title")) or "Untitled job",
-                        _text(row.get("company_name")),
-                        _text(row.get("location_text")),
-                        _text(row.get("date_found")),
-                        row.get("match_score"),
-                        1 if bool(row.get("analysis_completed")) else 0,
-                        1
-                        if bool(row.get("recommended", normalized_bucket == "recommended"))
-                        else 0,
-                        1
-                        if bool(row.get("pending_resume", normalized_bucket == "resume_pending"))
-                        else 0,
-                        _text(row.get("job_json")),
-                    )
-                    for row in rows
-                    if _text(row.get("job_key"))
-                ],
-            )
-
-    def load_bucket_jobs(self, *, search_run_id: int, job_bucket: str) -> list[dict[str, Any]]:
-        with self.database.session() as connection:
-            rows = connection.execute(
-                """
-                SELECT job_json
-                FROM search_run_jobs
-                WHERE search_run_id = ? AND job_bucket = ?
-                ORDER BY updated_at ASC, id ASC
-                """,
-                (int(search_run_id), _text(job_bucket) or "jobs"),
-            ).fetchall()
-        jobs: list[dict[str, Any]] = []
-        for row in rows:
-            try:
-                payload = json.loads(_text(row["job_json"]))
-            except Exception:
-                continue
-            if isinstance(payload, dict):
-                jobs.append(payload)
-        return jobs
-
-    def persist_job_display_i18n(
-        self,
-        *,
-        candidate_id: int,
-        updates: dict[str, dict[str, Any]],
-    ) -> None:
-        if not updates:
-            return
-        normalized_updates = {
-            _text(job_key): payload
-            for job_key, payload in updates.items()
-            if _text(job_key) and isinstance(payload, dict)
-        }
-        if not normalized_updates:
-            return
-        changed_rows: list[tuple[str, int]] = []
-        with self.database.session() as connection:
-            rows = connection.execute(
-                """
-                SELECT id, job_key, job_json
-                FROM search_run_jobs
-                WHERE candidate_id = ?
-                """,
-                (int(candidate_id),),
-            ).fetchall()
-            for row in rows:
-                job_key = _text(row["job_key"])
-                payload_update = normalized_updates.get(job_key)
-                if payload_update is None:
-                    continue
-                try:
-                    payload = json.loads(_text(row["job_json"]))
-                except Exception:
-                    continue
-                if not isinstance(payload, dict):
-                    continue
-                payload["displayI18n"] = payload_update
-                changed_rows.append(
-                    (
-                        json.dumps(payload, ensure_ascii=False),
-                        int(row["id"]),
-                    )
-                )
-            if not changed_rows:
-                return
-            connection.executemany(
-                """
-                UPDATE search_run_jobs
-                SET job_json = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                """,
-                changed_rows,
-            )
-
-    def summarize_bucket_counts(self, *, search_run_id: int) -> SearchRunJobBucketCounts:
-        with self.database.session() as connection:
-            row = connection.execute(
-                """
-                SELECT
-                  SUM(CASE WHEN job_bucket = 'found' THEN 1 ELSE 0 END) AS jobs_found_count,
-                  SUM(
-                    CASE
-                      WHEN job_bucket = 'all' AND analysis_completed = 1 THEN 1
-                      ELSE 0
-                    END
-                  ) AS jobs_scored_count,
-                  COUNT(DISTINCT CASE WHEN recommended = 1 THEN job_key ELSE NULL END) AS jobs_recommended_count
-                FROM search_run_jobs
-                WHERE search_run_id = ?
-                """,
-                (int(search_run_id),),
-            ).fetchone()
-        if row is None:
-            return SearchRunJobBucketCounts()
-        return SearchRunJobBucketCounts(
-            jobs_found_count=int(row["jobs_found_count"] or 0),
-            jobs_scored_count=int(row["jobs_scored_count"] or 0),
-            jobs_recommended_count=int(row["jobs_recommended_count"] or 0),
-        )
-
-
 __all__ = [
     "CandidateCompanyRepository",
     "CandidateSemanticProfileRepository",
@@ -1477,8 +1300,6 @@ __all__ = [
     "JobReviewStateRecord",
     "JobReviewStateRepository",
     "JobRepository",
-    "SearchRunJobRepository",
-    "SearchRunJobBucketCounts",
     "SearchRunRepository",
     "SearchRunSnapshot",
 ]

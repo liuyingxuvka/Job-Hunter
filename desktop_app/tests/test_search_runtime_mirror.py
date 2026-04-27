@@ -204,16 +204,23 @@ class SearchRuntimeMirrorTests(unittest.TestCase):
                     """,
                     (candidate_id,),
                 ).fetchall()
-                bucket_rows = connection.execute(
+                pool_total = int(
+                    connection.execute(
+                        """
+                        SELECT COUNT(*) AS total
+                        FROM candidate_jobs
+                        WHERE candidate_id = ?
+                        """,
+                        (candidate_id,),
+                    ).fetchone()["total"]
+                )
+                legacy_bucket_table = connection.execute(
                     """
-                    SELECT job_bucket, COUNT(*) AS total
-                    FROM search_run_jobs
-                    WHERE search_run_id = ?
-                    GROUP BY job_bucket
-                    ORDER BY job_bucket
-                    """,
-                    (search_run_id,),
-                ).fetchall()
+                    SELECT name
+                    FROM sqlite_master
+                    WHERE type = 'table' AND name = 'search_run_jobs'
+                    """
+                ).fetchone()
                 jobs_total = int(
                     connection.execute("SELECT COUNT(*) AS total FROM jobs").fetchone()["total"]
                 )
@@ -229,17 +236,15 @@ class SearchRuntimeMirrorTests(unittest.TestCase):
                     (candidate_id,),
                 ).fetchone()
 
-            self.assertEqual(int(search_run["jobs_found_count"]), 1)
+            self.assertEqual(int(search_run["jobs_found_count"]), 2)
             self.assertEqual(int(search_run["jobs_scored_count"]), 1)
-            self.assertEqual(int(search_run["jobs_recommended_count"]), 1)
+            self.assertEqual(int(search_run["jobs_recommended_count"]), 0)
             self.assertEqual(
                 [str(row["company_name"]) for row in company_rows],
                 ["Acme Hydrogen"],
             )
-            self.assertEqual(
-                [(str(row["job_bucket"]), int(row["total"])) for row in bucket_rows],
-                [("all", 2), ("found", 1), ("recommended", 1), ("resume_pending", 1)],
-            )
+            self.assertEqual(pool_total, 2)
+            self.assertIsNone(legacy_bucket_table)
             self.assertEqual(jobs_total, 2)
             self.assertEqual(analyses_total, 1)
             self.assertEqual(str(semantic_row["source_signature"]), "sig-1")
@@ -331,16 +336,23 @@ class SearchRuntimeMirrorTests(unittest.TestCase):
                     """,
                     (search_run_id,),
                 ).fetchone()
-                bucket_rows = connection.execute(
+                pool_total = int(
+                    connection.execute(
+                        """
+                        SELECT COUNT(*) AS total
+                        FROM candidate_jobs
+                        WHERE candidate_id = ?
+                        """,
+                        (candidate_id,),
+                    ).fetchone()["total"]
+                )
+                legacy_bucket_table = connection.execute(
                     """
-                    SELECT job_bucket, COUNT(*) AS total
-                    FROM search_run_jobs
-                    WHERE search_run_id = ?
-                    GROUP BY job_bucket
-                    ORDER BY job_bucket
-                    """,
-                    (search_run_id,),
-                ).fetchall()
+                    SELECT name
+                    FROM sqlite_master
+                    WHERE type = 'table' AND name = 'search_run_jobs'
+                    """
+                ).fetchone()
                 company_rows = connection.execute(
                     """
                     SELECT company_name
@@ -351,13 +363,11 @@ class SearchRuntimeMirrorTests(unittest.TestCase):
                     (candidate_id,),
                 ).fetchall()
 
-            self.assertEqual(int(search_run["jobs_found_count"]), 1)
+            self.assertEqual(int(search_run["jobs_found_count"]), 2)
             self.assertEqual(int(search_run["jobs_scored_count"]), 1)
-            self.assertEqual(int(search_run["jobs_recommended_count"]), 1)
-            self.assertEqual(
-                [(str(row["job_bucket"]), int(row["total"])) for row in bucket_rows],
-                [("all", 2), ("found", 1)],
-            )
+            self.assertEqual(int(search_run["jobs_recommended_count"]), 0)
+            self.assertEqual(pool_total, 2)
+            self.assertIsNone(legacy_bucket_table)
             self.assertEqual(
                 [str(row["company_name"]) for row in company_rows],
                 ["Acme Hydrogen"],
@@ -429,24 +439,29 @@ class SearchRuntimeMirrorTests(unittest.TestCase):
                     """,
                     (search_run_id,),
                 ).fetchone()
-                bucket_rows = connection.execute(
+                pool_total = int(
+                    connection.execute(
+                        """
+                        SELECT COUNT(*) AS total
+                        FROM candidate_jobs
+                        WHERE candidate_id = ?
+                        """,
+                        (candidate_id,),
+                    ).fetchone()["total"]
+                )
+                legacy_bucket_table = connection.execute(
                     """
-                    SELECT job_bucket, COUNT(*) AS total
-                    FROM search_run_jobs
-                    WHERE search_run_id = ?
-                    GROUP BY job_bucket
-                    ORDER BY job_bucket
-                    """,
-                    (search_run_id,),
-                ).fetchall()
+                    SELECT name
+                    FROM sqlite_master
+                    WHERE type = 'table' AND name = 'search_run_jobs'
+                    """
+                ).fetchone()
 
-            self.assertEqual(int(search_run["jobs_found_count"]), 1)
+            self.assertEqual(int(search_run["jobs_found_count"]), 2)
             self.assertEqual(int(search_run["jobs_scored_count"]), 1)
-            self.assertEqual(int(search_run["jobs_recommended_count"]), 1)
-            self.assertEqual(
-                [(str(row["job_bucket"]), int(row["total"])) for row in bucket_rows],
-                [("all", 2), ("found", 1)],
-            )
+            self.assertEqual(int(search_run["jobs_recommended_count"]), 0)
+            self.assertEqual(pool_total, 2)
+            self.assertIsNone(legacy_bucket_table)
 
     def test_build_search_runtime_mirror_returns_none_without_db_and_mirror_with_db(self) -> None:
         schema_path = Path(__file__).resolve().parents[1] / "src" / "jobflow_desktop_app" / "db" / "schema.sql"

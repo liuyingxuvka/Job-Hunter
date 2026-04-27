@@ -353,7 +353,7 @@ class JobSearchRunnerUnitTests(unittest.TestCase):
             self.assertEqual(recommended_jobs[0]["company"], "Acme Hydrogen")
             self.assertTrue((run_dir / "jobs_recommended.xlsx").exists())
 
-    def test_refresh_python_recommended_output_writes_explicit_run_not_latest(self) -> None:
+    def test_refresh_python_recommended_output_updates_candidate_job_pool(self) -> None:
         with make_temp_context() as context:
             candidate_id = create_candidate(context, name="Demo Candidate")
             create_profile(context, candidate_id, name="Systems Engineer", is_active=True)
@@ -406,8 +406,8 @@ class JobSearchRunnerUnitTests(unittest.TestCase):
                 1,
             )
             self.assertEqual(
-                runner.runtime_mirror.load_run_bucket_jobs(search_run_id=new_run_id, job_bucket="recommended"),
-                [],
+                len(runner.runtime_mirror.load_run_bucket_jobs(search_run_id=new_run_id, job_bucket="recommended")),
+                1,
             )
 
     def test_refresh_python_recommended_output_keeps_localization_target_role_binding(self) -> None:
@@ -615,7 +615,7 @@ class JobSearchRunnerUnitTests(unittest.TestCase):
             )
             self.assertEqual(current_pending, [])
 
-    def test_write_resume_pending_jobs_writes_explicit_run_not_latest(self) -> None:
+    def test_write_resume_pending_jobs_reads_candidate_pool_across_runs(self) -> None:
         with make_temp_context() as context:
             candidate_id = create_candidate(context, name="Resume Pending Candidate")
             create_profile(context, candidate_id, name="Systems Engineer", is_active=True)
@@ -653,8 +653,8 @@ class JobSearchRunnerUnitTests(unittest.TestCase):
                 1,
             )
             self.assertEqual(
-                runner.runtime_mirror.load_run_bucket_jobs(search_run_id=new_run_id, job_bucket="resume_pending"),
-                [],
+                len(runner.runtime_mirror.load_run_bucket_jobs(search_run_id=new_run_id, job_bucket="resume_pending")),
+                1,
             )
 
 

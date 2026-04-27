@@ -104,6 +104,27 @@ def _migrate_candidate_companies_drop_pool_name(connection) -> None:
     )
 
 
+def _migrate_search_run_jobs_to_candidate_jobs(connection) -> None:
+    if not _table_exists(connection, "search_run_jobs"):
+        return
+    from .repositories.pools import CandidateJobPoolRepository
+
+    rows = connection.execute(
+        """
+        SELECT DISTINCT candidate_id
+        FROM search_run_jobs
+        WHERE candidate_id IS NOT NULL
+        ORDER BY candidate_id
+        """
+    ).fetchall()
+    for row in rows:
+        CandidateJobPoolRepository.backfill_candidate_from_legacy_connection(
+            connection,
+            int(row["candidate_id"]),
+        )
+    connection.execute("DROP TABLE search_run_jobs")
+
+
 def initialize_database(database: Database, schema_path: Path) -> None:
     schema_sql = Path(schema_path).read_text(encoding="utf-8")
     with database.session() as connection:
@@ -142,6 +163,7 @@ def initialize_database(database: Database, schema_path: Path) -> None:
         _ensure_column(connection, "candidate_companies", "last_searched_at", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(connection, "candidate_companies", "last_run_id", "INTEGER")
         _migrate_candidate_companies_drop_pool_name(connection)
+        _migrate_search_run_jobs_to_candidate_jobs(connection)
         connection.execute(
             """
             UPDATE job_review_states

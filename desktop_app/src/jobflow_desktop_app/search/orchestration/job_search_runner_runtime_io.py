@@ -6,6 +6,7 @@ from ...ai.role_recommendations import CandidateSemanticProfile
 from ..output.final_output import rebuild_recommended_output_payload
 from ..output.manual_tracking_store import overlay_manual_fields_onto_jobs
 from ..output.tracker_xlsx import write_tracker_xlsx
+from ..run_state import job_identity_key, job_item_key
 from ..state.runtime_run_locator import (
     candidate_id_from_run_dir,
     job_review_state_repository_for_run_dir,
@@ -286,6 +287,9 @@ def refresh_python_recommended_output_json(
             job_bucket="recommended",
             jobs=[],
         )
+        marker = getattr(runtime_mirror, "mark_recommended_output_set", None)
+        if callable(marker):
+            marker(candidate_id=candidate_id, job_keys=set())
         write_tracker_xlsx(
             xlsx_path=run_dir / "jobs_recommended.xlsx",
             jobs=[],
@@ -324,6 +328,18 @@ def refresh_python_recommended_output_json(
         job_bucket="recommended",
         jobs=payload_jobs if isinstance(payload_jobs, list) else [],
     )
+    marker = getattr(runtime_mirror, "mark_recommended_output_set", None)
+    if callable(marker):
+        marker(
+            candidate_id=candidate_id,
+            job_keys={
+                job_item_key(item) or job_identity_key(item)
+                for item in payload_jobs
+                if isinstance(item, dict)
+            }
+            if isinstance(payload_jobs, list)
+            else set(),
+        )
     if isinstance(payload_jobs, list):
         write_tracker_xlsx(
             xlsx_path=tracker_xlsx_path,

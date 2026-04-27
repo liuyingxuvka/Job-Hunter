@@ -34,6 +34,14 @@ def _loads_object(value: object) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _table_exists(connection: Any, table_name: str) -> bool:
+    row = connection.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (_text(table_name),),
+    ).fetchone()
+    return row is not None
+
+
 def _analysis_completed(analysis: dict[str, Any]) -> bool:
     if not analysis:
         return False
@@ -108,77 +116,95 @@ class CandidateJobPoolRepository:
 
     def backfill_candidate_from_legacy(self, candidate_id: int) -> CandidateJobPoolBackfillResult:
         with self.database.session() as connection:
-            runtime_config = self._latest_runtime_config(connection, candidate_id)
-            source_rows = connection.execute(
-                """
-                SELECT
-                  srj.search_run_id,
-                  srj.job_id,
-                  srj.job_key,
-                  srj.canonical_url,
-                  srj.source_url,
-                  srj.title,
-                  srj.company_name,
-                  srj.location_text,
-                  srj.date_found,
-                  srj.match_score,
-                  srj.analysis_completed,
-                  srj.recommended,
-                  srj.pending_resume,
-                  srj.job_json,
-                  srj.updated_at,
-                  COALESCE(j.canonical_url, '') AS persisted_canonical_url,
-                  COALESCE(j.title, '') AS persisted_title,
-                  COALESCE(j.company_name, '') AS persisted_company_name,
-                  COALESCE(j.location_text, '') AS persisted_location_text,
-                  COALESCE(j.date_posted, '') AS persisted_date_posted,
-                  COALESCE(j.last_seen_at, '') AS persisted_last_seen_at,
-                  cc.id AS candidate_company_id
-                FROM search_run_jobs srj
-                LEFT JOIN jobs j ON j.id = srj.job_id
-                LEFT JOIN candidate_companies cc
-                  ON cc.candidate_id = srj.candidate_id
-                 AND lower(cc.company_name) = lower(srj.company_name)
-                WHERE srj.candidate_id = ?
-                  AND srj.job_id IS NOT NULL
-                  AND COALESCE(srj.job_key, '') <> ''
-                ORDER BY srj.updated_at ASC, srj.id ASC
-                """,
-                (int(candidate_id),),
-            ).fetchall()
-            review_rows = connection.execute(
-                """
-                SELECT
-                  jrs.job_id,
-                  jrs.job_key,
-                  jrs.status_code,
-                  jrs.hidden,
-                  jrs.interest_level,
-                  jrs.applied_date,
-                  jrs.applied_status,
-                  jrs.response_status,
-                  jrs.not_interested,
-                  jrs.notes,
-                  COALESCE(j.canonical_url, '') AS canonical_url
-                FROM job_review_states jrs
-                LEFT JOIN jobs j ON j.id = jrs.job_id
-                WHERE jrs.candidate_id = ?
-                ORDER BY jrs.updated_at ASC, jrs.id ASC
-                """,
-                (int(candidate_id),),
-            ).fetchall()
-            rows = self._build_pool_rows(
+            return self.backfill_candidate_from_legacy_connection(
+                connection,
                 candidate_id,
-                source_rows,
-                review_rows,
-                runtime_config=runtime_config,
             )
-            self._upsert_pool_rows(connection, rows)
+
+    @classmethod
+    def backfill_candidate_from_legacy_connection(
+        cls,
+        connection: Any,
+        candidate_id: int,
+    ) -> CandidateJobPoolBackfillResult:
+        if not _table_exists(connection, "search_run_jobs"):
+            return CandidateJobPoolBackfillResult(
+                candidate_id=int(candidate_id),
+                source_rows=0,
+                upserted_jobs=0,
+                recommended_jobs=0,
+            )
+        runtime_config = cls._latest_runtime_config(connection, candidate_id)
+        source_rows = connection.execute(
+            """
+            SELECT
+              srj.search_run_id,
+              srj.job_id,
+              srj.job_key,
+              srj.canonical_url,
+              srj.source_url,
+              srj.title,
+              srj.company_name,
+              srj.location_text,
+              srj.date_found,
+              srj.match_score,
+              srj.analysis_completed,
+              srj.recommended,
+              srj.pending_resume,
+              srj.job_json,
+              srj.updated_at,
+              COALESCE(j.canonical_url, '') AS persisted_canonical_url,
+              COALESCE(j.title, '') AS persisted_title,
+              COALESCE(j.company_name, '') AS persisted_company_name,
+              COALESCE(j.location_text, '') AS persisted_location_text,
+              COALESCE(j.date_posted, '') AS persisted_date_posted,
+              COALESCE(j.last_seen_at, '') AS persisted_last_seen_at,
+              cc.id AS candidate_company_id
+            FROM search_run_jobs srj
+            LEFT JOIN jobs j ON j.id = srj.job_id
+            LEFT JOIN candidate_companies cc
+              ON cc.candidate_id = srj.candidate_id
+             AND lower(cc.company_name) = lower(srj.company_name)
+            WHERE srj.candidate_id = ?
+              AND srj.job_id IS NOT NULL
+              AND COALESCE(srj.job_key, '') <> ''
+            ORDER BY srj.updated_at ASC, srj.id ASC
+            """,
+            (int(candidate_id),),
+        ).fetchall()
+        review_rows = connection.execute(
+            """
+            SELECT
+              jrs.job_id,
+              jrs.job_key,
+              jrs.status_code,
+              jrs.hidden,
+              jrs.interest_level,
+              jrs.applied_date,
+              jrs.applied_status,
+              jrs.response_status,
+              jrs.not_interested,
+              jrs.notes,
+              COALESCE(j.canonical_url, '') AS canonical_url
+            FROM job_review_states jrs
+            LEFT JOIN jobs j ON j.id = jrs.job_id
+            WHERE jrs.candidate_id = ?
+            ORDER BY jrs.updated_at ASC, jrs.id ASC
+            """,
+            (int(candidate_id),),
+        ).fetchall()
+        rows = cls._build_pool_rows(
+            candidate_id,
+            source_rows,
+            review_rows,
+            runtime_config=runtime_config,
+        )
+        cls._upsert_pool_rows(connection, rows)
         return CandidateJobPoolBackfillResult(
             candidate_id=int(candidate_id),
             source_rows=len(source_rows),
             upserted_jobs=len(rows),
-            recommended_jobs=sum(1 for row in rows if self._row_is_visible_recommendation(row)),
+            recommended_jobs=sum(1 for row in rows if cls._row_is_visible_recommendation(row)),
         )
 
     def upsert_runtime_jobs(
@@ -207,6 +233,84 @@ class CandidateJobPoolRepository:
             )
         with self.database.session() as connection:
             self._upsert_pool_rows(connection, rows)
+
+    def mark_recommended_output_set(self, *, candidate_id: int, job_keys: set[str]) -> None:
+        normalized_keys = {_text(key) for key in job_keys if _text(key)}
+        with self.database.session() as connection:
+            if normalized_keys:
+                placeholders = ",".join("?" for _ in normalized_keys)
+                connection.execute(
+                    f"""
+                    UPDATE candidate_jobs
+                    SET output_status = 'reject',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE candidate_id = ?
+                      AND recommendation_status = 'pass'
+                      AND pool_status = 'active'
+                      AND job_key NOT IN ({placeholders})
+                    """,
+                    (int(candidate_id), *sorted(normalized_keys)),
+                )
+                return
+            connection.execute(
+                """
+                UPDATE candidate_jobs
+                SET output_status = 'reject',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE candidate_id = ?
+                  AND recommendation_status = 'pass'
+                  AND pool_status = 'active'
+                """,
+                (int(candidate_id),),
+            )
+
+    def persist_display_i18n(self, *, candidate_id: int, updates: dict[str, dict[str, Any]]) -> None:
+        normalized_updates = {
+            _text(key): value
+            for key, value in updates.items()
+            if _text(key) and isinstance(value, dict)
+        }
+        if not normalized_updates:
+            return
+        with self.database.session() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, job_key, canonical_url, source_url, job_json
+                FROM candidate_jobs
+                WHERE candidate_id = ?
+                """,
+                (int(candidate_id),),
+            ).fetchall()
+            update_rows: list[tuple[str, int]] = []
+            for row in rows:
+                aliases = [
+                    _text(row["job_key"]),
+                    _text(row["canonical_url"]),
+                    _text(row["source_url"]),
+                ]
+                display_i18n = next(
+                    (
+                        normalized_updates[alias]
+                        for alias in aliases
+                        if alias in normalized_updates
+                    ),
+                    None,
+                )
+                if display_i18n is None:
+                    continue
+                payload = _loads_object(row["job_json"])
+                payload["displayI18n"] = dict(display_i18n)
+                update_rows.append((json.dumps(payload, ensure_ascii=False), int(row["id"])))
+            if update_rows:
+                connection.executemany(
+                    """
+                    UPDATE candidate_jobs
+                    SET job_json = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    update_rows,
+                )
 
     def list_for_candidate(self, candidate_id: int) -> list[CandidateJobPoolRecord]:
         with self.database.session() as connection:

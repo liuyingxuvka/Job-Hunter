@@ -10,6 +10,14 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-04-27
+
+### Changed
+
+- Migrated job search runtime state from duplicate run buckets to the durable candidate job pool, so discovered, scored, pending, and final recommended jobs share one candidate-scoped source of truth.
+- Dropped the old `search_run_jobs` runtime table after startup backfill and moved legacy compatibility to a narrowly scoped migration path.
+- Rebuilt recommendation output refresh so only the final output set marks jobs as visible recommendations, while AI screening stamps remain preserved for audit/debugging.
+
 ## [0.8.4] - 2026-04-26
 
 ### Fixed

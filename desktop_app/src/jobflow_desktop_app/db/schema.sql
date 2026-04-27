@@ -209,31 +209,6 @@ CREATE TABLE IF NOT EXISTS candidate_jobs (
   UNIQUE (candidate_id, job_key)
 );
 
-CREATE TABLE IF NOT EXISTS search_run_jobs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  search_run_id INTEGER NOT NULL,
-  candidate_id INTEGER NOT NULL,
-  job_id INTEGER,
-  job_key TEXT NOT NULL,
-  job_bucket TEXT NOT NULL DEFAULT 'jobs',
-  canonical_url TEXT DEFAULT '',
-  source_url TEXT DEFAULT '',
-  title TEXT NOT NULL DEFAULT '',
-  company_name TEXT NOT NULL DEFAULT '',
-  location_text TEXT DEFAULT '',
-  date_found TEXT DEFAULT '',
-  match_score INTEGER,
-  analysis_completed INTEGER NOT NULL DEFAULT 0,
-  recommended INTEGER NOT NULL DEFAULT 0,
-  pending_resume INTEGER NOT NULL DEFAULT 0,
-  job_json TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (search_run_id) REFERENCES search_runs(id) ON DELETE CASCADE,
-  FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
-  FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL,
-  UNIQUE (search_run_id, job_bucket, job_key)
-);
-
 CREATE TABLE IF NOT EXISTS candidate_semantic_profiles (
   candidate_id INTEGER PRIMARY KEY,
   source_signature TEXT DEFAULT '',
@@ -260,5 +235,3 @@ CREATE INDEX IF NOT EXISTS idx_candidate_companies_candidate_id ON candidate_com
 CREATE INDEX IF NOT EXISTS idx_candidate_jobs_candidate_id ON candidate_jobs(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_candidate_jobs_job_id ON candidate_jobs(job_id);
 CREATE INDEX IF NOT EXISTS idx_candidate_jobs_statuses ON candidate_jobs(candidate_id, recommendation_status, output_status, trash_status);
-CREATE INDEX IF NOT EXISTS idx_search_run_jobs_run_bucket ON search_run_jobs(search_run_id, job_bucket);
-CREATE INDEX IF NOT EXISTS idx_search_run_jobs_candidate_id ON search_run_jobs(candidate_id);

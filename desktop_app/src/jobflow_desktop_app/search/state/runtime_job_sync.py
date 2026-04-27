@@ -1,16 +1,8 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
-from ..run_state import (
-    analysis_completed,
-    canonical_job_item_url,
-    extract_match_score,
-    job_identity_key,
-    job_item_key,
-    merge_job_item,
-)
+from ..run_state import job_identity_key, job_item_key, merge_job_item
 
 
 def _search_profile_id_from_job(item: dict[str, Any]) -> int | None:
@@ -81,54 +73,16 @@ def persist_runtime_jobs(
     return job_ids
 
 
-def build_runtime_bucket_rows(
-    *,
-    bucket: str,
-    items: list[dict[str, Any]],
-    job_ids: dict[str, int],
-) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        key = job_item_key(item) or job_identity_key(item)
-        if not key:
-            continue
-        analysis = item.get("analysis")
-        is_recommended = bucket == "recommended" or (
-            isinstance(analysis, dict) and bool(analysis.get("recommend"))
-        )
-        rows.append(
-            {
-                "job_id": job_ids.get(key),
-                "job_key": key,
-                "canonical_url": canonical_job_item_url(item),
-                "source_url": str(item.get("url") or "").strip(),
-                "title": str(item.get("title") or "").strip(),
-                "company_name": str(item.get("company") or "").strip(),
-                "location_text": str(item.get("location") or "").strip(),
-                "date_found": str(item.get("dateFound") or "").strip(),
-                "match_score": extract_match_score(analysis),
-                "analysis_completed": analysis_completed(analysis),
-                "recommended": is_recommended,
-                "pending_resume": bucket == "resume_pending",
-                "job_json": json.dumps(item, ensure_ascii=False),
-            }
-        )
-    return rows
-
-
-def write_runtime_job_buckets(
+def write_runtime_job_pool(
     *,
     search_run_id: int,
     candidate_id: int,
-    buckets: dict[str, list[dict[str, Any]]],
+    job_lists: list[list[dict[str, Any]]],
     jobs_repo: Any,
     analyses_repo: Any,
-    run_jobs_repo: Any,
-    candidate_jobs_repo: Any | None = None,
+    candidate_jobs_repo: Any | None,
 ) -> None:
-    jobs_by_key = merge_runtime_jobs(buckets.values())
+    jobs_by_key = merge_runtime_jobs(job_lists)
     job_ids = persist_runtime_jobs(
         jobs_by_key=jobs_by_key,
         jobs_repo=jobs_repo,
@@ -141,22 +95,10 @@ def write_runtime_job_buckets(
             jobs_by_key=jobs_by_key,
             job_ids=job_ids,
         )
-    for bucket, items in buckets.items():
-        run_jobs_repo.replace_bucket(
-            search_run_id=search_run_id,
-            candidate_id=candidate_id,
-            job_bucket=bucket,
-            rows=build_runtime_bucket_rows(
-                bucket=bucket,
-                items=items,
-                job_ids=job_ids,
-            ),
-        )
 
 
 __all__ = [
-    "build_runtime_bucket_rows",
     "merge_runtime_jobs",
     "persist_runtime_jobs",
-    "write_runtime_job_buckets",
+    "write_runtime_job_pool",
 ]

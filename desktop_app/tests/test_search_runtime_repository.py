@@ -10,7 +10,6 @@ except ImportError:  # pragma: no cover - direct discovery fallback
 from jobflow_desktop_app.db.repositories.search_runtime import (
     CandidateCompanyRepository,
     JobReviewStateRepository,
-    SearchRunJobRepository,
     SearchRunRepository,
 )
 from jobflow_desktop_app.app.pages.search_results_runtime_state import (
@@ -186,113 +185,6 @@ class SearchRuntimeRepositoryTests(unittest.TestCase):
                 ["Acme Hydrogen GmbH", "Beta Systems"],
             )
 
-    def test_search_run_job_repository_summarizes_bucket_counts_from_runtime_rows(self) -> None:
-        with make_temp_context() as context:
-            candidate_id = create_candidate(context)
-            runs = SearchRunRepository(context.database)
-            run_jobs = SearchRunJobRepository(context.database)
-            search_run_id = runs.create_run(
-                candidate_id=candidate_id,
-                run_dir="runtime/search_runs/test",
-            )
-
-            run_jobs.replace_bucket(
-                search_run_id=search_run_id,
-                candidate_id=candidate_id,
-                job_bucket="all",
-                rows=[
-                    {
-                        "job_key": "job-1",
-                        "title": "Hydrogen Systems Engineer",
-                        "analysis_completed": True,
-                        "recommended": True,
-                        "job_json": '{"title":"Hydrogen Systems Engineer"}',
-                    },
-                    {
-                        "job_key": "job-2",
-                        "title": "Battery Engineer",
-                        "analysis_completed": False,
-                        "recommended": False,
-                        "job_json": '{"title":"Battery Engineer"}',
-                    },
-                ],
-            )
-            run_jobs.replace_bucket(
-                search_run_id=search_run_id,
-                candidate_id=candidate_id,
-                job_bucket="found",
-                rows=[
-                    {
-                        "job_key": "job-1",
-                        "title": "Hydrogen Systems Engineer",
-                        "analysis_completed": True,
-                        "recommended": True,
-                        "job_json": '{"title":"Hydrogen Systems Engineer"}',
-                    }
-                ],
-            )
-            run_jobs.replace_bucket(
-                search_run_id=search_run_id,
-                candidate_id=candidate_id,
-                job_bucket="recommended",
-                rows=[
-                    {
-                        "job_key": "job-1",
-                        "title": "Hydrogen Systems Engineer",
-                        "analysis_completed": True,
-                        "recommended": True,
-                        "job_json": '{"title":"Hydrogen Systems Engineer"}',
-                    }
-                ],
-            )
-            run_jobs.replace_bucket(
-                search_run_id=search_run_id,
-                candidate_id=candidate_id,
-                job_bucket="resume_pending",
-                rows=[
-                    {
-                        "job_key": "job-2",
-                        "title": "Battery Engineer",
-                        "analysis_completed": False,
-                        "pending_resume": True,
-                        "job_json": '{"title":"Battery Engineer"}',
-                    }
-                ],
-            )
-
-            counts = run_jobs.summarize_bucket_counts(search_run_id=search_run_id)
-            with context.database.session() as connection:
-                row_flags = connection.execute(
-                    """
-                    SELECT job_bucket, recommended, pending_resume
-                    FROM search_run_jobs
-                    WHERE search_run_id = ? AND job_key IN (?, ?)
-                    ORDER BY job_bucket
-                    """,
-                    (search_run_id, "job-1", "job-2"),
-                ).fetchall()
-
-            self.assertEqual(counts.jobs_found_count, 1)
-            self.assertEqual(counts.jobs_scored_count, 1)
-            self.assertEqual(counts.jobs_recommended_count, 1)
-            self.assertEqual(
-                [
-                    (
-                        str(row["job_bucket"]),
-                        int(row["recommended"] or 0),
-                        int(row["pending_resume"] or 0),
-                    )
-                    for row in row_flags
-                ],
-                [
-                    ("all", 1, 0),
-                    ("all", 0, 0),
-                    ("found", 1, 0),
-                    ("recommended", 1, 0),
-                    ("resume_pending", 0, 1),
-                ],
-            )
-
     def test_search_run_repository_recent_for_candidate_returns_newest_first(self) -> None:
         with make_temp_context() as context:
             candidate_id = create_candidate(context)
@@ -352,7 +244,6 @@ class SearchRuntimeRepositoryTests(unittest.TestCase):
         with make_temp_context() as context:
             candidate_id = create_candidate(context)
             mirror = SearchRuntimeMirror(context.database)
-            run_jobs = SearchRunJobRepository(context.database)
             run_id = mirror.create_run(
                 candidate_id=candidate_id,
                 run_dir=context.paths.runtime_dir / "search_runs" / "candidate_test",
@@ -360,17 +251,17 @@ class SearchRuntimeRepositoryTests(unittest.TestCase):
                 current_stage="company_sources",
                 started_at="2026-04-21T10:00:00+00:00",
             )
-            run_jobs.replace_bucket(
+            mirror.replace_bucket_jobs(
                 search_run_id=run_id,
                 candidate_id=candidate_id,
-                job_bucket="found",
-                rows=[
+                job_bucket="all",
+                jobs=[
                     {
-                        "job_key": "job-1",
                         "title": "Localization Program Manager",
-                        "analysis_completed": False,
-                        "recommended": False,
-                        "job_json": '{"title":"Localization Program Manager"}',
+                        "company": "Acme",
+                        "url": "https://acme.example/jobs/loc-pm",
+                        "canonicalUrl": "https://acme.example/jobs/loc-pm",
+                        "analysis": {},
                     }
                 ],
             )
@@ -459,58 +350,38 @@ class SearchRuntimeRepositoryTests(unittest.TestCase):
             self.assertEqual(latest.current_stage, "done")
             self.assertEqual(latest.last_message, "Search cancelled by the user.")
 
-    def test_job_review_state_repository_resolves_job_id_by_newest_run_id(self) -> None:
+    def test_job_review_state_repository_resolves_job_id_from_candidate_job_pool(self) -> None:
         with make_temp_context() as context:
             candidate_id = create_candidate(context)
             create_profile(context, candidate_id, name="Systems Engineer", is_active=True)
-            runs = SearchRunRepository(context.database)
-            run_jobs = SearchRunJobRepository(context.database)
+            mirror = SearchRuntimeMirror(context.database)
             review_states = JobReviewStateRepository(context.database)
 
-            first_run_id = runs.create_run(
+            run_id = mirror.create_run(
                 candidate_id=candidate_id,
-                run_dir="runtime/search_runs/candidate_old",
+                run_dir=context.paths.runtime_dir / "search_runs" / "candidate_test",
+                status="success",
+                current_stage="done",
+                started_at="2026-04-27T10:00:00+00:00",
             )
-            second_run_id = runs.create_run(
+            mirror.replace_bucket_jobs(
+                search_run_id=run_id,
                 candidate_id=candidate_id,
-                run_dir="runtime/search_runs/candidate_new",
-            )
-
-            run_jobs.replace_bucket(
-                search_run_id=first_run_id,
-                candidate_id=candidate_id,
-                job_bucket="recommended",
-                rows=[
+                job_bucket="all",
+                jobs=[
                     {
-                        "job_key": "job-key",
-                        "title": "Older Run Job",
-                        "job_json": '{"title":"Older Run Job","canonicalUrl":"https://older.example/job"}',
+                        "title": "Fuel Cell Validation Engineer",
+                        "company": "Acme",
+                        "url": "https://newer.example/job",
+                        "canonicalUrl": "https://newer.example/job",
+                        "analysis": {},
                     }
                 ],
-            )
-            run_jobs.replace_bucket(
-                search_run_id=second_run_id,
-                candidate_id=candidate_id,
-                job_bucket="recommended",
-                rows=[
-                    {
-                        "job_key": "job-key",
-                        "title": "Newer Run Job",
-                        "job_json": '{"title":"Newer Run Job","canonicalUrl":"https://newer.example/job"}',
-                    }
-                ],
-            )
-
-            runs.update_counts(
-                first_run_id,
-                jobs_found_count=5,
-                jobs_scored_count=5,
-                jobs_recommended_count=5,
             )
 
             review_states.replace_candidate_review_state(
                 candidate_id=candidate_id,
-                status_by_job_key={"job-key": "saved"},
+                status_by_job_key={"https://newer.example/job": "saved"},
                 hidden_job_keys=set(),
             )
 
@@ -518,7 +389,7 @@ class SearchRuntimeRepositoryTests(unittest.TestCase):
                 (
                     record
                     for record in review_states.list_for_candidate(candidate_id)
-                    if record.job_key == "job-key"
+                    if record.job_key == "https://newer.example/job"
                 ),
                 None,
             )

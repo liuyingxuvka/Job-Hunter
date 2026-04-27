@@ -98,6 +98,16 @@ CREATE TABLE IF NOT EXISTS candidate_companies (
   company_name TEXT NOT NULL DEFAULT '',
   website TEXT DEFAULT '',
   careers_url TEXT DEFAULT '',
+  fit_status TEXT NOT NULL DEFAULT 'pending',
+  careers_url_status TEXT NOT NULL DEFAULT 'unknown',
+  job_fetch_status TEXT NOT NULL DEFAULT 'pending',
+  search_status TEXT NOT NULL DEFAULT 'pending',
+  pool_status TEXT NOT NULL DEFAULT 'active',
+  user_status TEXT NOT NULL DEFAULT '',
+  first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_searched_at TEXT NOT NULL DEFAULT '',
+  last_run_id INTEGER,
   company_json TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
@@ -152,6 +162,53 @@ CREATE TABLE IF NOT EXISTS job_review_states (
   UNIQUE (candidate_id, search_profile_id, job_id)
 );
 
+CREATE TABLE IF NOT EXISTS candidate_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  candidate_id INTEGER NOT NULL,
+  job_id INTEGER NOT NULL,
+  candidate_company_id INTEGER,
+  job_key TEXT NOT NULL,
+  canonical_url TEXT NOT NULL DEFAULT '',
+  source_url TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  company_name TEXT NOT NULL DEFAULT '',
+  location_text TEXT NOT NULL DEFAULT '',
+  date_found TEXT NOT NULL DEFAULT '',
+  discovery_status TEXT NOT NULL DEFAULT 'pending',
+  url_status TEXT NOT NULL DEFAULT 'unknown',
+  prefilter_status TEXT NOT NULL DEFAULT 'pending',
+  jd_fetch_status TEXT NOT NULL DEFAULT 'pending',
+  scoring_status TEXT NOT NULL DEFAULT 'pending',
+  recommendation_status TEXT NOT NULL DEFAULT 'pending',
+  output_status TEXT NOT NULL DEFAULT 'pending',
+  pool_status TEXT NOT NULL DEFAULT 'active',
+  user_status TEXT NOT NULL DEFAULT '',
+  application_status TEXT NOT NULL DEFAULT '',
+  trash_status TEXT NOT NULL DEFAULT 'active',
+  review_status_code TEXT NOT NULL DEFAULT '',
+  hidden INTEGER NOT NULL DEFAULT 0,
+  interest_level TEXT NOT NULL DEFAULT '',
+  applied_date TEXT NOT NULL DEFAULT '',
+  applied_status TEXT NOT NULL DEFAULT '',
+  response_status TEXT NOT NULL DEFAULT '',
+  not_interested INTEGER NOT NULL DEFAULT 0,
+  notes TEXT NOT NULL DEFAULT '',
+  rejection_reason TEXT NOT NULL DEFAULT '',
+  match_score INTEGER,
+  analysis_json TEXT NOT NULL DEFAULT '',
+  job_json TEXT NOT NULL DEFAULT '',
+  first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_run_id INTEGER,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
+  FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+  FOREIGN KEY (candidate_company_id) REFERENCES candidate_companies(id) ON DELETE SET NULL,
+  FOREIGN KEY (last_run_id) REFERENCES search_runs(id) ON DELETE SET NULL,
+  UNIQUE (candidate_id, job_id),
+  UNIQUE (candidate_id, job_key)
+);
+
 CREATE TABLE IF NOT EXISTS search_run_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   search_run_id INTEGER NOT NULL,
@@ -200,5 +257,8 @@ CREATE INDEX IF NOT EXISTS idx_job_analyses_profile_id ON job_analyses(search_pr
 CREATE INDEX IF NOT EXISTS idx_review_states_job_id ON job_review_states(job_id);
 CREATE INDEX IF NOT EXISTS idx_review_states_candidate_job_key ON job_review_states(candidate_id, job_key);
 CREATE INDEX IF NOT EXISTS idx_candidate_companies_candidate_id ON candidate_companies(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_candidate_jobs_candidate_id ON candidate_jobs(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_candidate_jobs_job_id ON candidate_jobs(job_id);
+CREATE INDEX IF NOT EXISTS idx_candidate_jobs_statuses ON candidate_jobs(candidate_id, recommendation_status, output_status, trash_status);
 CREATE INDEX IF NOT EXISTS idx_search_run_jobs_run_bucket ON search_run_jobs(search_run_id, job_bucket);
 CREATE INDEX IF NOT EXISTS idx_search_run_jobs_candidate_id ON search_run_jobs(candidate_id);

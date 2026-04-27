@@ -468,6 +468,50 @@ class CandidateCompanyRepository:
         candidate_id: int,
         companies: list[dict[str, Any]],
     ) -> None:
+        with self.database.session() as connection:
+            existing_rows = connection.execute(
+                """
+                SELECT
+                  company_key,
+                  company_name,
+                  website,
+                  careers_url,
+                  fit_status,
+                  careers_url_status,
+                  job_fetch_status,
+                  search_status,
+                  pool_status,
+                  user_status,
+                  first_seen_at,
+                  last_seen_at,
+                  last_searched_at,
+                  last_run_id,
+                  company_json
+                FROM candidate_companies
+                WHERE candidate_id = ?
+                """,
+                (int(candidate_id),),
+            ).fetchall()
+        existing_by_key = {
+            _text(row["company_key"]): {
+                "company_name": _text(row["company_name"]),
+                "website": _text(row["website"]),
+                "careers_url": _text(row["careers_url"]),
+                "fit_status": _text(row["fit_status"]) or "pending",
+                "careers_url_status": _text(row["careers_url_status"]) or "unknown",
+                "job_fetch_status": _text(row["job_fetch_status"]) or "pending",
+                "search_status": _text(row["search_status"]) or "pending",
+                "pool_status": _text(row["pool_status"]) or "active",
+                "user_status": _text(row["user_status"]),
+                "first_seen_at": _text(row["first_seen_at"]),
+                "last_seen_at": _text(row["last_seen_at"]),
+                "last_searched_at": _text(row["last_searched_at"]),
+                "last_run_id": row["last_run_id"],
+                "company_json": _text(row["company_json"]),
+            }
+            for row in existing_rows
+            if _text(row["company_key"])
+        }
         rows: list[tuple[object, ...]] = []
         for item in companies:
             if not isinstance(item, dict):
@@ -480,6 +524,13 @@ class CandidateCompanyRepository:
                 company_key = (website or careers_url or company_name.casefold()).casefold()
             if not company_key:
                 continue
+            existing = existing_by_key.get(company_key, {})
+            if not company_name:
+                company_name = _text(existing.get("company_name"))
+            if not website:
+                website = _text(existing.get("website"))
+            if not careers_url:
+                careers_url = _text(existing.get("careers_url"))
             rows.append(
                 (
                     int(candidate_id),
@@ -487,14 +538,20 @@ class CandidateCompanyRepository:
                     company_name,
                     website,
                     careers_url,
+                    _text(item.get("fitStatus")) or existing.get("fit_status") or "pending",
+                    _text(item.get("careersUrlStatus")) or existing.get("careers_url_status") or "unknown",
+                    _text(item.get("jobFetchStatus")) or existing.get("job_fetch_status") or "pending",
+                    _text(item.get("searchStatus")) or existing.get("search_status") or "pending",
+                    _text(item.get("poolStatus")) or existing.get("pool_status") or "active",
+                    _text(item.get("userStatus")) or existing.get("user_status") or "",
+                    existing.get("first_seen_at") or _now_iso(),
+                    _now_iso(),
+                    _text(item.get("lastSearchedAt")) or existing.get("last_searched_at") or "",
+                    item.get("lastRunId") or existing.get("last_run_id"),
                     json.dumps(item, ensure_ascii=False),
                 )
             )
         with self.database.session() as connection:
-            connection.execute(
-                "DELETE FROM candidate_companies WHERE candidate_id = ?",
-                (int(candidate_id),),
-            )
             if rows:
                 connection.executemany(
                     """
@@ -504,10 +561,35 @@ class CandidateCompanyRepository:
                       company_name,
                       website,
                       careers_url,
+                      fit_status,
+                      careers_url_status,
+                      job_fetch_status,
+                      search_status,
+                      pool_status,
+                      user_status,
+                      first_seen_at,
+                      last_seen_at,
+                      last_searched_at,
+                      last_run_id,
                       company_json,
                       updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(candidate_id, company_key) DO UPDATE SET
+                      company_name = excluded.company_name,
+                      website = excluded.website,
+                      careers_url = excluded.careers_url,
+                      fit_status = excluded.fit_status,
+                      careers_url_status = excluded.careers_url_status,
+                      job_fetch_status = excluded.job_fetch_status,
+                      search_status = excluded.search_status,
+                      pool_status = excluded.pool_status,
+                      user_status = excluded.user_status,
+                      last_seen_at = excluded.last_seen_at,
+                      last_searched_at = excluded.last_searched_at,
+                      last_run_id = excluded.last_run_id,
+                      company_json = excluded.company_json,
+                      updated_at = CURRENT_TIMESTAMP
                     """,
                     rows,
                 )
@@ -998,33 +1080,101 @@ class JobReviewStateRepository:
                 "DELETE FROM job_review_states WHERE candidate_id = ?",
                 (int(candidate_id),),
             )
+            if rows:
+                connection.executemany(
+                    """
+                    INSERT INTO job_review_states (
+                      candidate_id,
+                      search_profile_id,
+                      job_id,
+                      job_key,
+                      status_code,
+                      hidden,
+                      interest_level,
+                      applied_date,
+                      applied_status,
+                      response_status,
+                      not_interested,
+                      notes,
+                      updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """,
+                    [
+                        (
+                            int(row["candidate_id"]),
+                            int(row["search_profile_id"]),
+                            int(row["job_id"]),
+                            _text(row["job_key"]),
+                            _text(row.get("status_code")),
+                            1 if bool(row.get("hidden")) else 0,
+                            _text(row.get("interest_level")),
+                            _text(row.get("applied_date")),
+                            _text(row.get("applied_status")),
+                            _text(row.get("response_status")),
+                            1 if bool(row.get("not_interested")) else 0,
+                            _text(row.get("notes")),
+                        )
+                        for row in rows
+                        if _text(row.get("job_key"))
+                    ],
+                )
+        self._sync_candidate_job_pool_review_state(candidate_id, rows)
+
+    def _sync_candidate_job_pool_review_state(
+        self,
+        candidate_id: int,
+        rows: list[dict[str, Any]],
+    ) -> None:
+        with self.database.session() as connection:
+            table_exists = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'candidate_jobs'"
+            ).fetchone()
+            if table_exists is None:
+                return
+            connection.execute(
+                """
+                UPDATE candidate_jobs
+                SET user_status = '',
+                    application_status = '',
+                    trash_status = 'active',
+                    review_status_code = '',
+                    hidden = 0,
+                    interest_level = '',
+                    applied_date = '',
+                    applied_status = '',
+                    response_status = '',
+                    not_interested = 0,
+                    notes = '',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE candidate_id = ?
+                """,
+                (int(candidate_id),),
+            )
             if not rows:
                 return
             connection.executemany(
                 """
-                INSERT INTO job_review_states (
-                  candidate_id,
-                  search_profile_id,
-                  job_id,
-                  job_key,
-                  status_code,
-                  hidden,
-                  interest_level,
-                  applied_date,
-                  applied_status,
-                  response_status,
-                  not_interested,
-                  notes,
-                  updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                UPDATE candidate_jobs
+                SET user_status = ?,
+                    application_status = ?,
+                    trash_status = ?,
+                    review_status_code = ?,
+                    hidden = ?,
+                    interest_level = ?,
+                    applied_date = ?,
+                    applied_status = ?,
+                    response_status = ?,
+                    not_interested = ?,
+                    notes = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE candidate_id = ? AND job_id = ?
                 """,
                 [
                     (
-                        int(row["candidate_id"]),
-                        int(row["search_profile_id"]),
-                        int(row["job_id"]),
-                        _text(row["job_key"]),
+                        self._candidate_job_user_status(row),
+                        self._candidate_job_application_status(row),
+                        "trashed" if bool(row.get("hidden")) else "active",
                         _text(row.get("status_code")),
                         1 if bool(row.get("hidden")) else 0,
                         _text(row.get("interest_level")),
@@ -1033,11 +1183,26 @@ class JobReviewStateRepository:
                         _text(row.get("response_status")),
                         1 if bool(row.get("not_interested")) else 0,
                         _text(row.get("notes")),
+                        int(candidate_id),
+                        int(row["job_id"]),
                     )
                     for row in rows
-                    if _text(row.get("job_key"))
+                    if row.get("job_id")
                 ],
             )
+
+    @staticmethod
+    def _candidate_job_user_status(row: dict[str, Any]) -> str:
+        if bool(row.get("hidden")):
+            return "hidden"
+        if bool(row.get("not_interested")):
+            return "not_interested"
+        return _text(row.get("status_code"))
+
+    @staticmethod
+    def _candidate_job_application_status(row: dict[str, Any]) -> str:
+        status = _text(row.get("status_code"))
+        return status if status in {"applied", "offered", "rejected"} else ""
 
     def _default_profile_id(self, candidate_id: int) -> int | None:
         with self.database.session() as connection:

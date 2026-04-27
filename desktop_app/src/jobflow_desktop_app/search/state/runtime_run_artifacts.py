@@ -14,12 +14,14 @@ class SearchRunArtifactsStore:
         jobs,
         analyses,
         run_jobs,
+        candidate_jobs=None,
     ) -> None:
         self.search_runs = search_runs
         self.candidate_companies = candidate_companies
         self.jobs = jobs
         self.analyses = analyses
         self.run_jobs = run_jobs
+        self.candidate_jobs = candidate_jobs
 
     def load_latest_bucket_jobs(
         self,
@@ -89,6 +91,7 @@ class SearchRunArtifactsStore:
             jobs_repo=self.jobs,
             analyses_repo=self.analyses,
             run_jobs_repo=self.run_jobs,
+            candidate_jobs_repo=self.candidate_jobs,
         )
         if refresh_counts:
             self.refresh_counts(search_run_id=search_run_id)
@@ -120,6 +123,7 @@ class SearchRunArtifactsStore:
             jobs_repo=self.jobs,
             analyses_repo=self.analyses,
             run_jobs_repo=self.run_jobs,
+            candidate_jobs_repo=self.candidate_jobs,
         )
         self.candidate_companies.replace_candidate_pool(
             candidate_id=candidate_id,

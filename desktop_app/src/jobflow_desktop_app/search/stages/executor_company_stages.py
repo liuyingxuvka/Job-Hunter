@@ -52,6 +52,17 @@ def _count_qualified_new_companies(
     return qualified, pending
 
 
+def _load_candidate_job_pool_payloads(runtime_mirror, *, candidate_id: int) -> list[dict] | None:
+    loader = getattr(runtime_mirror, "load_candidate_job_pool_payloads", None)
+    if not callable(loader):
+        return None
+    return [
+        dict(item)
+        for item in loader(candidate_id=int(candidate_id))
+        if isinstance(item, dict)
+    ]
+
+
 def run_company_discovery_stage_db(
     *,
     runtime_mirror,
@@ -287,10 +298,15 @@ def run_company_sources_stage_db(
         )
 
     try:
-        existing_jobs = runtime_mirror.load_run_bucket_jobs(
-            search_run_id=search_run_id,
-            job_bucket="all",
+        existing_jobs = _load_candidate_job_pool_payloads(
+            runtime_mirror,
+            candidate_id=candidate_id,
         )
+        if existing_jobs is None:
+            existing_jobs = runtime_mirror.load_run_bucket_jobs(
+                search_run_id=search_run_id,
+                job_bucket="all",
+            )
         result = collect_supported_company_source_jobs(
             resolved_selected_companies,
             config=config,

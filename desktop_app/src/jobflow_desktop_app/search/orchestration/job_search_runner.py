@@ -248,6 +248,14 @@ class JobSearchRunner:
                 source_run = explicit_run
         if source_run is None:
             return []
+        pool_pending_loader = getattr(runtime_mirror, "load_candidate_pending_job_pool_payloads", None)
+        if callable(pool_pending_loader):
+            pending_jobs = pool_pending_loader(candidate_id=int(candidate_id))
+            return state_normalize_resume_pending_jobs(
+                pending_jobs,
+                run_dir,
+                current_run_id=current_run_id or source_run.search_run_id,
+            )
         pending_jobs = runtime_mirror.load_run_bucket_jobs(
             search_run_id=source_run.search_run_id,
             job_bucket="resume_pending",

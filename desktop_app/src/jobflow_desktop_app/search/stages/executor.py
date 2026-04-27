@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from ...ai.client import OpenAIResponsesClient
 from ..analysis.service import JobAnalysisService, ResponseRequestClient
 from ..companies.state import reconcile_company_pipeline_state_in_memory
-from ..run_state import collect_resume_pending_jobs_from_job_lists
+from ..run_state import collect_resume_pending_jobs_from_job_lists, normalize_resume_pending_jobs
 from ..state.work_unit_state import clear_work_unit_state, record_technical_failure
 from .executor_common import _build_openai_client, _config_mapping, _now_iso, _remaining_seconds, _tail_lines
 from .resume_pending_support import (
@@ -50,6 +50,79 @@ class PythonStageRunResult:
     stderr_tail: str
     cancelled: bool = False
     payload: dict[str, Any] | None = None
+
+
+def _load_candidate_pool_payloads(runtime_mirror: Any, *, method_name: str, candidate_id: int) -> list[dict[str, Any]] | None:
+    loader = getattr(runtime_mirror, method_name, None)
+    if not callable(loader):
+        return None
+    return [
+        dict(item)
+        for item in loader(candidate_id=int(candidate_id))
+        if isinstance(item, Mapping)
+    ]
+
+
+def _load_resume_pending_jobs_for_stage(
+    runtime_mirror: Any,
+    *,
+    search_run_id: int,
+    candidate_id: int,
+    run_dir: Path,
+) -> list[dict[str, Any]]:
+    pool_jobs = _load_candidate_pool_payloads(
+        runtime_mirror,
+        method_name="load_candidate_pending_job_pool_payloads",
+        candidate_id=candidate_id,
+    )
+    if pool_jobs is not None:
+        return normalize_resume_pending_jobs(
+            pool_jobs,
+            run_dir,
+            current_run_id=search_run_id,
+        )
+    return runtime_mirror.load_run_bucket_jobs(
+        search_run_id=search_run_id,
+        job_bucket="resume_pending",
+    )
+
+
+def _load_resume_existing_jobs_for_stage(
+    runtime_mirror: Any,
+    *,
+    search_run_id: int,
+    candidate_id: int,
+) -> list[dict[str, Any]]:
+    pool_jobs = _load_candidate_pool_payloads(
+        runtime_mirror,
+        method_name="load_candidate_job_pool_payloads",
+        candidate_id=candidate_id,
+    )
+    if pool_jobs is not None:
+        return pool_jobs
+    return runtime_mirror.load_run_bucket_jobs(
+        search_run_id=search_run_id,
+        job_bucket="all",
+    )
+
+
+def _load_resume_recommended_jobs_for_stage(
+    runtime_mirror: Any,
+    *,
+    search_run_id: int,
+    candidate_id: int,
+) -> list[dict[str, Any]]:
+    pool_jobs = _load_candidate_pool_payloads(
+        runtime_mirror,
+        method_name="load_candidate_recommended_job_pool_payloads",
+        candidate_id=candidate_id,
+    )
+    if pool_jobs is not None:
+        return pool_jobs
+    return runtime_mirror.load_run_bucket_jobs(
+        search_run_id=search_run_id,
+        job_bucket="recommended",
+    )
 
 
 def _capped_remaining_seconds(deadline: float | None, cap_seconds: int) -> int:
@@ -102,9 +175,11 @@ class PythonStageExecutor:
                 stderr_tail="",
                 cancelled=True,
             )
-        pending_jobs = runtime_mirror.load_run_bucket_jobs(
+        pending_jobs = _load_resume_pending_jobs_for_stage(
+            runtime_mirror,
             search_run_id=search_run_id,
-            job_bucket="resume_pending",
+            candidate_id=candidate_id,
+            run_dir=run_dir,
         )
         if not pending_jobs:
             return PythonStageRunResult(
@@ -132,13 +207,15 @@ class PythonStageExecutor:
                 stderr_tail=str(exc),
             )
 
-        existing_jobs = runtime_mirror.load_run_bucket_jobs(
+        existing_jobs = _load_resume_existing_jobs_for_stage(
+            runtime_mirror,
             search_run_id=search_run_id,
-            job_bucket="all",
+            candidate_id=candidate_id,
         )
-        recommended_jobs = runtime_mirror.load_run_bucket_jobs(
+        recommended_jobs = _load_resume_recommended_jobs_for_stage(
+            runtime_mirror,
             search_run_id=search_run_id,
-            job_bucket="recommended",
+            candidate_id=candidate_id,
         )
         working_jobs = _merge_jobs_for_resume(existing_jobs, pending_jobs)
         candidate_profile = _load_candidate_profile_payload(config, run_dir)

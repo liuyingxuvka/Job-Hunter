@@ -124,6 +124,17 @@ class _DirectStageJobState:
     seen_keys: set[str]
 
 
+def _load_candidate_pool_payloads(runtime_mirror: Any, *, method_name: str, candidate_id: int) -> list[dict[str, Any]] | None:
+    loader = getattr(runtime_mirror, method_name, None)
+    if not callable(loader):
+        return None
+    return [
+        dict(item)
+        for item in loader(candidate_id=int(candidate_id))
+        if isinstance(item, Mapping)
+    ]
+
+
 def run_direct_job_discovery_stage_db(
     *,
     runtime_mirror,
@@ -352,17 +363,39 @@ def _load_direct_stage_job_state(
     search_run_id: int,
     candidate_id: int,
 ) -> _DirectStageJobState:
-    existing_all_jobs = runtime_mirror.load_run_bucket_jobs(
-        search_run_id=search_run_id,
-        job_bucket="all",
+    pool_all_jobs = _load_candidate_pool_payloads(
+        runtime_mirror,
+        method_name="load_candidate_job_pool_payloads",
+        candidate_id=candidate_id,
     )
-    existing_found_jobs = runtime_mirror.load_run_bucket_jobs(
-        search_run_id=search_run_id,
-        job_bucket="found",
+    pool_recommended_jobs = _load_candidate_pool_payloads(
+        runtime_mirror,
+        method_name="load_candidate_recommended_job_pool_payloads",
+        candidate_id=candidate_id,
     )
-    existing_recommended_jobs = runtime_mirror.load_run_bucket_jobs(
-        search_run_id=search_run_id,
-        job_bucket="recommended",
+    existing_all_jobs = (
+        pool_all_jobs
+        if pool_all_jobs is not None
+        else runtime_mirror.load_run_bucket_jobs(
+            search_run_id=search_run_id,
+            job_bucket="all",
+        )
+    )
+    existing_recommended_jobs = (
+        pool_recommended_jobs
+        if pool_recommended_jobs is not None
+        else runtime_mirror.load_run_bucket_jobs(
+            search_run_id=search_run_id,
+            job_bucket="recommended",
+        )
+    )
+    existing_found_jobs = (
+        []
+        if pool_all_jobs is not None
+        else runtime_mirror.load_run_bucket_jobs(
+            search_run_id=search_run_id,
+            job_bucket="found",
+        )
     )
     historical_jobs = _load_historical_jobs(runtime_mirror, candidate_id)
     return _DirectStageJobState(

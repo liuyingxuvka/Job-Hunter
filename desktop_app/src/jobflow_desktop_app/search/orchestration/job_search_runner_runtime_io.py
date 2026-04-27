@@ -63,6 +63,11 @@ def _load_cumulative_bucket_jobs(
 
 
 def _load_cumulative_main_jobs(runner, candidate_id: int) -> list[dict]:
+    pool_loader = getattr(runner.runtime_mirror, "load_candidate_job_pool_payloads", None)
+    if callable(pool_loader):
+        jobs = pool_loader(candidate_id=int(candidate_id))
+        if jobs:
+            return jobs
     return _load_cumulative_bucket_jobs(
         runner,
         candidate_id,
@@ -85,14 +90,20 @@ def load_recommended_jobs(runner, candidate_id: int, *, job_result_factory) -> l
     if runner.runtime_mirror is None:
         return []
     config = _latest_runtime_config(runner, candidate_id)
-    jobs = _displayable_recommended_jobs(
-        _load_cumulative_bucket_jobs(
-            runner,
-            candidate_id,
-            buckets=("all", "recommended"),
-        ),
-        config=config,
-    )
+    pool_loader = getattr(runner.runtime_mirror, "load_candidate_recommended_job_pool_payloads", None)
+    if callable(pool_loader):
+        jobs = pool_loader(candidate_id=int(candidate_id))
+    else:
+        jobs = []
+    if not jobs:
+        jobs = _displayable_recommended_jobs(
+            _load_cumulative_bucket_jobs(
+                runner,
+                candidate_id,
+                buckets=("all", "recommended"),
+            ),
+            config=config,
+        )
     if not jobs:
         return []
     jobs = job_result_i18n.enrich_job_display_i18n(runner, candidate_id, jobs)
@@ -125,6 +136,34 @@ def load_search_stats(runner, candidate_id: int) -> SearchStats:
     if runner.runtime_mirror is None:
         return SearchStats()
     config = _latest_runtime_config(runner, candidate_id)
+    pool_summary_loader = getattr(runner.runtime_mirror, "summarize_candidate_job_pool", None)
+    pool_summary = None
+    if callable(pool_summary_loader):
+        pool_summary = pool_summary_loader(candidate_id=int(candidate_id))
+    if pool_summary is not None and getattr(pool_summary, "total_jobs", 0):
+        candidate_company_pool_count = runner.runtime_mirror.count_candidate_company_pool(
+            int(candidate_id)
+        )
+        pool_jobs_loader = getattr(runner.runtime_mirror, "load_candidate_job_pool_payloads", None)
+        pool_jobs = pool_jobs_loader(candidate_id=int(candidate_id)) if callable(pool_jobs_loader) else []
+        discovered_companies = {
+            str(item.get("company") or "").strip().casefold()
+            for item in pool_jobs
+            if isinstance(item, dict) and str(item.get("company") or "").strip()
+        }
+        return SearchStats(
+            discovered_job_count=int(getattr(pool_summary, "total_jobs", 0) or 0),
+            discovered_company_count=len(discovered_companies),
+            scored_job_count=int(getattr(pool_summary, "scored_jobs", 0) or 0),
+            recommended_job_count=int(getattr(pool_summary, "recommended_jobs", 0) or 0),
+            pending_resume_count=int(getattr(pool_summary, "pending_jobs", 0) or 0),
+            candidate_company_pool_count=candidate_company_pool_count,
+            signal_hit_job_count=0,
+            main_discovered_job_count=int(getattr(pool_summary, "total_jobs", 0) or 0),
+            main_scored_job_count=int(getattr(pool_summary, "scored_jobs", 0) or 0),
+            displayable_result_count=int(getattr(pool_summary, "recommended_jobs", 0) or 0),
+            main_pending_analysis_count=int(getattr(pool_summary, "pending_jobs", 0) or 0),
+        )
     main_jobs = _load_cumulative_main_jobs(runner, candidate_id)
     pending_jobs = runner.runtime_mirror.load_latest_bucket_jobs(
         candidate_id=int(candidate_id),
@@ -210,22 +249,36 @@ def refresh_python_recommended_output_json(
                 search_run_id = None
     if runtime_mirror is None or search_run_id is None or candidate_id is None:
         return 0
-    all_jobs = (
-        runtime_mirror.load_run_bucket_jobs(
-            search_run_id=search_run_id,
-            job_bucket="all",
-        )
-        if search_run_id is not None
-        else []
+    pool_loader = getattr(runtime_mirror, "load_candidate_job_pool_payloads", None)
+    recommended_pool_loader = getattr(
+        runtime_mirror,
+        "load_candidate_recommended_job_pool_payloads",
+        None,
     )
+    all_jobs = pool_loader(candidate_id=int(candidate_id)) if callable(pool_loader) else []
     existing_recommended_jobs = (
-        runtime_mirror.load_run_bucket_jobs(
-            search_run_id=search_run_id,
-            job_bucket="recommended",
-        )
-        if search_run_id is not None
+        recommended_pool_loader(candidate_id=int(candidate_id))
+        if callable(recommended_pool_loader)
         else []
     )
+    if not all_jobs:
+        all_jobs = (
+            runtime_mirror.load_run_bucket_jobs(
+                search_run_id=search_run_id,
+                job_bucket="all",
+            )
+            if search_run_id is not None
+            else []
+        )
+    if not existing_recommended_jobs:
+        existing_recommended_jobs = (
+            runtime_mirror.load_run_bucket_jobs(
+                search_run_id=search_run_id,
+                job_bucket="recommended",
+            )
+            if search_run_id is not None
+            else []
+        )
     if not all_jobs and not existing_recommended_jobs:
         runtime_mirror.replace_bucket_jobs(
             search_run_id=search_run_id,

@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from ...db.bootstrap import initialize_database
 from ...db.connection import Database
+from ...db.repositories.pools import CandidateJobPoolRepository
 from ...db.repositories.search_runtime import (
     CandidateCompanyRepository,
     CandidateSemanticProfileRepository,
@@ -12,6 +14,7 @@ from ...db.repositories.search_runtime import (
     SearchRunJobRepository,
     SearchRunRepository,
 )
+from ...paths import _resolve_schema_path
 from .runtime_candidate_state import SearchRuntimeCandidateStateStore
 from .runtime_run_artifacts import SearchRunArtifactsStore
 from .runtime_run_state import SearchRunStateStore
@@ -26,6 +29,7 @@ class SearchRuntimeMirror:
         self.jobs = JobRepository(database)
         self.analyses = JobAnalysisRepository(database)
         self.run_jobs = SearchRunJobRepository(database)
+        self.candidate_jobs = CandidateJobPoolRepository(database)
         self.run_state = SearchRunStateStore(
             search_runs=self.search_runs,
         )
@@ -39,6 +43,7 @@ class SearchRuntimeMirror:
             jobs=self.jobs,
             analyses=self.analyses,
             run_jobs=self.run_jobs,
+            candidate_jobs=self.candidate_jobs,
         )
 
     def create_run(
@@ -152,6 +157,36 @@ class SearchRuntimeMirror:
             candidate_id=candidate_id,
         )
 
+    def backfill_candidate_job_pool_from_legacy(self, candidate_id: int) -> Any:
+        return self.candidate_jobs.backfill_candidate_from_legacy(candidate_id)
+
+    def load_candidate_job_pool_payloads(self, *, candidate_id: int) -> list[dict[str, Any]]:
+        jobs = self.candidate_jobs.load_job_payloads_for_candidate(candidate_id)
+        if jobs:
+            return jobs
+        self.candidate_jobs.backfill_candidate_from_legacy(candidate_id)
+        return self.candidate_jobs.load_job_payloads_for_candidate(candidate_id)
+
+    def load_candidate_recommended_job_pool_payloads(self, *, candidate_id: int) -> list[dict[str, Any]]:
+        jobs = self.candidate_jobs.load_recommended_payloads_for_candidate(candidate_id)
+        if jobs:
+            return jobs
+        self.candidate_jobs.backfill_candidate_from_legacy(candidate_id)
+        return self.candidate_jobs.load_recommended_payloads_for_candidate(candidate_id)
+
+    def load_candidate_pending_job_pool_payloads(self, *, candidate_id: int) -> list[dict[str, Any]]:
+        summary = self.candidate_jobs.summarize_candidate(candidate_id)
+        if not summary.total_jobs:
+            self.candidate_jobs.backfill_candidate_from_legacy(candidate_id)
+        return self.candidate_jobs.load_pending_payloads_for_candidate(candidate_id)
+
+    def summarize_candidate_job_pool(self, *, candidate_id: int) -> Any:
+        summary = self.candidate_jobs.summarize_candidate(candidate_id)
+        if summary.total_jobs:
+            return summary
+        self.candidate_jobs.backfill_candidate_from_legacy(candidate_id)
+        return self.candidate_jobs.summarize_candidate(candidate_id)
+
     def replace_candidate_company_pool(
         self,
         *,
@@ -227,7 +262,11 @@ def build_search_runtime_mirror(project_root: Path) -> SearchRuntimeMirror | Non
     db_path = Path(project_root) / "runtime" / "data" / "jobflow_desktop.db"
     if not db_path.exists():
         return None
-    return SearchRuntimeMirror(Database(db_path))
+    database = Database(db_path)
+    schema_path = _resolve_schema_path(Path(project_root))
+    if schema_path.exists():
+        initialize_database(database, schema_path)
+    return SearchRuntimeMirror(database)
 
 
 __all__ = [

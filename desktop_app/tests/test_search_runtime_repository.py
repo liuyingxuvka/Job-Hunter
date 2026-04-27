@@ -91,6 +91,101 @@ class SearchRuntimeRepositoryTests(unittest.TestCase):
                 ["Acme Hydrogen", "Beta Systems"],
             )
 
+    def test_candidate_company_repository_preserves_pool_stamps_on_replace(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context)
+            repository = CandidateCompanyRepository(context.database)
+            repository.replace_candidate_pool(
+                candidate_id=candidate_id,
+                companies=[
+                    {
+                        "name": "Acme Hydrogen",
+                        "website": "https://acme.example",
+                        "companyKey": "acme",
+                    }
+                ],
+            )
+            with context.database.session() as connection:
+                connection.execute(
+                    """
+                    UPDATE candidate_companies
+                    SET fit_status = 'pass',
+                        careers_url_status = 'pass',
+                        job_fetch_status = 'pass',
+                        search_status = 'cooldown',
+                        user_status = 'focus'
+                    WHERE candidate_id = ? AND company_key = ?
+                    """,
+                    (candidate_id, "acme"),
+                )
+
+            repository.replace_candidate_pool(
+                candidate_id=candidate_id,
+                companies=[
+                    {
+                        "name": "Acme Hydrogen",
+                        "website": "https://acme.example",
+                        "companyKey": "acme",
+                        "careersUrl": "https://acme.example/careers",
+                    }
+                ],
+            )
+
+            with context.database.session() as connection:
+                row = connection.execute(
+                    """
+                    SELECT fit_status, careers_url_status, job_fetch_status, search_status, user_status
+                    FROM candidate_companies
+                    WHERE candidate_id = ? AND company_key = ?
+                    """,
+                    (candidate_id, "acme"),
+                ).fetchone()
+
+            self.assertIsNotNone(row)
+            assert row is not None
+            self.assertEqual(str(row["fit_status"]), "pass")
+            self.assertEqual(str(row["careers_url_status"]), "pass")
+            self.assertEqual(str(row["job_fetch_status"]), "pass")
+            self.assertEqual(str(row["search_status"]), "cooldown")
+            self.assertEqual(str(row["user_status"]), "focus")
+
+    def test_candidate_company_repository_keeps_omitted_companies_as_durable_pool_rows(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context)
+            repository = CandidateCompanyRepository(context.database)
+            repository.replace_candidate_pool(
+                candidate_id=candidate_id,
+                companies=[
+                    {
+                        "name": "Acme Hydrogen",
+                        "website": "https://acme.example",
+                        "companyKey": "acme",
+                    },
+                    {
+                        "name": "Beta Systems",
+                        "website": "https://beta.example",
+                        "companyKey": "beta",
+                    },
+                ],
+            )
+
+            repository.replace_candidate_pool(
+                candidate_id=candidate_id,
+                companies=[
+                    {
+                        "name": "Acme Hydrogen GmbH",
+                        "website": "https://acme.example",
+                        "companyKey": "acme",
+                    }
+                ],
+            )
+
+            self.assertEqual(repository.count_candidate_pool(candidate_id=candidate_id), 2)
+            self.assertEqual(
+                sorted(item.get("name") for item in repository.load_candidate_pool(candidate_id=candidate_id)),
+                ["Acme Hydrogen GmbH", "Beta Systems"],
+            )
+
     def test_search_run_job_repository_summarizes_bucket_counts_from_runtime_rows(self) -> None:
         with make_temp_context() as context:
             candidate_id = create_candidate(context)

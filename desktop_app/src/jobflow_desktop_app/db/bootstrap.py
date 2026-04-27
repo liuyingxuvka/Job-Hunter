@@ -37,6 +37,16 @@ def _migrate_candidate_companies_drop_pool_name(connection) -> None:
           company_name TEXT NOT NULL DEFAULT '',
           website TEXT DEFAULT '',
           careers_url TEXT DEFAULT '',
+          fit_status TEXT NOT NULL DEFAULT 'pending',
+          careers_url_status TEXT NOT NULL DEFAULT 'unknown',
+          job_fetch_status TEXT NOT NULL DEFAULT 'pending',
+          search_status TEXT NOT NULL DEFAULT 'pending',
+          pool_status TEXT NOT NULL DEFAULT 'active',
+          user_status TEXT NOT NULL DEFAULT '',
+          first_seen_at TEXT NOT NULL DEFAULT '',
+          last_seen_at TEXT NOT NULL DEFAULT '',
+          last_searched_at TEXT NOT NULL DEFAULT '',
+          last_run_id INTEGER,
           company_json TEXT NOT NULL DEFAULT '',
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
@@ -52,6 +62,16 @@ def _migrate_candidate_companies_drop_pool_name(connection) -> None:
           company_name,
           website,
           careers_url,
+          fit_status,
+          careers_url_status,
+          job_fetch_status,
+          search_status,
+          pool_status,
+          user_status,
+          first_seen_at,
+          last_seen_at,
+          last_searched_at,
+          last_run_id,
           company_json,
           updated_at
         )
@@ -61,6 +81,16 @@ def _migrate_candidate_companies_drop_pool_name(connection) -> None:
           company_name,
           website,
           careers_url,
+          'pending',
+          'unknown',
+          'pending',
+          'pending',
+          'active',
+          '',
+          COALESCE(NULLIF(updated_at, ''), CURRENT_TIMESTAMP),
+          COALESCE(NULLIF(updated_at, ''), CURRENT_TIMESTAMP),
+          '',
+          NULL,
           company_json,
           updated_at
         FROM candidate_companies_legacy
@@ -101,6 +131,16 @@ def initialize_database(database: Database, schema_path: Path) -> None:
         _ensure_column(connection, "job_review_states", "job_key", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(connection, "job_review_states", "status_code", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(connection, "job_review_states", "hidden", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(connection, "candidate_companies", "fit_status", "TEXT NOT NULL DEFAULT 'pending'")
+        _ensure_column(connection, "candidate_companies", "careers_url_status", "TEXT NOT NULL DEFAULT 'unknown'")
+        _ensure_column(connection, "candidate_companies", "job_fetch_status", "TEXT NOT NULL DEFAULT 'pending'")
+        _ensure_column(connection, "candidate_companies", "search_status", "TEXT NOT NULL DEFAULT 'pending'")
+        _ensure_column(connection, "candidate_companies", "pool_status", "TEXT NOT NULL DEFAULT 'active'")
+        _ensure_column(connection, "candidate_companies", "user_status", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(connection, "candidate_companies", "first_seen_at", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(connection, "candidate_companies", "last_seen_at", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(connection, "candidate_companies", "last_searched_at", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(connection, "candidate_companies", "last_run_id", "INTEGER")
         _migrate_candidate_companies_drop_pool_name(connection)
         connection.execute(
             """

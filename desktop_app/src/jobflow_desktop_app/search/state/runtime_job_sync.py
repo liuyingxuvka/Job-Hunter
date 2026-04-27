@@ -126,6 +126,7 @@ def write_runtime_job_buckets(
     jobs_repo: Any,
     analyses_repo: Any,
     run_jobs_repo: Any,
+    candidate_jobs_repo: Any | None = None,
 ) -> None:
     jobs_by_key = merge_runtime_jobs(buckets.values())
     job_ids = persist_runtime_jobs(
@@ -133,6 +134,13 @@ def write_runtime_job_buckets(
         jobs_repo=jobs_repo,
         analyses_repo=analyses_repo,
     )
+    if candidate_jobs_repo is not None and hasattr(candidate_jobs_repo, "upsert_runtime_jobs"):
+        candidate_jobs_repo.upsert_runtime_jobs(
+            candidate_id=candidate_id,
+            search_run_id=search_run_id,
+            jobs_by_key=jobs_by_key,
+            job_ids=job_ids,
+        )
     for bucket, items in buckets.items():
         run_jobs_repo.replace_bucket(
             search_run_id=search_run_id,

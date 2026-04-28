@@ -18,6 +18,7 @@ desktop_app/runtime/logs/**
 !desktop_app/runtime/logs/.gitkeep
 desktop_app/runtime/search_runs/**
 !desktop_app/runtime/search_runs/.gitkeep
+desktop_app/runtime/updates/**
 
 # Local desktop QA runs, private user runtime pointers, logs, screenshots, and generated artifacts.
 runtime/**

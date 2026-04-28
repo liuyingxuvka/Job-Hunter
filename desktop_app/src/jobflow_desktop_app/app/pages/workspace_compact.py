@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -43,6 +44,7 @@ class CandidateWorkspaceCompactPage(QWidget):
         on_back_to_candidates: Callable[[], None] | None = None,
         on_ui_language_changed: Callable[[str], None] | None = None,
         on_ai_settings_changed: Callable[[], None] | None = None,
+        on_update_requested: Callable[[], None] | None = None,
     ) -> None:
         super().__init__()
         self.context = context
@@ -51,6 +53,7 @@ class CandidateWorkspaceCompactPage(QWidget):
         self.on_back_to_candidates = on_back_to_candidates
         self.on_ui_language_changed = on_ui_language_changed
         self.on_ai_settings_changed = on_ai_settings_changed
+        self.on_update_requested = on_update_requested
         self._current_candidate: CandidateRecord | None = None
         self.step_buttons: list[QWidget] = []
         self.step_titles = [
@@ -108,6 +111,7 @@ class CandidateWorkspaceCompactPage(QWidget):
         self.switch_candidate_button.clicked.connect(self._go_back_to_candidates)
         self.workspace_settings_button.clicked.connect(self._open_ai_settings)
         self.support_button.clicked.connect(self._show_support_dialog)
+        self.update_capsule.clicked.connect(self._request_update)
 
         self.setStyleSheet(
             f"""
@@ -152,6 +156,43 @@ class CandidateWorkspaceCompactPage(QWidget):
               min-height: 28px;
               padding: 1px 9px;
               border-radius: 8px;
+            }}
+            QLabel#CompactVersionCapsule {{
+              min-height: 26px;
+              padding: 1px 10px;
+              border-radius: 13px;
+              border: 1px solid rgba(255, 255, 255, 0.50);
+              background: rgba(255, 255, 255, 0.16);
+              color: {UI_COLORS["text_inverse"]};
+              font-size: 12px;
+              font-weight: 800;
+            }}
+            QPushButton#CompactUpdateCapsule {{
+              min-height: 26px;
+              padding: 1px 10px;
+              border-radius: 13px;
+              font-size: 12px;
+              font-weight: 800;
+            }}
+            QPushButton#CompactUpdateCapsule[stateLevel="neutral"] {{
+              background: rgba(255, 255, 255, 0.14);
+              color: {UI_COLORS["text_inverse"]};
+              border: 1px solid rgba(255, 255, 255, 0.42);
+            }}
+            QPushButton#CompactUpdateCapsule[stateLevel="active"] {{
+              background: #dbeafe;
+              color: #1d4ed8;
+              border: 1px solid #93c5fd;
+            }}
+            QPushButton#CompactUpdateCapsule[stateLevel="warning"] {{
+              background: #fef3c7;
+              color: #92400e;
+              border: 1px solid #fbbf24;
+            }}
+            QPushButton#CompactUpdateCapsule[stateLevel="ready"] {{
+              background: #d1fae5;
+              color: #065f46;
+              border: 1px solid #34d399;
             }}
             """
         )
@@ -231,6 +272,19 @@ class CandidateWorkspaceCompactPage(QWidget):
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(5)
+        self.version_capsule = QLabel("")
+        self.version_capsule.setObjectName("CompactVersionCapsule")
+        self.version_capsule.setFixedHeight(28)
+        self.version_capsule.setAlignment(Qt.AlignCenter)
+        self.version_capsule.setToolTip(_t(self.ui_language, "当前版本", "Current version"))
+
+        self.update_capsule = QPushButton("")
+        self.update_capsule.setObjectName("CompactUpdateCapsule")
+        self.update_capsule.setFixedHeight(28)
+        self.update_capsule.setCursor(Qt.PointingHandCursor)
+        self.update_capsule.setToolTip(_t(self.ui_language, "软件更新状态", "Software update status"))
+        self.update_capsule.setVisible(False)
+
         self.workspace_settings_button = styled_button(
             _t(self.ui_language, "设置 / Settings", "Settings / 设置"),
             "hero",
@@ -243,11 +297,35 @@ class CandidateWorkspaceCompactPage(QWidget):
             _t(self.ui_language, "☕ 支持", "☕ Support"),
             "hero",
         )
+        actions.addWidget(self.version_capsule, 0, Qt.AlignVCenter)
+        actions.addWidget(self.update_capsule, 0, Qt.AlignVCenter)
         for button in (self.workspace_settings_button, self.switch_candidate_button, self.support_button):
             button.setObjectName("CompactToolbarButton")
             actions.addWidget(button)
         layout.addLayout(actions)
         return hero
+
+    def set_update_capsules(
+        self,
+        *,
+        version_text: str,
+        update_text: str = "",
+        update_level: str = "neutral",
+        update_enabled: bool = False,
+        update_visible: bool = False,
+    ) -> None:
+        self.version_capsule.setText(version_text)
+        normalized_level = update_level if update_level in {"neutral", "active", "warning", "ready"} else "neutral"
+        self.update_capsule.setText(update_text)
+        self.update_capsule.setProperty("stateLevel", normalized_level)
+        self.update_capsule.style().unpolish(self.update_capsule)
+        self.update_capsule.style().polish(self.update_capsule)
+        self.update_capsule.setEnabled(bool(update_enabled))
+        self.update_capsule.setVisible(bool(update_visible and update_text))
+
+    def _request_update(self) -> None:
+        if self.on_update_requested is not None:
+            self.on_update_requested()
 
     def _build_step_bar(self) -> QWidget:
         card = make_card()

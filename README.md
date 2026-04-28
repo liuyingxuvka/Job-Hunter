@@ -92,6 +92,8 @@ Job Hunter 不是又一个职位列表工具。它解决的是一个更长期的
 
 发布包不会包含真实候选人数据库、客户数据、搜索历史、导出结果或运行备份。
 
+打包版会把用户数据库、导出、日志和搜索运行状态保存在本机用户目录下，并在启动后静默检查 GitHub Releases 是否有新版本。有可用更新时，工作台顶部版本胶囊旁边会提示；更新包下载并校验完成后，你可以选择现在重启安装或以后再安装。
+
 #### 开发者：从源码运行
 
 下面这部分只面向开发者和协作者。
@@ -294,6 +296,8 @@ Recommended steps:
 The release package already includes the desktop runtime, demo candidate seed, and safe templates. End users do not need to install Python locally.
 
 The release package does not include real candidate databases, customer data, search history, exports, or runtime backups.
+
+The packaged app stores user databases, exports, logs, and search runtime state under the local user profile. On startup, it quietly checks GitHub Releases for newer versions. When an update is downloaded and verified, the workspace-header update capsule lets you install it now with a restart or leave it for later.
 
 #### Developers: Run From Source
 

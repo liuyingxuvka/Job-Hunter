@@ -67,6 +67,8 @@
 - 解压后启动：
   `Jobflow Desktop.exe`
 
+打包版会把用户数据库、导出、日志和搜索运行状态保存在本机用户目录下，并在启动后静默检查 GitHub Releases 是否有新版本。更新包准备好后，工作台顶部版本胶囊旁边会让你选择现在重启安装或以后再安装。
+
 #### 开发者：从源码运行
 
 下面这部分才是源码工作树运行方式。
@@ -203,6 +205,8 @@ If you are not a developer and just want to use the app, do not start from the `
   `Job-Hunter-<version>-win64.zip`
 - Launch after extraction:
   `Jobflow Desktop.exe`
+
+The packaged app stores user databases, exports, logs, and search runtime state under the local user profile. On startup, it quietly checks GitHub Releases for newer versions. When an update is prepared, the workspace-header capsule lets you install it now with a restart or leave it for later.
 
 #### Developers: Run From Source
 

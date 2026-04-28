@@ -112,6 +112,7 @@ $packageStem = "Job-Hunter-$releaseVersion-win64"
 $stageRoot = if ($OutputRoot) { Join-Path $OutputRoot $packageStem } else { Join-Path $buildRoot $packageStem }
 $zipPath = Join-Path $distRoot "$packageStem.zip"
 $checksumPath = "$zipPath.sha256"
+$manifestPath = Join-Path $distRoot "update-manifest.json"
 $versionInfoPath = Join-Path $buildRoot "windows-version-info.txt"
 
 if (-not (Test-Path -LiteralPath $privacyAuditPath)) {
@@ -245,6 +246,9 @@ if (-not $SkipZip) {
   if (Test-Path -LiteralPath $checksumPath) {
     Remove-Item -LiteralPath $checksumPath -Force
   }
+  if (Test-Path -LiteralPath $manifestPath) {
+    Remove-Item -LiteralPath $manifestPath -Force
+  }
 
   Push-Location (Split-Path -Parent $stageRoot)
   try {
@@ -255,10 +259,25 @@ if (-not $SkipZip) {
 
   $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
   Set-Content -LiteralPath $checksumPath -Value "$hash *$(Split-Path -Leaf $zipPath)" -Encoding ascii
+
+  $manifest = [ordered]@{
+    version = $releaseVersion
+    platform = "win64"
+    package = [ordered]@{
+      name = "$(Split-Path -Leaf $zipPath)"
+      sha256 = $hash
+    }
+    checksum = [ordered]@{
+      name = "$(Split-Path -Leaf $checksumPath)"
+    }
+    createdAt = [DateTimeOffset]::UtcNow.ToString("o")
+  }
+  $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding utf8
 }
 
 Write-Output "Release package root: $stageRoot"
 if (-not $SkipZip) {
   Write-Output "Release zip: $zipPath"
   Write-Output "Release checksum: $checksumPath"
+  Write-Output "Release update manifest: $manifestPath"
 }

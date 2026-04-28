@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import sys
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
@@ -8,11 +9,13 @@ from PySide6.QtGui import QCloseEvent, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
+    QMessageBox,
     QStackedWidget,
     QStatusBar,
 )
 
 from .context import AppContext
+from .. import __version__
 from ..ai.client import (
     OpenAIResponsesClient,
     OpenAIResponsesError,
@@ -20,6 +23,9 @@ from ..ai.client import (
     parse_response_json,
 )
 from ..ai.model_catalog import fetch_available_models
+from ..updates.apply import UpdateApplyError, launch_prepared_update
+from ..updates.prepare import check_and_prepare_update
+from ..updates.state import UpdateState, UpdateStateStore
 from .theme import apply_theme
 from .pages.candidate_directory import CandidateDirectoryPage
 from .pages.workspace_compact import CandidateWorkspaceCompactPage
@@ -205,6 +211,32 @@ class _AIValidationWorker(QObject):
         )
 
 
+class _UpdateWorker(QObject):
+    finished = Signal(object)
+
+    def __init__(self, context: AppContext, current_version: str) -> None:
+        super().__init__()
+        self.context = context
+        self.current_version = current_version
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            state = check_and_prepare_update(
+                self.context.paths,
+                current_version=self.current_version,
+            )
+        except Exception as exc:  # pragma: no cover - defensive boundary for UI worker
+            store = UpdateStateStore(self.context.paths)
+            state = store.save(
+                store.load(current_version=self.current_version).with_changes(
+                    status="failed",
+                    error_message=str(exc),
+                )
+            )
+        self.finished.emit(state.to_dict())
+
+
 class MainWindow(QMainWindow):
     def __init__(self, context: AppContext) -> None:
         super().__init__()
@@ -215,6 +247,10 @@ class MainWindow(QMainWindow):
         self._ai_status_error = ""
         self._ai_validation_thread: QThread | None = None
         self._ai_validation_worker: _AIValidationWorker | None = None
+        self._update_thread: QThread | None = None
+        self._update_worker: _UpdateWorker | None = None
+        self._apply_update_after_check = False
+        self._update_state = UpdateStateStore(self.context.paths).load(current_version=__version__)
         self.setWindowTitle(_t(self.ui_language, "求职工作台", "Jobflow Desktop App"))
         self.resize(1280, 860)
 
@@ -227,6 +263,7 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.candidate_directory_page)
         self.refresh()
         QTimer.singleShot(0, self._warmup_model_catalog)
+        QTimer.singleShot(800, self._start_packaged_update_check)
 
     @property
     def current_candidate_id(self) -> int | None:
@@ -247,6 +284,11 @@ class MainWindow(QMainWindow):
         if isinstance(thread, QThread) and thread.isRunning():
             thread.wait(max(0, int(wait_ms)))
 
+    def _shutdown_update_check(self, wait_ms: int = 2000) -> None:
+        thread = self._update_thread
+        if isinstance(thread, QThread) and thread.isRunning():
+            thread.wait(max(0, int(wait_ms)))
+
     def closeEvent(self, event: QCloseEvent) -> None:
         try:
             if isinstance(getattr(self, "workspace_compact_page", None), CandidateWorkspaceCompactPage):
@@ -256,6 +298,7 @@ class MainWindow(QMainWindow):
             # to avoid tearing
             # down Qt while the worker thread is still alive.
             self._shutdown_ai_validation(wait_ms=30000)
+            self._shutdown_update_check(wait_ms=5000)
         finally:
             super().closeEvent(event)
 
@@ -275,10 +318,12 @@ class MainWindow(QMainWindow):
             on_back_to_candidates=self._show_candidates_page,
             on_ui_language_changed=self._on_ui_language_changed,
             on_ai_settings_changed=self._start_ai_health_check,
+            on_update_requested=self._on_update_capsule_clicked,
         )
         self.stack.addWidget(self.candidate_directory_page)
         self.stack.addWidget(self.workspace_compact_page)
         self._apply_ai_status()
+        self._apply_update_state_to_capsules()
 
     def refresh(self) -> None:
         candidate_id = self.current_candidate_id
@@ -349,8 +394,141 @@ class MainWindow(QMainWindow):
             self.stack.setCurrentWidget(self.candidate_directory_page)
         self.refresh()
         self._apply_ai_status()
+        self._apply_update_state_to_capsules()
         if keep_compact_workspace:
             self._start_ai_health_check()
+
+    def _update_status_text(self, state: UpdateState) -> tuple[str, str, bool]:
+        status = state.status
+        if not self.context.paths.is_packaged:
+            return ("", "neutral", False)
+        if status == "checking":
+            return (_t(self.ui_language, "检查更新", "Checking"), "active", False)
+        if status == "downloading":
+            target = state.latest_version or ""
+            return (_t(self.ui_language, f"下载 v{target}", f"Downloading v{target}"), "active", False)
+        if status == "prepared":
+            target = state.prepared_version or state.latest_version
+            return (_t(self.ui_language, f"可安装 v{target}", f"Install v{target}"), "ready", True)
+        if status == "stale":
+            return (_t(self.ui_language, "更新过期", "Update stale"), "warning", True)
+        if status == "failed":
+            return (_t(self.ui_language, "稍后重试更新", "Retry update later"), "neutral", True)
+        if status == "up_to_date":
+            return ("", "neutral", False)
+        if status == "available":
+            target = state.latest_version or ""
+            return (_t(self.ui_language, f"可更新 v{target}", f"Update v{target}"), "warning", True)
+        return ("", "neutral", False)
+
+    def _apply_update_state_to_capsules(self) -> None:
+        if not hasattr(self, "workspace_compact_page"):
+            return
+        text, level, enabled = self._update_status_text(self._update_state)
+        self.workspace_compact_page.set_update_capsules(
+            version_text=f"v{__version__}",
+            update_text=text,
+            update_level=level,
+            update_enabled=enabled,
+            update_visible=bool(text),
+        )
+
+    def _set_update_state(self, state: UpdateState) -> None:
+        self._update_state = state
+        self._apply_update_state_to_capsules()
+
+    def _start_packaged_update_check(self) -> None:
+        if not self.context.paths.is_packaged:
+            self._apply_update_state_to_capsules()
+            return
+        self._start_update_check()
+
+    def _start_update_check(self, *, apply_when_ready: bool = False) -> None:
+        if not self.context.paths.is_packaged:
+            return
+        if self._update_thread is not None and self._update_thread.isRunning():
+            self._apply_update_after_check = self._apply_update_after_check or apply_when_ready
+            return
+
+        self._apply_update_after_check = apply_when_ready
+        self._set_update_state(self._update_state.with_changes(status="checking", current_version=__version__))
+        worker = _UpdateWorker(self.context, __version__)
+        thread_parent = QApplication.instance()
+        thread = QThread(thread_parent if isinstance(thread_parent, QObject) else None)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_update_check_finished)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        self._update_worker = worker
+        self._update_thread = thread
+        thread.start()
+
+    @Slot(object)
+    def _on_update_check_finished(self, payload: object) -> None:
+        self._update_worker = None
+        self._update_thread = None
+        data = payload if isinstance(payload, dict) else {}
+        state = UpdateState.from_mapping(data, current_version=__version__)
+        should_apply = self._apply_update_after_check
+        self._apply_update_after_check = False
+        self._set_update_state(state)
+        if should_apply:
+            if state.status == "prepared":
+                self._confirm_apply_update()
+                return
+            QMessageBox.warning(
+                self,
+                _t(self.ui_language, "更新未准备好", "Update not ready"),
+                _t(
+                    self.ui_language,
+                    "更新包还没有准备好。请稍后再试，或下次打开软件时让它自动重新检查。",
+                    "The update is not ready yet. Try again later or let the app check again next time it opens.",
+                ),
+            )
+
+    def _on_update_capsule_clicked(self) -> None:
+        status = self._update_state.status
+        if status == "prepared":
+            self._start_update_check(apply_when_ready=True)
+            return
+        if status in {"failed", "stale", "available", "up_to_date", "idle"}:
+            self._start_update_check()
+
+    def _confirm_apply_update(self) -> None:
+        target = self._update_state.prepared_version or self._update_state.latest_version
+        response = QMessageBox.question(
+            self,
+            _t(self.ui_language, "安装更新", "Install update"),
+            _t(
+                self.ui_language,
+                f"更新 {target} 已准备好。现在更新会关闭软件、停止当前后台任务、安装新版本，然后重新打开。",
+                f"Update {target} is ready. Installing now will close the app, stop current background work, install the new version, and reopen it.",
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if response != QMessageBox.Yes:
+            return
+
+        try:
+            launch_prepared_update(self.context.paths, self._update_state, current_pid=os.getpid())
+        except UpdateApplyError as exc:
+            failed_state = UpdateStateStore(self.context.paths).save(
+                self._update_state.with_changes(status="failed", error_message=str(exc))
+            )
+            self._set_update_state(failed_state)
+            QMessageBox.warning(
+                self,
+                _t(self.ui_language, "无法启动更新", "Could not start update"),
+                str(exc),
+            )
+            return
+
+        app = QApplication.instance()
+        if app is not None:
+            QTimer.singleShot(0, app.quit)
 
     def _build_ai_status_texts(self) -> tuple[str, str]:
         level = self._ai_status_level

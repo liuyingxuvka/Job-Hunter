@@ -12,5 +12,6 @@ Jobflow Desktop Release Package
 Notes:
 - This package is intended for non-developer Windows users.
 - On first launch, the app seeds only demo/default content, including the demo candidate resume.
-- Runtime logs, exports, backups, and run outputs start empty in this release package.
+- Runtime logs, exports, backups, user databases, and run outputs are stored under your local Windows user profile, not inside the replaceable app package.
 - The package includes only demo/default content. It does not ship real user, customer, or search-history data.
+- The app checks for GitHub Release updates quietly on startup. If an update is prepared, use the workspace-header update capsule to install now or leave it for a later restart.

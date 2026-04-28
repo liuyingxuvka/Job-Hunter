@@ -57,6 +57,7 @@ jobs:
           path: |
             dist/release/*.zip
             dist/release/*.sha256
+            dist/release/*.json
 
   create-release:
     runs-on: ubuntu-latest
@@ -98,3 +99,4 @@ jobs:
           files: |
             release-assets/*.zip
             release-assets/*.sha256
+            release-assets/*.json

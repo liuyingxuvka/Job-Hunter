@@ -236,6 +236,40 @@ class CandidateWorkspaceCompactPageTests(unittest.TestCase):
             self.assertIn("buy the developer a coffee", page._support_dialog_message())
             self.assertIn("voluntary support for project maintenance", page._support_dialog_message())
 
+    def test_version_and_update_capsules_live_before_toolbar_actions(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context, name="Capsule Candidate")
+            update_requested = Mock()
+            with patch("jobflow_desktop_app.app.pages.search_results.JobSearchRunner", HermeticJobSearchRunner):
+                page = CandidateWorkspaceCompactPage(
+                    context,
+                    ui_language="en",
+                    on_update_requested=update_requested,
+                )
+            self.addCleanup(page.deleteLater)
+            page.resize(1400, 900)
+            page.set_candidate(candidate_id)
+            page.show()
+
+            page.set_update_capsules(
+                version_text="v0.8.6",
+                update_text="Install v0.8.7",
+                update_level="ready",
+                update_enabled=True,
+                update_visible=True,
+            )
+            process_events()
+
+            self.assertEqual(page.version_capsule.text(), "v0.8.6")
+            self.assertTrue(page.update_capsule.isVisible())
+            self.assertEqual(page.update_capsule.text(), "Install v0.8.7")
+            self.assertEqual(page.update_capsule.property("stateLevel"), "ready")
+            self.assertLess(page.version_capsule.x(), page.workspace_settings_button.x())
+            self.assertLess(page.update_capsule.x(), page.workspace_settings_button.x())
+
+            QTest.mouseClick(page.update_capsule, Qt.LeftButton)
+            update_requested.assert_called_once()
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

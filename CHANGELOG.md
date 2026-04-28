@@ -10,6 +10,13 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-04-28
+
+### Added
+
+- Added the first packaged-app update system: packaged Windows builds now keep user runtime data under the local user profile, can track update state, check GitHub Releases in the background, download and verify prepared update packages, show version/update capsules in the workspace header, and hand prepared installs to an external updater.
+- Added Windows release update manifest generation and upload so future update clients have a stable version/package/checksum contract.
+
 ## [0.8.6] - 2026-04-28
 
 ### Added

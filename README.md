@@ -1,5 +1,15 @@
 # Job Hunter
 
+<!-- README HERO START -->
+<p align="center">
+  <img src="./assets/readme-hero/hero.png" alt="Job Hunter concept hero image" width="100%" />
+</p>
+
+<p align="center">
+  <strong>A local-first desktop workspace for building persistent job-search evidence and company memory.</strong>
+</p>
+<!-- README HERO END -->
+
 <p align="center">
   <img src="desktop_app/assets/app_icon.png" alt="Job Hunter app icon" width="96">
 </p>

@@ -1,21 +1,3 @@
 # README Hero Prompt
 
-Use case: productivity-visual
-Asset type: GitHub README concept hero image
-Project: Job Hunter
-Hero tagline: A local-first desktop workspace for building persistent job-search evidence and company memory.
-
-Primary request:
-Create a professional, modern, clean, visually strong, slightly cinematic concept hero image for a GitHub README. The image should make the project understandable within three seconds.
-
-Project-specific visual subject:
-A desktop search workspace links candidate context, role discovery, company memory, and follow-up status into one local evidence loop.
-
-Composition:
-Wide 1600 x 840 banner with a deterministic text layer, project name on the left, minimal workflow labels on the right, semi-realistic software panels, glass surfaces, subtle depth, and clear data/workflow connections.
-
-Text constraints:
-Use only this exact English text: project name, hero tagline, and the workflow labels Candidate, Discovery, Company Pool, Follow-up. Keep text minimal and deterministic.
-
-Avoid:
-Generic technology wallpaper, childish illustration, heavy cartoon style, anime-only style, memes, unreadably dark output, visual clutter, fake UI paragraphs, garbled text, Chinese text, watermarks, or decorative-only backgrounds.
+Create a wide GitHub README concept hero image for a Windows desktop app called Job Hunter. Direct text-to-image generation, no SVG template, no reused card-grid layout. Visual subject: a polished semi-realistic desktop workspace in a quiet professional command center for long-term job discovery. Show a large desktop monitor with a sophisticated local app interface: a candidate profile panel, a map-like company discovery board, validated job openings as evidence cards, a local SQLite-like storage vault, and a follow-up pipeline with statuses. The key idea is company-first job discovery for experienced professionals, starting from real capabilities and building persistent local memory over time. Include subtle visual cues of specialized roles, company websites, ATS entry points, scoring signals, and local-first data persistence. Style: professional modern product hero, clean, slightly cinematic, CG-like semi-realistic, warm dark workstation lighting with green and amber accents, not too dark, premium software showcase. Composition: wide README banner, strong product scene, visibly different from abstract AI memory or code validation images. Constraints: avoid readable personal data, avoid real company names, no Chinese text, no gibberish text, no big words, no watermark, no logo, not cartoon, not anime, not childish, not meme-like.

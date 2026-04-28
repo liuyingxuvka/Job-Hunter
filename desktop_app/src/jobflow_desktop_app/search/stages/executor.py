@@ -50,6 +50,7 @@ class PythonStageRunResult:
     stderr_tail: str
     cancelled: bool = False
     payload: dict[str, Any] | None = None
+    stage_log_id: int | None = None
 
 
 def _load_candidate_pool_payloads(runtime_mirror: Any, *, method_name: str, candidate_id: int) -> list[dict[str, Any]] | None:
@@ -188,6 +189,12 @@ class PythonStageExecutor:
                 message="Python resume stage skipped because no unfinished jobs remain.",
                 stdout_tail="No pending jobs.",
                 stderr_tail="",
+                payload={
+                    "pendingJobs": 0,
+                    "analyzedJobs": 0,
+                    "pendingRemainingJobs": 0,
+                    "failedJobs": 0,
+                },
             )
 
         deadline = time.monotonic() + max(1, int(timeout_seconds)) if timeout_seconds else None
@@ -205,6 +212,12 @@ class PythonStageExecutor:
                 message=f"Failed to initialize Python resume stage client: {exc}",
                 stdout_tail="",
                 stderr_tail=str(exc),
+                payload={
+                    "pendingJobs": len(pending_jobs),
+                    "analyzedJobs": 0,
+                    "failedJobs": 0,
+                    "error": str(exc),
+                },
             )
 
         existing_jobs = _load_resume_existing_jobs_for_stage(
@@ -272,6 +285,11 @@ class PythonStageExecutor:
                     stdout_tail=_tail_lines(stdout_lines),
                     stderr_tail=_tail_lines(stderr_lines),
                     cancelled=True,
+                    payload={
+                        "pendingJobs": total,
+                        "analyzedJobs": processed_count,
+                        "failedJobs": failed_count,
+                    },
                 )
 
             remaining = _remaining_seconds(deadline)
@@ -285,6 +303,11 @@ class PythonStageExecutor:
                     message=message,
                     stdout_tail=_tail_lines(stdout_lines),
                     stderr_tail=_tail_lines(stderr_lines),
+                    payload={
+                        "pendingJobs": total,
+                        "analyzedJobs": processed_count,
+                        "failedJobs": failed_count,
+                    },
                 )
 
             merged_job = _merge_with_existing_job(working_jobs, pending_job)
@@ -314,6 +337,11 @@ class PythonStageExecutor:
                         stdout_tail=_tail_lines(stdout_lines),
                         stderr_tail=_tail_lines(stderr_lines),
                         cancelled=True,
+                        payload={
+                            "pendingJobs": total,
+                            "analyzedJobs": processed_count,
+                            "failedJobs": failed_count,
+                        },
                     )
                 with _temporary_client_timeout(
                     client_instance,
@@ -335,6 +363,11 @@ class PythonStageExecutor:
                         stdout_tail=_tail_lines(stdout_lines),
                         stderr_tail=_tail_lines(stderr_lines),
                         cancelled=True,
+                        payload={
+                            "pendingJobs": total,
+                            "analyzedJobs": processed_count,
+                            "failedJobs": failed_count,
+                        },
                     )
                 analysis_payload = JobAnalysisService.prepare_analysis_for_storage(
                     analysis,
@@ -405,6 +438,13 @@ class PythonStageExecutor:
             message=message,
             stdout_tail=_tail_lines(stdout_lines),
             stderr_tail=_tail_lines(stderr_lines),
+            payload={
+                "pendingJobs": total,
+                "analyzedJobs": processed_count,
+                "pendingRemainingJobs": remaining_pending,
+                "failedJobs": failed_count,
+                "postVerifyJobs": post_verify_count,
+            },
         )
 
     @classmethod

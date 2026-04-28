@@ -91,6 +91,27 @@ CREATE TABLE IF NOT EXISTS search_runs (
   FOREIGN KEY (search_profile_id) REFERENCES search_profiles(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS search_stage_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  search_run_id INTEGER NOT NULL,
+  candidate_id INTEGER,
+  round_number INTEGER NOT NULL DEFAULT 0,
+  stage_name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'started',
+  started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  finished_at TEXT NOT NULL DEFAULT '',
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  exit_code INTEGER,
+  message TEXT NOT NULL DEFAULT '',
+  error_summary TEXT NOT NULL DEFAULT '',
+  counts_json TEXT NOT NULL DEFAULT '',
+  metadata_json TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (search_run_id) REFERENCES search_runs(id) ON DELETE CASCADE,
+  FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS candidate_companies (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   candidate_id INTEGER NOT NULL,
@@ -227,6 +248,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
 CREATE INDEX IF NOT EXISTS idx_search_profiles_candidate_id ON search_profiles(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_resumes_candidate_id ON resumes(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_search_runs_candidate_id ON search_runs(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_search_stage_logs_run_id ON search_stage_logs(search_run_id, id);
+CREATE INDEX IF NOT EXISTS idx_search_stage_logs_stage ON search_stage_logs(search_run_id, round_number, stage_name);
 CREATE INDEX IF NOT EXISTS idx_job_analyses_job_id ON job_analyses(job_id);
 CREATE INDEX IF NOT EXISTS idx_job_analyses_profile_id ON job_analyses(search_profile_id);
 CREATE INDEX IF NOT EXISTS idx_review_states_job_id ON job_review_states(job_id);

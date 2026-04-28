@@ -11,10 +11,13 @@ from jobflow_desktop_app.search.orchestration.search_session_runtime import (
     SearchSessionRuntime,
     _cancelled_outcome,
     _combined_tail,
+    _mark_stage_log_status,
     _refresh_python_recommended_outputs,
+    _run_direct_job_discovery_stage,
     _remaining_search_session_seconds,
     _write_main_runtime_config,
 )
+from jobflow_desktop_app.search.stages.executor import PythonStageRunResult
 
 
 class SearchSessionRuntimeTests(unittest.TestCase):
@@ -141,6 +144,67 @@ class SearchSessionRuntimeTests(unittest.TestCase):
                 {"output": {"recommendedMode": "replace"}},
                 search_run_id=None,
             )
+
+    def test_stage_logging_wraps_stage_result_and_can_mark_soft_failure(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            run_dir = Path(temp_dir)
+            log_rows: dict[int, dict[str, object]] = {}
+
+            class Mirror:
+                def start_stage_log(self, **kwargs):
+                    log_id = len(log_rows) + 1
+                    log_rows[log_id] = {"status": "started", **kwargs}
+                    return log_id
+
+                def finish_stage_log(self, log_id, **kwargs):
+                    log_rows[int(log_id)].update(kwargs)
+
+                def update_stage_log_status(self, log_id, **kwargs):
+                    log_rows[int(log_id)].update(kwargs)
+
+            mirror = Mirror()
+            runner = SimpleNamespace(runtime_mirror=mirror)
+            runtime = self._make_runtime(run_dir, runner=runner)
+            runtime.search_run_id = 88
+            runtime.search_session_deadline = 10**12
+            runtime.write_progress = Mock()
+
+            with patch(
+                "jobflow_desktop_app.search.orchestration.search_session_runtime.PythonStageExecutor.run_direct_job_discovery_stage_for_runtime",
+                return_value=PythonStageRunResult(
+                    success=False,
+                    exit_code=1,
+                    message="direct failed",
+                    stdout_tail="",
+                    stderr_tail="api timeout",
+                    payload={"rawJobs": 3, "skippedExisting": 2},
+                ),
+            ):
+                result = _run_direct_job_discovery_stage(
+                    runtime,
+                    "Searching direct jobs.",
+                    "Starting direct jobs.",
+                    round_number=2,
+                )
+
+            self.assertIsNotNone(result)
+            assert result is not None
+            self.assertEqual(result.stage_log_id, 1)
+            self.assertEqual(log_rows[1]["stage_name"], "direct_job_discovery")
+            self.assertEqual(log_rows[1]["round_number"], 2)
+            self.assertEqual(log_rows[1]["status"], "hard_failed")
+            self.assertEqual(log_rows[1]["exit_code"], 1)
+            self.assertEqual(log_rows[1]["counts"]["rawJobs"], 3)
+
+            _mark_stage_log_status(
+                runtime,
+                result,
+                status="soft_failed",
+                message="continuing with company pool",
+            )
+
+            self.assertEqual(log_rows[1]["status"], "soft_failed")
+            self.assertEqual(log_rows[1]["message"], "continuing with company pool")
 
     def test_combined_tail_and_cancelled_outcome_preserve_labels_and_progress(self) -> None:
         with TemporaryDirectory() as temp_dir:

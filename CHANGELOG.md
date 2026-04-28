@@ -10,6 +10,13 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-04-28
+
+### Added
+
+- Added persistent backend stage logs for Jobflow Desktop search runs so each discovery, selection, source-fetch, resume, and recommendation-refresh stage records status, timing, counts, and soft-failure diagnostics.
+- Added MIT license metadata and repository-facing license notes so public releases have an explicit open-source license boundary.
+
 ## [0.8.5] - 2026-04-27
 
 ### Changed

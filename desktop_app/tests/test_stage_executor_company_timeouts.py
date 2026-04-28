@@ -391,7 +391,9 @@ class StageExecutorCompanyTimeoutTests(unittest.TestCase):
             )
 
         self.assertTrue(result.success)
-        self.assertEqual(result.payload, {"selectedCompanies": []})
+        self.assertEqual(result.payload["selectedCompanies"], [])
+        self.assertEqual(result.payload["availableCompanies"], 1)
+        self.assertEqual(result.payload["unresolvedCompanyRankings"], 1)
 
     def test_company_discovery_stage_caps_openai_request_timeout(self) -> None:
         client = OpenAIResponsesClient(api_key="test-key", timeout_seconds=999)

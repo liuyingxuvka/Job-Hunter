@@ -195,9 +195,14 @@ python -m venv .venv
 
 这只是自愿支持项目维护，不代表购买技术支持、质保、优先服务、商业授权或功能定制。
 
+### 许可
+
+本项目以 [MIT License](LICENSE) 发布。贡献代码、文档或示例时，默认同意将贡献内容按同一许可发布；当前不要求单独签署 CLA。
+
 ### 文档导航
 
 - [更新记录](CHANGELOG.md)
+- [许可](LICENSE)
 - [产品定位](docs/PRODUCT_POSITIONING.md)
 - [架构概览](docs/ARCHITECTURE.md)
 - [llms.txt](llms.txt)
@@ -393,9 +398,14 @@ If this project is useful to you, you're welcome to buy the developer a coffee h
 
 This is voluntary support for project maintenance. It does not purchase technical support, warranty, priority service, commercial rights, or feature requests.
 
+### License
+
+This project is released under the [MIT License](LICENSE). Code, documentation, or example contributions are expected to be contributed under the same license; no separate CLA is currently required.
+
 ### Documentation
 
 - [Changelog](CHANGELOG.md)
+- [License](LICENSE)
 - [Product Positioning](docs/PRODUCT_POSITIONING.md)
 - [Architecture Overview](docs/ARCHITECTURE.md)
 - [llms.txt](llms.txt)

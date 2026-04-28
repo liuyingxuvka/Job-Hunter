@@ -136,6 +136,10 @@ cd .\desktop_app
 
 这只是自愿支持项目维护，不代表购买技术支持、质保、优先服务、商业授权或功能定制。
 
+### 许可
+
+本子项目随仓库根目录的 [MIT License](../LICENSE) 发布。当前不要求单独签署 CLA。
+
 ## English
 
 ### What This Subproject Is
@@ -268,3 +272,7 @@ If this project is useful to you, you're welcome to buy the developer a coffee h
 [Buy me a coffee via PayPal](https://paypal.me/Yingxuliu)
 
 This is voluntary support for project maintenance. It does not purchase technical support, warranty, priority service, commercial rights, or feature requests.
+
+### License
+
+This subproject is released under the repository-level [MIT License](../LICENSE). No separate CLA is currently required.

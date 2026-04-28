@@ -6,6 +6,7 @@ from typing import Any
 from ...db.bootstrap import initialize_database
 from ...db.connection import Database
 from ...db.repositories.pools import CandidateJobPoolRepository
+from ...db.repositories.stage_logs import SearchStageLogRepository
 from ...db.repositories.search_runtime import (
     CandidateCompanyRepository,
     CandidateSemanticProfileRepository,
@@ -28,6 +29,7 @@ class SearchRuntimeMirror:
         self.jobs = JobRepository(database)
         self.analyses = JobAnalysisRepository(database)
         self.candidate_jobs = CandidateJobPoolRepository(database)
+        self.stage_logs = SearchStageLogRepository(database)
         self.run_state = SearchRunStateStore(
             search_runs=self.search_runs,
         )
@@ -89,6 +91,68 @@ class SearchRuntimeMirror:
             search_run_id,
             runtime_config=runtime_config,
         )
+
+    def start_stage_log(
+        self,
+        *,
+        search_run_id: int,
+        candidate_id: int | None,
+        round_number: int = 0,
+        stage_name: str,
+        message: str = "",
+        counts: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> int:
+        return self.stage_logs.start(
+            search_run_id=search_run_id,
+            candidate_id=candidate_id,
+            round_number=round_number,
+            stage_name=stage_name,
+            message=message,
+            counts=counts,
+            metadata=metadata,
+        )
+
+    def finish_stage_log(
+        self,
+        log_id: int,
+        *,
+        status: str,
+        exit_code: int | None = None,
+        message: str = "",
+        error_summary: str = "",
+        counts: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+        duration_ms: int | None = None,
+    ) -> None:
+        self.stage_logs.finish(
+            log_id,
+            status=status,
+            exit_code=exit_code,
+            message=message,
+            error_summary=error_summary,
+            counts=counts,
+            metadata=metadata,
+            duration_ms=duration_ms,
+        )
+
+    def update_stage_log_status(
+        self,
+        log_id: int,
+        *,
+        status: str,
+        message: str = "",
+        error_summary: str = "",
+    ) -> None:
+        self.stage_logs.update_status(
+            log_id,
+            status=status,
+            message=message,
+            error_summary=error_summary,
+        )
+
+    def list_stage_logs_for_run(self, search_run_id: int) -> list[Any]:
+        return self.stage_logs.list_for_run(search_run_id)
 
     def store_semantic_profile(
         self,

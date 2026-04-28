@@ -204,6 +204,16 @@ When opening a PR, please explain:
 
 If the change affects UI, include screenshots. If it affects search results or data flow, explain the expected input and output changes.
 
+## 贡献许可 / Contribution License
+
+本仓库以 [MIT License](LICENSE) 发布。提交代码、文档、示例或其他可纳入仓库的内容时，请确认你有权贡献这些内容，并同意它们按同一 MIT 许可发布。
+
+当前项目不要求单独签署 CLA。如果以后引入更正式的贡献者协议，会在 README 和本文件中明确说明。
+
+This repository is released under the [MIT License](LICENSE). By submitting code, documentation, examples, or other repository content, please make sure you have the right to contribute it and agree that it is released under the same MIT license.
+
+No separate CLA is currently required. If the project later introduces a formal contributor agreement, README and this file will state that explicitly.
+
 ## 双语协作 / Bilingual Collaboration
 
 核心入口文档默认建议中英双语，至少包括 README、CONTRIBUTING、Issue 模板和面向仓库访客的说明页面。

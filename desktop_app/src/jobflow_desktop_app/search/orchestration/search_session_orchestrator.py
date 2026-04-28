@@ -16,6 +16,7 @@ from .search_session_runtime import (
     _StageResult,
     _cancelled_outcome,
     _combined_tail,
+    _mark_stage_log_status,
     _refresh_python_recommended_outputs,
     _refresh_resume_pending_jobs,
     _remaining_search_session_seconds,
@@ -303,6 +304,7 @@ def _run_company_round(
                 first="Starting Python company discovery round 1.",
                 later="Starting Python company discovery round {round_number}.",
             ),
+            round_number=round_number,
         )
         cancelled_outcome = _run_round_stage(
             runtime,
@@ -340,6 +342,13 @@ def _run_company_round(
                 "Python company discovery failed "
                 f"(exit {company_discovery_result.exit_code}); continuing with the existing company pool."
             )
+            _mark_stage_log_status(
+                runtime,
+                company_discovery_result,
+                status="soft_failed",
+                message=stage_notes[-1],
+                error_summary=company_discovery_result.stderr_tail,
+            )
         if (
             company_discovery_result is not None
             and company_discovery_result.success
@@ -362,6 +371,7 @@ def _run_company_round(
             first="Starting Python company selection round 1.",
             later="Starting Python company selection round {round_number}.",
         ),
+        round_number=round_number,
     )
     cancelled_outcome = _run_round_stage(
         runtime,
@@ -387,6 +397,13 @@ def _run_company_round(
         stage_notes.append(
             "Python company selection failed "
             f"(exit {company_selection_result.exit_code}); falling back to the current candidate company pool."
+        )
+        _mark_stage_log_status(
+            runtime,
+            company_selection_result,
+            status="soft_failed",
+            message=stage_notes[-1],
+            error_summary=company_selection_result.stderr_tail,
         )
 
     selected_companies_for_sources = _resolve_selected_companies_for_sources(
@@ -434,6 +451,7 @@ def _run_company_round(
             later="Starting Python company sources round {round_number}.",
         ),
         selected_companies=selected_companies_for_sources,
+        round_number=round_number,
     )
     cancelled_outcome = _run_round_stage(
         runtime,
@@ -462,6 +480,13 @@ def _run_company_round(
             stage_notes.append(
                 "Python company sources failed "
                 f"(exit {company_sources_result.exit_code}); deferring residual company processing to the next selection cycle."
+            )
+            _mark_stage_log_status(
+                runtime,
+                company_sources_result,
+                status="soft_failed",
+                message=stage_notes[-1],
+                error_summary=company_sources_result.stderr_tail,
             )
         if isinstance(company_sources_result.payload, dict):
             remaining_selected_companies = [
@@ -504,6 +529,7 @@ def _run_discovery_round(
             first="Starting Python direct job discovery round 1.",
             later="Starting Python direct job discovery round {round_number}.",
         ),
+        round_number=round_number,
     )
     direct_cancelled_outcome = _run_round_stage(
         runtime,
@@ -530,7 +556,15 @@ def _run_discovery_round(
         )
     if direct_job_result is not None and not direct_job_result.success:
         stage_notes.append(
-            "Python direct job discovery failed; continuing with the existing company-pool flow."
+            "Python direct job discovery failed "
+            f"(exit {direct_job_result.exit_code}); continuing with the existing company-pool flow."
+        )
+        _mark_stage_log_status(
+            runtime,
+            direct_job_result,
+            status="soft_failed",
+            message=stage_notes[-1],
+            error_summary=direct_job_result.stderr_tail,
         )
 
     search_stats_before_company_round = search_stats_before_round

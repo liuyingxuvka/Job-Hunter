@@ -157,6 +157,7 @@ def run_company_discovery_stage_db(
             message=message,
             stdout_tail=_tail_lines(stdout_lines),
             stderr_tail=_tail_lines(stderr_lines),
+            payload={"error": str(exc)},
         )
 
     message = (
@@ -166,6 +167,10 @@ def run_company_discovery_stage_db(
         f"pool now has {int(result.get('total') or 0)} company(s)."
     )
     payload = {
+        "addedCompanies": int(result.get("added") or 0),
+        "totalCompanies": int(result.get("total") or 0),
+        "qualifiedNewCompanies": qualified_new_companies,
+        "pendingNewCompanies": pending_new_companies,
         "noQualifiedNewCompanies": bool(
             has_company_discovery_input
             and qualified_new_companies <= 0
@@ -205,7 +210,7 @@ def run_company_selection_stage_db(
             message="Python company selection stage skipped because the company pool is empty.",
             stdout_tail="",
             stderr_tail="",
-            payload={"selectedCompanies": []},
+            payload={"availableCompanies": 0, "selectedCompanies": []},
         )
 
     try:
@@ -217,6 +222,7 @@ def run_company_selection_stage_db(
             companies,
             current_run_id=search_run_id,
         )
+        available_company_count = len(companies)
         if unresolved_rankings > 0:
             scored_companies = score_companies_for_candidate(
                 client_instance,
@@ -254,6 +260,7 @@ def run_company_selection_stage_db(
             message=message,
             stdout_tail=_tail_lines(stdout_lines),
             stderr_tail=_tail_lines(stderr_lines),
+            payload={"availableCompanies": len(companies), "error": str(exc)},
         )
 
     message = (
@@ -267,7 +274,11 @@ def run_company_selection_stage_db(
         message=message,
         stdout_tail=_tail_lines(stdout_lines),
         stderr_tail=_tail_lines(stderr_lines),
-        payload={"selectedCompanies": selected_companies},
+        payload={
+            "availableCompanies": available_company_count,
+            "unresolvedCompanyRankings": unresolved_rankings,
+            "selectedCompanies": selected_companies,
+        },
     )
 
 
@@ -294,7 +305,11 @@ def run_company_sources_stage_db(
             message="Python company sources stage skipped because no selected companies are available.",
             stdout_tail="",
             stderr_tail="",
-            payload={"remainingSelectedCompanies": []},
+            payload={
+                "inputSelectedCompanies": 0,
+                "remainingSelectedCompanies": [],
+                "queuedJobs": 0,
+            },
         )
 
     try:
@@ -352,6 +367,10 @@ def run_company_sources_stage_db(
             message=message,
             stdout_tail=_tail_lines(stdout_lines),
             stderr_tail=_tail_lines(stderr_lines),
+            payload={
+                "inputSelectedCompanies": len(resolved_selected_companies),
+                "error": str(exc),
+            },
         )
 
     message = (
@@ -367,6 +386,11 @@ def run_company_sources_stage_db(
         stdout_tail=_tail_lines(stdout_lines),
         stderr_tail=_tail_lines(stderr_lines),
         payload={
+            "inputSelectedCompanies": len(resolved_selected_companies),
+            "companiesHandled": result.companies_handled_count,
+            "jobsFound": result.jobs_found_count,
+            "queuedJobs": len(result.jobs),
+            "deferredCompanies": len(artifacts.deferred_companies),
             "remainingSelectedCompanies": [
                 dict(item)
                 for item in artifacts.deferred_companies

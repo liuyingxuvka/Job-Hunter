@@ -179,3 +179,6 @@ def initialize_database(database: Database, schema_path: Path) -> None:
             WHERE COALESCE(job_key, '') = ''
             """
         )
+        from .target_role_cleanup import cleanup_stale_target_role_references
+
+        cleanup_stale_target_role_references(connection)

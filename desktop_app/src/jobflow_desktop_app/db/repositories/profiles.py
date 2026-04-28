@@ -164,4 +164,15 @@ class SearchProfileRepository:
 
     def delete(self, profile_id: int) -> None:
         with self.database.session() as connection:
+            row = connection.execute(
+                "SELECT candidate_id FROM search_profiles WHERE id = ?",
+                (int(profile_id),),
+            ).fetchone()
             connection.execute("DELETE FROM search_profiles WHERE id = ?", (profile_id,))
+            if row is not None:
+                from ..target_role_cleanup import cleanup_stale_target_role_references
+
+                cleanup_stale_target_role_references(
+                    connection,
+                    candidate_id=int(row["candidate_id"]),
+                )

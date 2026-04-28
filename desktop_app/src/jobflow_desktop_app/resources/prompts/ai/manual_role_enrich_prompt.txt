@@ -4,9 +4,14 @@ Task:
 Given a candidate context and a user-provided role intent (name + rough notes),
 produce one refined role that is specific and practical.
 
+Product context:
+- This role will be saved as a downstream search lens for finding real open jobs.
+- The title should be market-facing, not a personalized research label.
+- The user has already chosen the role type. Your job is to make the content visibly fit that selected type.
+
 Rules:
 1. Return strict JSON only. No Markdown.
-2. Keep the user intent, but make role.name_en more specific and recruiting-ready.
+2. Keep the user intent and make role.name_en recruiting-ready. If the user's title is already market-facing, preserve it or add only one short qualifier.
 3. role.name_en must NOT be generic labels like "Engineer", "Manager", "Specialist", "Analyst" alone.
 4. role.name_zh should be concise Chinese and aligned with role.name_en.
 5. role.description_zh must be Chinese and contain 2-3 concrete sentences.
@@ -16,6 +21,12 @@ Rules:
    unless a clear specialization qualifier is included.
 9. Respect the required scope_profile given by the user prompt. Do not switch to a different bucket.
 10. Return scope_profile as one of: core, adjacent, exploratory.
+11. Keep role.name_en concise and searchable, usually 3-7 meaningful words.
+12. Do not add extra methods, acronyms, products, or proof points to the title just to demonstrate fit. Put that evidence in the descriptions.
+13. Core means direct continuation of the candidate's strongest demonstrated responsibilities and engineering problem type.
+14. Adjacent means familiar domain or product context, but a different main function such as application, validation, systems, customer-facing, product, or operational work.
+15. Exploratory means farther repositioning with a real anchor in the candidate's domain, customers, tools, or engineering workflow.
+16. Do not describe an exploratory role as if it were a core continuation, and do not make a core role sound like a broad pivot.
 
 JSON format:
 {

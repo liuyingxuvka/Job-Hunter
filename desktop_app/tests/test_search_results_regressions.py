@@ -96,6 +96,18 @@ class SearchResultsRegressionTests(unittest.TestCase):
         )
         return candidate_id
 
+    def test_search_runner_uses_context_runtime_and_database_paths(self) -> None:
+        with make_temp_context() as context:
+            step = SearchResultsStep(context, ui_language="zh")
+            try:
+                self.assertEqual(step.runner.runtime_root, context.paths.runtime_dir / "search_runs")
+                self.assertIsNotNone(step.runner.runtime_mirror)
+                assert step.runner.runtime_mirror is not None
+                self.assertIs(step.runner.runtime_mirror.database, context.database)
+                self.assertEqual(step.runner.runtime_mirror.database.db_path, context.paths.db_path)
+            finally:
+                step.deleteLater()
+
     def test_pending_resume_text_and_stats_stay_aligned_after_reload(self) -> None:
         with make_temp_context() as context:
             save_runner = FakeJobSearchRunner()

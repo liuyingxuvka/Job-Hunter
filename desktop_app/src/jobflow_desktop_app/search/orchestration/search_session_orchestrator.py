@@ -29,6 +29,9 @@ from .search_session_runtime import (
     _write_main_runtime_config,
 )
 
+EMPTY_DISCOVERY_ROUND_LIMIT = 3
+
+
 @dataclass(frozen=True)
 class RoundProgress:
     company_pool_growth: int
@@ -175,20 +178,6 @@ def _skip_company_sources_result(message: str) -> _StageResult:
     )
 
 
-def _has_ready_companies_for_sources(runtime: SearchSessionRuntime) -> bool:
-    if runtime.runner.runtime_mirror is None:
-        return False
-    candidate_pool = runtime.runner.runtime_mirror.load_candidate_company_pool(
-        candidate_id=runtime.candidate_id,
-    )
-    selected = select_companies_for_run(
-        companies=candidate_pool,
-        max_companies=max(0, int(runtime.effective_max_companies)),
-        current_run_id=runtime.search_run_id,
-    )
-    return bool(selected)
-
-
 def _round_message(round_number: int, *, first: str, later: str) -> str:
     return first if round_number <= 1 else later.format(round_number=round_number)
 
@@ -273,91 +262,11 @@ def _run_company_round(
     runtime: SearchSessionRuntime,
     *,
     round_number: int,
-    company_pool_before_round: int,
-    unresolved_company_rankings_before_round: int,
-    ready_companies_for_sources_before_round: bool,
     stage_notes: list[str],
     stage_stdout: list[tuple[str, str]],
     stage_stderr: list[tuple[str, str]],
 ) -> CompanyRoundOutcome:
     discovery_stage_attempted = False
-    company_discovery_result: _StageResult | None = None
-    if company_pool_before_round > 0 and unresolved_company_rankings_before_round > 0:
-        stage_notes.append(
-            "Python company discovery deferred until company fit ranking finishes for the current pool."
-        )
-    elif company_pool_before_round > 0 and ready_companies_for_sources_before_round:
-        stage_notes.append(
-            "Python company discovery deferred because scored companies are already ready for the sources stage."
-        )
-    else:
-        discovery_stage_attempted = True
-        company_discovery_result = _run_company_discovery_stage(
-            runtime,
-            _round_message(
-                round_number,
-                first="Refreshing company pool before discovery round 1.",
-                later="Refreshing company pool before discovery round {round_number}.",
-            ),
-            _round_message(
-                round_number,
-                first="Starting Python company discovery round 1.",
-                later="Starting Python company discovery round {round_number}.",
-            ),
-            round_number=round_number,
-        )
-        cancelled_outcome = _run_round_stage(
-            runtime,
-            company_discovery_result,
-            stage_label=_round_stage_label("company_discovery", round_number),
-            cancel_message="Search cancelled while refreshing the company pool.",
-            stage_stdout=stage_stdout,
-            stage_stderr=stage_stderr,
-        )
-        if cancelled_outcome is not None:
-            return CompanyRoundOutcome(
-                main_result=_StageResult(
-                    success=False,
-                    exit_code=-2,
-                    message="Search cancelled while refreshing the company pool.",
-                    stdout_tail=company_discovery_result.stdout_tail if company_discovery_result is not None else "",
-                    stderr_tail=company_discovery_result.stderr_tail if company_discovery_result is not None else "",
-                    cancelled=True,
-                ),
-                discovery_stage_attempted=discovery_stage_attempted,
-                cancelled_outcome=cancelled_outcome,
-            )
-        if company_discovery_result is not None and not company_discovery_result.success:
-            if company_pool_before_round <= 0:
-                return CompanyRoundOutcome(
-                    main_result=_StageResult(
-                        success=False,
-                        exit_code=company_discovery_result.exit_code,
-                        message=company_discovery_result.message,
-                        stdout_tail=company_discovery_result.stdout_tail,
-                        stderr_tail=company_discovery_result.stderr_tail,
-                    )
-                )
-            stage_notes.append(
-                "Python company discovery failed "
-                f"(exit {company_discovery_result.exit_code}); continuing with the existing company pool."
-            )
-            _mark_stage_log_status(
-                runtime,
-                company_discovery_result,
-                status="soft_failed",
-                message=stage_notes[-1],
-                error_summary=company_discovery_result.stderr_tail,
-            )
-        if (
-            company_discovery_result is not None
-            and company_discovery_result.success
-            and isinstance(company_discovery_result.payload, dict)
-            and bool(company_discovery_result.payload.get("noQualifiedNewCompanies"))
-        ):
-            stage_notes.append(
-                "Company discovery did not produce qualified new companies in this round; continuing with existing company-pool work."
-            )
 
     company_selection_result = _run_company_selection_stage(
         runtime,
@@ -426,38 +335,99 @@ def _run_company_round(
             stage_notes.append(
                 "Python company sources deferred until company fit ranking finishes for the current pool."
             )
-            return CompanyRoundOutcome(
-                main_result=_skip_company_sources_result(
-                    "Company fit ranking still pending; sources stage deferred."
-                ),
-                discovery_stage_attempted=discovery_stage_attempted,
+            sources_main_result = _skip_company_sources_result(
+                "Company fit ranking still pending; sources stage deferred."
             )
-        return CompanyRoundOutcome(
-            main_result=_skip_company_sources_result(
+        else:
+            sources_main_result = _skip_company_sources_result(
                 "No companies selected for company sources this round."
+            )
+    else:
+        company_sources_result = _run_company_sources_stage(
+            runtime,
+            _round_message(
+                round_number,
+                first="Fetching direct ATS jobs before discovery round 1.",
+                later="Fetching direct ATS jobs before discovery round {round_number}.",
             ),
-            discovery_stage_attempted=discovery_stage_attempted,
+            _round_message(
+                round_number,
+                first="Starting Python company sources round 1.",
+                later="Starting Python company sources round {round_number}.",
+            ),
+            selected_companies=selected_companies_for_sources,
+            round_number=round_number,
         )
-    company_sources_result = _run_company_sources_stage(
+        cancelled_outcome = _run_round_stage(
+            runtime,
+            company_sources_result,
+            stage_label=_round_stage_label("company_sources", round_number),
+            cancel_message="Search cancelled while fetching direct ATS company jobs.",
+            stage_stdout=stage_stdout,
+            stage_stderr=stage_stderr,
+        )
+        if cancelled_outcome is not None:
+            return CompanyRoundOutcome(
+                main_result=_StageResult(
+                    success=False,
+                    exit_code=-2,
+                    message="Search cancelled while fetching direct ATS company jobs.",
+                    stdout_tail=company_sources_result.stdout_tail if company_sources_result is not None else "",
+                    stderr_tail=company_sources_result.stderr_tail if company_sources_result is not None else "",
+                    cancelled=True,
+                ),
+                cancelled_outcome=cancelled_outcome,
+            )
+
+        remaining_selected_companies: list[dict[str, object]] = []
+        if company_sources_result is not None:
+            if not company_sources_result.success:
+                stage_notes.append(
+                    "Python company sources failed "
+                    f"(exit {company_sources_result.exit_code}); deferring residual company processing to the next selection cycle."
+                )
+                _mark_stage_log_status(
+                    runtime,
+                    company_sources_result,
+                    status="soft_failed",
+                    message=stage_notes[-1],
+                    error_summary=company_sources_result.stderr_tail,
+                )
+            if isinstance(company_sources_result.payload, dict):
+                remaining_selected_companies = [
+                    dict(item)
+                    for item in company_sources_result.payload.get(
+                        "remainingSelectedCompanies",
+                        [],
+                    )
+                    if isinstance(item, dict)
+                ]
+        sources_main_result = _main_result_from_remaining_selected_companies(
+            round_number=round_number,
+            remaining_selected_companies=remaining_selected_companies,
+            stage_notes=stage_notes,
+        )
+
+    discovery_stage_attempted = True
+    company_discovery_result = _run_company_discovery_stage(
         runtime,
         _round_message(
             round_number,
-            first="Fetching direct ATS jobs before discovery round 1.",
-            later="Fetching direct ATS jobs before discovery round {round_number}.",
+            first="Refreshing company pool after company sources round 1.",
+            later="Refreshing company pool after company sources round {round_number}.",
         ),
         _round_message(
             round_number,
-            first="Starting Python company sources round 1.",
-            later="Starting Python company sources round {round_number}.",
+            first="Starting Python company discovery round 1.",
+            later="Starting Python company discovery round {round_number}.",
         ),
-        selected_companies=selected_companies_for_sources,
         round_number=round_number,
     )
     cancelled_outcome = _run_round_stage(
         runtime,
-        company_sources_result,
-        stage_label=_round_stage_label("company_sources", round_number),
-        cancel_message="Search cancelled while fetching direct ATS company jobs.",
+        company_discovery_result,
+        stage_label=_round_stage_label("company_discovery", round_number),
+        cancel_message="Search cancelled while refreshing the company pool.",
         stage_stdout=stage_stdout,
         stage_stderr=stage_stderr,
     )
@@ -466,43 +436,37 @@ def _run_company_round(
             main_result=_StageResult(
                 success=False,
                 exit_code=-2,
-                message="Search cancelled while fetching direct ATS company jobs.",
-                stdout_tail=company_sources_result.stdout_tail if company_sources_result is not None else "",
-                stderr_tail=company_sources_result.stderr_tail if company_sources_result is not None else "",
+                message="Search cancelled while refreshing the company pool.",
+                stdout_tail=company_discovery_result.stdout_tail if company_discovery_result is not None else "",
+                stderr_tail=company_discovery_result.stderr_tail if company_discovery_result is not None else "",
                 cancelled=True,
             ),
+            discovery_stage_attempted=discovery_stage_attempted,
             cancelled_outcome=cancelled_outcome,
         )
-
-    remaining_selected_companies: list[dict[str, object]] = []
-    if company_sources_result is not None:
-        if not company_sources_result.success:
-            stage_notes.append(
-                "Python company sources failed "
-                f"(exit {company_sources_result.exit_code}); deferring residual company processing to the next selection cycle."
-            )
-            _mark_stage_log_status(
-                runtime,
-                company_sources_result,
-                status="soft_failed",
-                message=stage_notes[-1],
-                error_summary=company_sources_result.stderr_tail,
-            )
-        if isinstance(company_sources_result.payload, dict):
-            remaining_selected_companies = [
-                dict(item)
-                for item in company_sources_result.payload.get(
-                    "remainingSelectedCompanies",
-                    [],
-                )
-                if isinstance(item, dict)
-            ]
+    if company_discovery_result is not None and not company_discovery_result.success:
+        stage_notes.append(
+            "Python company discovery failed "
+            f"(exit {company_discovery_result.exit_code}); continuing with the next search round."
+        )
+        _mark_stage_log_status(
+            runtime,
+            company_discovery_result,
+            status="soft_failed",
+            message=stage_notes[-1],
+            error_summary=company_discovery_result.stderr_tail,
+        )
+    if (
+        company_discovery_result is not None
+        and company_discovery_result.success
+        and isinstance(company_discovery_result.payload, dict)
+        and bool(company_discovery_result.payload.get("noQualifiedNewCompanies"))
+    ):
+        stage_notes.append(
+            "Company discovery did not produce qualified new companies in this round; continuing until the empty-round limit is reached."
+        )
     return CompanyRoundOutcome(
-        main_result=_main_result_from_remaining_selected_companies(
-            round_number=round_number,
-            remaining_selected_companies=remaining_selected_companies,
-            stage_notes=stage_notes,
-        ),
+        main_result=sources_main_result,
         discovery_stage_attempted=discovery_stage_attempted,
     )
 
@@ -567,28 +531,9 @@ def _run_discovery_round(
             error_summary=direct_job_result.stderr_tail,
         )
 
-    search_stats_before_company_round = search_stats_before_round
-    unresolved_company_rankings_for_company_round = unresolved_company_rankings_before_round
-    if direct_job_result is not None:
-        search_stats_before_company_round = runtime.runner.load_search_stats(runtime.candidate_id)
-    if direct_job_result is not None and runtime.runner.runtime_mirror is not None:
-        companies_before_company_round = runtime.runner.runtime_mirror.load_candidate_company_pool(
-            candidate_id=runtime.candidate_id,
-        )
-        unresolved_company_rankings_for_company_round = unresolved_company_ranking_count(
-            companies_before_company_round,
-            current_run_id=runtime.search_run_id,
-        )
-    ready_companies_for_sources_before_round = (
-        unresolved_company_rankings_for_company_round <= 0
-        and _has_ready_companies_for_sources(runtime)
-    )
     company_round_outcome = _run_company_round(
         runtime,
         round_number=round_number,
-        company_pool_before_round=search_stats_before_company_round.candidate_company_pool_count,
-        unresolved_company_rankings_before_round=unresolved_company_rankings_for_company_round,
-        ready_companies_for_sources_before_round=ready_companies_for_sources_before_round,
         stage_notes=stage_notes,
         stage_stdout=stage_stdout,
         stage_stderr=stage_stderr,
@@ -729,6 +674,7 @@ def run_search_session(runtime: SearchSessionRuntime) -> SearchSessionOutcome:
     completed_pending_finalize_count = 0
     incomplete_pending_finalize_count = 0
     current_round_number = 0
+    consecutive_empty_rounds = 0
     finalize_phase_failed = False
     while True:
         if runtime.cancel_event is not None and runtime.cancel_event.is_set():
@@ -802,8 +748,8 @@ def run_search_session(runtime: SearchSessionRuntime) -> SearchSessionOutcome:
                 )
             break
         pending_after_round = round_outcome.pending_after_round
+        round_made_progress = round_outcome.round_progress.made_progress
         if round_outcome.session_details is not None:
-            session_details = round_outcome.session_details
             if (
                 str(round_outcome.session_details.get("stopReason") or "").strip()
                 == "no_qualified_new_companies"
@@ -811,7 +757,9 @@ def run_search_session(runtime: SearchSessionRuntime) -> SearchSessionOutcome:
                 stage_notes.append(
                     "Company discovery did not produce qualified new companies in this session. Try again later."
                 )
-            break
+            else:
+                session_details = round_outcome.session_details
+                break
         finalize_phase_failed = round_outcome.finalize_phase_failed
         if round_outcome.finalize_status == "cleared":
             completed_pending_finalize_count += 1
@@ -820,32 +768,36 @@ def run_search_session(runtime: SearchSessionRuntime) -> SearchSessionOutcome:
         if finalize_phase_failed:
             break
         if pending_after_round > 0:
-            if round_outcome.round_progress.made_progress:
+            if round_made_progress:
                 stage_notes.append(
                     "Pending jobs remain after this round, but the session made progress; continuing while time remains."
                 )
                 continue
-            break
+            stage_notes.append(
+                "Pending jobs remain after this round, but no new work was unlocked; "
+                "counting this as an empty discovery round."
+            )
 
-        if (
-            not round_outcome.round_progress.made_progress
-            and not finalize_phase_failed
-            and pending_after_round <= 0
-            and runtime.runner.runtime_mirror is not None
-        ):
-            current_pool = runtime.runner.runtime_mirror.load_candidate_company_pool(
-                candidate_id=runtime.candidate_id,
-            )
-            unresolved_rankings = unresolved_company_ranking_count(
-                current_pool,
-                current_run_id=runtime.search_run_id,
-            )
-            ready_companies = _has_ready_companies_for_sources(runtime)
-            if unresolved_rankings <= 0 and not ready_companies:
+        if round_made_progress:
+            consecutive_empty_rounds = 0
+        else:
+            consecutive_empty_rounds += 1
+            if consecutive_empty_rounds >= EMPTY_DISCOVERY_ROUND_LIMIT:
+                session_details = {
+                    "stopReason": "consecutive_empty_rounds",
+                    "emptyRounds": EMPTY_DISCOVERY_ROUND_LIMIT,
+                }
                 stage_notes.append(
-                    "Timed search session ended because no actionable work units remained for this session."
+                    "Timed search session ended after "
+                    f"{EMPTY_DISCOVERY_ROUND_LIMIT} consecutive full rounds with no new jobs, "
+                    "companies, recommendations, or unlocked work. Try again later or in a few days."
                 )
                 break
+            stage_notes.append(
+                "Discovery round "
+                f"{current_round_number} produced no new jobs or companies; "
+                "continuing to the next search round."
+            )
 
     success = (
         not resume_phase_failed

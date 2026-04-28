@@ -616,7 +616,7 @@ class MainWindow(QMainWindow):
         self._apply_ai_status()
 
     def _update_status_bar(self) -> None:
-        prefix = f"DB: {self.context.paths.db_path}"
+        prefix = f"DB: {self.context.database.db_path}"
         no_candidate = _t(self.ui_language, "未选择", "Not selected")
         label = _t(self.ui_language, "当前求职者", "Current Candidate")
         ai_label = _t(self.ui_language, "AI", "AI")

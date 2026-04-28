@@ -22,7 +22,7 @@ class JobSearchRunnerRegressionTests(unittest.TestCase):
     def _make_runner(self, context) -> JobSearchRunner:
         return JobSearchRunner(context.paths.runtime_dir.parent)
 
-    def test_run_search_stops_when_no_actionable_work_units_remain(self) -> None:
+    def test_run_search_stops_after_three_empty_discovery_rounds(self) -> None:
         with make_temp_context() as context:
             candidate_id = create_candidate(context, name="Demo Candidate")
             profile_id = create_profile(context, candidate_id, name="Generalist", scope_profile="", keyword_focus="", is_active=True)
@@ -67,7 +67,7 @@ class JobSearchRunnerRegressionTests(unittest.TestCase):
             self.assertTrue(result.success)
             self.assertEqual(result.exit_code, 0)
             self.assertIn(
-                "Timed search session ended because no actionable work units remained for this session.",
+                "Timed search session ended after 3 consecutive full rounds with no new jobs",
                 result.message,
             )
 

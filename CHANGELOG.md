@@ -10,6 +10,22 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-04-28
+
+### Added
+
+- Added prompt sandbox tooling and FlowGuard models for validating role recommendation quality, search-loop behavior, and target-role reset consistency.
+
+### Changed
+
+- Tightened AI target-role recommendation prompts toward market-facing searchable titles, stronger existing-role de-duplication, and clearer core/adjacent/exploratory scope separation.
+- Updated the search session loop to continue through bounded empty rounds and keep company discovery running after source processing instead of stopping after the first no-output condition.
+
+### Fixed
+
+- Fixed packaged-app database routing so search results use the active app database and runtime path.
+- Fixed target-role deletion/replacement cleanup so stale role-bound job analysis JSON is invalidated, manual review fields are preserved, and runtime analysis writes cannot target deleted search profiles.
+
 ## [0.9.0] - 2026-04-28
 
 ### Added

@@ -6,6 +6,7 @@ from typing import Any
 
 from ...search.output.final_output import has_current_output_eligibility
 from ..connection import Database
+from ..target_role_cleanup import sanitize_job_payload_role_bindings, valid_profile_ids_for_candidate
 
 
 def _text(value: object) -> str:
@@ -215,23 +216,25 @@ class CandidateJobPoolRepository:
         jobs_by_key: dict[str, dict[str, Any]],
         job_ids: dict[str, int],
     ) -> None:
-        rows: list[dict[str, Any]] = []
-        for key, item in jobs_by_key.items():
-            if not isinstance(item, dict):
-                continue
-            job_id = job_ids.get(key)
-            if job_id is None:
-                continue
-            rows.append(
-                self._build_runtime_row(
-                    candidate_id=candidate_id,
-                    search_run_id=search_run_id,
-                    job_id=job_id,
-                    job_key=key,
-                    item=item,
-                )
-            )
         with self.database.session() as connection:
+            valid_profile_ids = valid_profile_ids_for_candidate(connection, int(candidate_id))
+            rows: list[dict[str, Any]] = []
+            for key, item in jobs_by_key.items():
+                if not isinstance(item, dict):
+                    continue
+                job_id = job_ids.get(key)
+                if job_id is None:
+                    continue
+                sanitized = sanitize_job_payload_role_bindings(item, valid_profile_ids)
+                rows.append(
+                    self._build_runtime_row(
+                        candidate_id=candidate_id,
+                        search_run_id=search_run_id,
+                        job_id=job_id,
+                        job_key=key,
+                        item=sanitized.payload,
+                    )
+                )
             self._upsert_pool_rows(connection, rows)
 
     def mark_recommended_output_set(self, *, candidate_id: int, job_keys: set[str]) -> None:

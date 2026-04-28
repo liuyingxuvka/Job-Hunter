@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from ...db.connection import Database
 from ...db.repositories.candidates import CandidateRecord
 from ...db.repositories.profiles import SearchProfileRecord
 from ...db.repositories.settings import OpenAISettings
@@ -21,7 +22,7 @@ from ..run_state import (
     normalize_resume_pending_jobs as state_normalize_resume_pending_jobs,
 )
 from ..state.search_progress_state import SearchProgress, SearchStats
-from ..state.runtime_db_mirror import build_search_runtime_mirror
+from ..state.runtime_db_mirror import SearchRuntimeMirror, build_search_runtime_mirror
 from ..state.runtime_run_locator import candidate_id_from_run_dir, project_root_from_run_dir
 from . import (
     job_search_runner_session,
@@ -79,10 +80,13 @@ class SearchStageRunResult:
 
 
 class JobSearchRunner:
-    def __init__(self, project_root: Path) -> None:
+    def __init__(self, project_root: Path, *, database: Database | None = None) -> None:
         self.project_root = Path(project_root)
         self.runtime_root = self._ensure_runtime_root(self.project_root / "runtime")
-        self.runtime_mirror = build_search_runtime_mirror(self.project_root)
+        if database is not None:
+            self.runtime_mirror = SearchRuntimeMirror(database)
+        else:
+            self.runtime_mirror = build_search_runtime_mirror(self.project_root)
         self._job_display_i18n_context_provider: Callable[[], tuple[OpenAISettings | None, str]] | None = None
         self._job_display_i18n_failed_keys: set[str] = set()
 

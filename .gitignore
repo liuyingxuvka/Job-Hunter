@@ -24,3 +24,5 @@ desktop_app/runtime/updates/**
 runtime/**
 kb/
 tmp_*.png
+.flowguard/adoption_log.jsonl
+.flowguard/**/__pycache__/

@@ -189,8 +189,16 @@ def build_role_recommendation_prompt(
                 parts.append(f"- {role_name}: {role_desc}")
             else:
                 parts.append(f"- {role_name}")
-        parts.append(
-            "Do not repeat existing roles, and do not return near-duplicate variants with the same functional intent."
+        parts.extend(
+            [
+                "Before proposing roles, internally group the existing roles by broad job family and functional intent.",
+                "Do not repeat existing roles, and do not return near-duplicate variants with the same functional intent.",
+                "Do not treat a small wording change, seniority change, acronym swap, or narrower/wider rewrite as a new role.",
+                "If existing roles are over-specific or AI-synthetic, do not imitate their naming style. Move to a different market hiring lane or return fewer roles.",
+                "If an existing over-specific role is clearly a narrow version of a broader market title, treat that broader title as already covered.",
+                "Do not propose a cleaner market-facing rewrite of an existing role as a new role; the new role must have different day-to-day hiring intent.",
+                "A broader market title is acceptable only when it would retrieve a materially different set of real job postings than the existing roles.",
+            ]
         )
     else:
         parts.append("There are currently no saved target roles yet.")
@@ -211,6 +219,7 @@ def build_role_recommendation_prompt(
                 "Keep the overall role list trending toward a 3:2:1 ratio of core : adjacent : exploratory roles.",
                 "If the candidate already has enough of one type this round, do not return more of that type.",
                 "If there are not enough good ideas for one bucket, return fewer roles instead of padding with weak or repetitive ideas.",
+                "The role-mix target is subordinate to distinctness. Returning 0 or 1 role is better than filling a bucket with a repeat.",
             ]
         )
     else:
@@ -218,25 +227,47 @@ def build_role_recommendation_prompt(
 
     parts.extend(
         [
+            "Product context:",
+            "These target roles are saved as search lenses for finding real, currently open jobs in the market.",
+            "They are not a personalized label for the candidate's full research history or a compact abstract of every skill.",
+            "The role title should be the market lane we can search on job boards and employer career pages; detailed technologies, acronyms, methods, and fit evidence belong in the descriptions.",
+            "Think like a recruiter choosing job families to search, not like a researcher naming a thesis topic.",
+            "Generation workflow:",
+            "1. Read the candidate context and identify broad market role families that fit.",
+            "2. Read existing roles and remove any family already covered, including close synonyms and nested variants.",
+            "3. If a remaining idea is just a better market wording for an existing role, discard it instead of returning it.",
+            "4. For each remaining idea, choose the simplest real-market title that still carries one clear domain or function qualifier.",
+            "5. Keep only roles that are distinct from existing roles and from each other. Return fewer roles if necessary.",
+            "Role-mix and count targets are subordinate to distinctness. Returning 0 or 1 role is better than filling a bucket with a repeat.",
             "Each role must include scope_profile as one of: core, adjacent, exploratory.",
-            "core means highly aligned with the candidate's demonstrated mainline experience and explicit target directions.",
-            "adjacent means a credible transition role that is related, but not the most direct continuation.",
-            "exploratory means broader or more experimental, but still realistically worth trying.",
+            "Scope decision rubric:",
+            "- core: the day-to-day work is a direct continuation of the candidate's demonstrated mainline work. The main job is still close to the candidate's strongest responsibilities, methods, and engineering problem type.",
+            "- adjacent: the domain or product context is familiar, but the main job function changes. It is a credible transition into nearby product, application, validation, systems, customer-facing, or operational work.",
+            "- exploratory: the role is a farther repositioning that still has a real anchor in the candidate's domain, customers, tools, or engineering workflow. It should require a larger career narrative shift than adjacent.",
+            "Do not label a role core just because it contains the right domain words. If the daily function changes from modeling/analysis into application engineering, product ownership, sales support, program leadership, or broad systems coordination, it is usually adjacent or exploratory.",
+            "Exploratory does not mean unrelated. Keep exploratory roles anchored in the candidate's demonstrated domain, technology stack, customer/problem context, or product-development workflow.",
+            "Do not jump to battery-only, generic consulting, corporate strategy, or broad energy transition roles unless the candidate evidence explicitly supports that lane.",
             "role.name_en must be a concise, market-facing job-board title that could plausibly appear on LinkedIn, Indeed, or a company careers page.",
             "Keep role.name_en short: prefer 3-6 meaningful words, excluding seniority words such as Senior, Lead, or Principal.",
             "Do not pack research topics, methods, product details, and every keyword into the title. Put technical specificity in role.description_zh and role.description_en instead.",
-            "Good role.name_en examples: Fuel Cell Modeling Engineer; Hydrogen Systems Engineer; Fuel Cell Test Engineer; Reliability Engineer, Fuel Cell Systems; Digital Twin Engineer; Electrolyzer Test Engineer.",
+            "Good role.name_en shape examples, not candidate-specific recommendations: <Domain> Performance Engineer; <Technology> Test Engineer; Reliability Engineer, <Product System>; Modeling & Simulation Engineer, <Domain Systems>; Application Engineer, <Product Systems>.",
             "Bad role.name_en examples: LT-PEM Fuel Cell Degradation Lifetime Multi-Physics Modeling Specialist; Advanced Hydrogen Energy System Dynamics and Durability Optimization Engineer; Data-Driven Prognostics and Health Monitoring Engineer for LT-PEM Fuel Cells.",
+            "Treat examples as title-shape examples only. Do not copy an example if the existing roles already cover that hiring lane.",
             "Avoid generic role titles like Engineer/Manager/Specialist without domain qualifiers.",
             "Avoid broad titles like Systems Engineer / Software Engineer / Project Manager unless strongly specialized.",
             "Prefer titles with one clear domain or work context, not a chain of all possible contexts.",
+            "Avoid Researcher, Scientist, or Architect titles unless that exact title family is common in job postings for this market lane.",
             "Across one recommendation round, cover different practical work settings such as modeling, test and validation, systems engineering, reliability, digital twin, or hydrogen systems instead of returning several long variants of the same idea.",
+            "Do not return multiple roles that differ only by LT-PEM vs PEM, fuel cell vs electrolyzer, modeling vs degradation modeling, or engineer vs scientist unless the real hiring market treats them as separate job families.",
+            "If existing roles already cover modeling, degradation/lifetime, reliability, health monitoring, digital twin, control strategy, test design, or validation as the main hiring intent, do not return a broad rewrite of that same lane.",
+            "Do not propose a Systems Engineer, Test Engineer, Validation Engineer, Reliability Engineer, Modeling Engineer, or Simulation Engineer lane if existing roles already cover that same system, test, validation, reliability, modeling, or simulation intent under a narrower title.",
             "Prioritize the candidate's demonstrated domain continuity from resume, notes, and self-described directions.",
             "Do not over-index on isolated software/tool keywords if they are not central to the candidate's main work.",
             "Treat any inferred scope label as soft evidence only; do not force the candidate into a legacy default domain if the resume, notes, and self-described directions do not clearly support it.",
             "Provide both role.name_en and role.name_zh.",
             "role.description_zh must be Chinese and 2-3 sentences with concrete details.",
             "role.description_en must be English and 2-3 sentences with concrete details.",
+            "Also include market_search_rationale as one short English sentence and distinctness_check as one short English sentence for each role. These audit fields are for quality review and should not contain long reasoning.",
             "Return strict JSON only.",
         ]
     )
@@ -275,8 +306,15 @@ def build_manual_role_enrich_prompt(
         f"- Required scope_profile: {scope_label}",
         "The returned role must stay inside that requested scope_profile. Do not silently switch it to another bucket.",
         "Use the requested scope to decide how conservative or exploratory the refinement should be.",
+        "Scope decision rubric:",
+        "- core: direct continuation of the candidate's strongest demonstrated responsibilities, methods, and engineering problem type.",
+        "- adjacent: familiar domain or product context, but a different main function such as application, validation, systems, customer-facing, product, or operational work.",
+        "- exploratory: farther repositioning with a real anchor in the candidate's domain, customers, tools, or engineering workflow, requiring a larger career narrative shift.",
+        "The title and descriptions should make the selected scope visible. Do not describe an exploratory role as if it were a direct core continuation, and do not make a core role sound like a broad career pivot.",
         "The saved role type is determined by the user's selection, so the content should support that selection rather than override it.",
         "Keep the refined role close to the candidate's demonstrated main domain instead of over-weighting isolated tool keywords.",
+        "Keep role.name_en concise and searchable. If the user-provided title is already market-facing, preserve it or add only one short qualifier.",
+        "Do not add extra methods, acronyms, products, or proof points to role.name_en just to demonstrate fit. Put that evidence in the descriptions.",
     ]
     user_prompt_parts.extend(compact_role_recommendation_semantic_profile_lines(semantic_profile))
     if candidate.active_resume_path.strip() and resume_excerpt:

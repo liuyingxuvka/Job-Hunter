@@ -753,10 +753,17 @@ class JobAnalysisRepository:
         search_profile_id: int,
         analysis: dict[str, Any],
     ) -> None:
+        profile_id = int(search_profile_id)
         match_score = overall_score(analysis)
         transferable_score = _optional_int(analysis.get("transferableScore")) or 0
         domain_score = _optional_int(analysis.get("domainScore")) or 0
         with self.database.session() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM search_profiles WHERE id = ?",
+                (profile_id,),
+            ).fetchone()
+            if row is None:
+                return
             connection.execute(
                 """
                 INSERT INTO job_analyses (
@@ -803,7 +810,7 @@ class JobAnalysisRepository:
                 """,
                 (
                     int(job_id),
-                    int(search_profile_id),
+                    profile_id,
                     match_score,
                     _text(analysis.get("fitLevelCn")),
                     _text(analysis.get("fitTrack")),

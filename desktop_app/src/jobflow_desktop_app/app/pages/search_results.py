@@ -42,7 +42,7 @@ class SearchResultsStep(QWidget):
         super().__init__()
         self.context = context
         self.ui_language = "en" if ui_language == "en" else "zh"
-        self.runner = JobSearchRunner(context.paths.project_root)
+        self.runner = JobSearchRunner(context.paths.runtime_dir.parent, database=context.database)
         set_i18n_provider = getattr(self.runner, "set_job_display_i18n_context_provider", None)
         if callable(set_i18n_provider):
             set_i18n_provider(self._job_display_i18n_context)

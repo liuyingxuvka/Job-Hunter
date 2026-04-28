@@ -22,15 +22,15 @@ A local-first desktop workspace for building persistent job-search evidence and 
 
 ## Visual concept
 
-A professional desktop command center showing candidate context, company discovery, validated job openings, local storage, and a follow-up pipeline as one long-lived search workspace.
+A bright workflow diagram where candidate capabilities feed company discovery, source validation, job evidence, local company memory, and a follow-up pipeline with a feedback loop.
 
 ## Image keywords
 
-candidate profile, company-first discovery, validated job openings, local storage, follow-up pipeline
+bright conceptual schematic, candidate capability profile, company discovery, validated job evidence, local company memory, follow-up pipeline
 
 ## Generation method
 
-Direct project-specific text-to-image generation. This hero is not a reused SVG, HTML, Canvas, Pillow, or card-grid template.
+Direct project-specific text-to-image generation using a bright conceptual schematic direction. This hero is not a reused SVG, HTML, Canvas, Pillow, robot-screen scene, or dark dashboard template.
 
 ## File paths
 

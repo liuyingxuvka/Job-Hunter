@@ -10,6 +10,12 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-04-29
+
+### Changed
+
+- Preserve previously visible job recommendations across target-role changes, rescoring, and output refreshes while marking historical fit status.
+
 ## [0.9.1] - 2026-04-28
 
 ### Added

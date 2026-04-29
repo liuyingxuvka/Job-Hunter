@@ -67,7 +67,9 @@ class SearchResultsLiveStateTests(unittest.TestCase):
         self.assertEqual(signature[1], "https://source.example.com/post/1")
         self.assertEqual(signature[2], "https://apply.example.com/roles/1")
         self.assertEqual(signature[3], "verified")
-        self.assertEqual(signature[-1], 91)
+        self.assertEqual(signature[-3], 91)
+        self.assertEqual(signature[-2], "")
+        self.assertEqual(signature[-1], "")
 
     def test_jobs_signature_preserves_row_order(self) -> None:
         first = make_job(title="First", url="https://example.com/jobs/1")

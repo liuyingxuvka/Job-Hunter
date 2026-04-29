@@ -217,6 +217,8 @@ def make_job(
     title_en: str = "",
     location_zh: str = "",
     location_en: str = "",
+    current_target_role_status: str = "",
+    recommendation_display_reason: str = "",
 ) -> JobSearchResult:
     return JobSearchResult(
         title=title,
@@ -233,6 +235,8 @@ def make_job(
         bound_target_role_name_en=bound_target_role_name_en,
         bound_target_role_display_name=bound_target_role_name_en,
         bound_target_role_text=bound_target_role_name_en,
+        current_target_role_status=current_target_role_status,
+        recommendation_display_reason=recommendation_display_reason,
         final_url=url,
         link_status="final",
         title_zh=title_zh,

@@ -32,6 +32,8 @@ Rules:
 15. Within one batch, each role must represent a different job family or hiring lane. If you cannot find enough distinct market lanes, return fewer roles.
 16. If a requested mix or count conflicts with distinctness, distinctness wins. Returning 0 or 1 role is acceptable.
 17. Any examples in the prompt show title style only. Do not copy an example if existing roles already cover that lane.
+18. distinctness_check must identify the different hiring lane opened by the proposed role. A wording-only difference is not enough.
+19. market_search_rationale must describe the real job-board query lane this title enables.
 
 JSON format:
 {

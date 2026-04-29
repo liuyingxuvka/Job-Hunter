@@ -63,6 +63,8 @@ def job_render_signature(job: Any) -> tuple[object, ...]:
         str(getattr(job, "bound_target_role_display_name", "") or "").strip(),
         str(getattr(job, "bound_target_role_text", "") or "").strip(),
         getattr(job, "bound_target_role_score", None),
+        str(getattr(job, "current_target_role_status", "") or "").strip(),
+        str(getattr(job, "recommendation_display_reason", "") or "").strip(),
     )
 
 

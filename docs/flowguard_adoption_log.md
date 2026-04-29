@@ -68,3 +68,49 @@
 - Next actions:
   - Add a production conformance replay if this cleanup boundary evolves further.
   - Run the full user-facing app search flow after other concurrent changes settle.
+
+## 2026-04-29 - Recommendation Persistence Visible History
+
+- Task id: `recommendation-persistence-visible-history-20260429`
+- Project: Job-Hunter
+- Task summary: preserve jobs that have already entered the recommendation table while labeling stale or no-longer-current target-role bindings.
+- Trigger reason: the workflow changes target-role update/delete behavior, visible recommendation lifecycle, rescore overwrite behavior, JSON analysis state, runtime write guards, and prompt-side dedupe quality.
+- Model files:
+  - `.flowguard/target_role_reset/model.py`
+  - `.flowguard/target_role_reset/run_checks.py`
+- Commands run:
+  - `python -c "import flowguard; print(flowguard.SCHEMA_VERSION)"`
+  - `python .flowguard/target_role_reset/run_checks.py`
+  - `python -m unittest desktop_app.tests.test_target_role_cleanup`
+  - `python -m unittest desktop_app.tests.test_candidate_job_pool`
+  - `python -m unittest desktop_app.tests.test_job_search_runner_records desktop_app.tests.test_search_results_row_rendering desktop_app.tests.test_search_results_live_state desktop_app.tests.test_role_recommendations_prompts`
+  - `python -m unittest desktop_app.tests.test_target_role_cleanup desktop_app.tests.test_candidate_job_pool desktop_app.tests.test_search_runtime_mirror desktop_app.tests.test_runtime_job_sync`
+  - `python -m unittest desktop_app.tests.test_search_results_regressions desktop_app.tests.test_job_search_runner_regressions desktop_app.tests.test_target_direction_regressions desktop_app.tests.test_role_recommendations_prompts`
+  - `python -m compileall -q desktop_app\src\jobflow_desktop_app .flowguard\target_role_reset`
+  - `python -m unittest discover desktop_app\tests`
+- Findings:
+  - Correct model passed 399 sequences across 4 initial states and 4536 traces.
+  - The safe policy is `keep-visible-labeled`: once a job has been shown in the recommendation table, target-role edits/deletes must not silently remove it.
+  - Visible stale or no-longer-current rows must carry a UI-visible status such as `needs_rescore` or `not_current_fit`; otherwise old recommendation reasons look current.
+  - Unshown stale rows can still be reset to pending because there is no user-visible recommendation history to preserve.
+  - Current rescore reject should preserve an already visible row and mark it `not_current_fit`, rather than overwriting `pass/pass` visibility with reject.
+  - Recommended-output refresh exclusion should preserve an already visible row and mark it `historical_only`, rather than changing `output_status` to reject.
+  - Runtime job-analysis writes still need the missing-profile guard so preserved historical display state does not reintroduce foreign-key failures.
+  - Prompt-side target-role dedupe was strengthened with distinct hiring-lane and job-board query-lane requirements, without adding hard semantic rejection logic.
+- Counterexamples:
+  - Resetting visible stale recommendations violates `shown_recommendations_stay_visible`.
+  - Keeping stale visible rows without a historical/current-fit label violates `visible_stale_bindings_are_labeled`.
+  - Overwriting a previously visible recommendation with a current rescore reject violates `shown_recommendations_stay_visible`.
+  - Overwriting a previously visible recommendation during recommended-output refresh violates `shown_recommendations_stay_visible`.
+  - Removing the runtime write guard can still reproduce `no_fk_failures`.
+- Skipped steps:
+  - Packaged Windows build was not run in this pass; validation used FlowGuard and Python regression tests.
+  - Interactive GUI QA was not rerun after code edits; the next packaged-app desktop test should cover the real UI labels.
+  - Production conformance replay remains a future improvement; current coverage is model exploration plus focused DB/runtime unit tests.
+- Friction points:
+  - The earlier `target_role_reset` model encoded cleanup-to-pending semantics too narrowly and had to distinguish shown recommendations from unshown stale rows.
+  - A final output refresh path had to be modeled separately from current rescore rejects because it can also remove rows from the visible recommendation table.
+  - Prompt-only dedupe can reduce drift but cannot guarantee semantic uniqueness without future hard or review-only checks.
+- Next actions:
+  - Run the next packaged-app QA to verify visible historical/current-fit labels in the real desktop UI.
+  - If recommendation persistence changes again, add a replay adapter that projects real `candidate_jobs` rows into the FlowGuard state model.

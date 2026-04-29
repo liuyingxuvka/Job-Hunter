@@ -575,6 +575,174 @@ class CandidateJobPoolRepositoryTests(unittest.TestCase):
             self.assertEqual(record.output_status, "reject")
             self.assertEqual(summary.recommended_jobs, 0)
 
+    def test_current_rescore_reject_preserves_previously_visible_recommendation(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context)
+            profile_id = create_profile(context, candidate_id, name="Fuel Cell Systems Engineer")
+            mirror = SearchRuntimeMirror(context.database)
+            run_id = mirror.create_run(
+                candidate_id=candidate_id,
+                run_dir=context.paths.runtime_dir / "search_runs" / "candidate_test",
+                status="running",
+                current_stage="direct",
+                started_at="2026-04-27T10:00:00+00:00",
+            )
+            recommended_job = materialize_output_eligibility(
+                {
+                    "title": "Hydrogen Systems Engineer",
+                    "company": "Acme Hydrogen",
+                    "location": "Berlin",
+                    "url": "https://acme.example/jobs/visible",
+                    "canonicalUrl": "https://acme.example/jobs/visible",
+                    "jd": {
+                        "applyUrl": "https://acme.example/jobs/visible",
+                        "finalUrl": "https://acme.example/jobs/visible",
+                    },
+                    "analysis": {
+                        "overallScore": 86,
+                        "recommend": True,
+                        "boundTargetRole": {
+                            "profileId": profile_id,
+                            "roleId": f"profile:{profile_id}",
+                            "displayName": "Fuel Cell Systems Engineer",
+                        },
+                    },
+                },
+                {},
+            )
+            rejected_current_job = {
+                "title": "Hydrogen Systems Engineer",
+                "company": "Acme Hydrogen",
+                "location": "Berlin",
+                "url": "https://acme.example/jobs/visible",
+                "canonicalUrl": "https://acme.example/jobs/visible",
+                "analysis": {
+                    "overallScore": 42,
+                    "recommend": False,
+                    "boundTargetRole": {
+                        "profileId": profile_id,
+                        "roleId": f"profile:{profile_id}",
+                        "displayName": "Fuel Cell Systems Engineer",
+                    },
+                },
+            }
+
+            mirror.replace_bucket_jobs(
+                search_run_id=run_id,
+                candidate_id=candidate_id,
+                job_bucket="all",
+                jobs=[recommended_job],
+            )
+            mirror.replace_bucket_jobs(
+                search_run_id=run_id,
+                candidate_id=candidate_id,
+                job_bucket="all",
+                jobs=[rejected_current_job],
+            )
+
+            record = CandidateJobPoolRepository(context.database).list_for_candidate(candidate_id)[0]
+            payload = CandidateJobPoolRepository(context.database).load_recommended_payloads_for_candidate(
+                candidate_id
+            )[0]
+
+            self.assertEqual(record.recommendation_status, "pass")
+            self.assertEqual(record.output_status, "pass")
+            self.assertEqual(
+                payload["analysis"]["recommendationDisplay"]["currentFitStatus"],
+                "not_current_fit",
+            )
+            self.assertEqual(
+                payload["analysis"]["recommendationDisplay"]["reason"],
+                "current_rescore_reject",
+            )
+
+    def test_output_set_refresh_preserves_previously_visible_recommendation(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context)
+            mirror = SearchRuntimeMirror(context.database)
+            run_id = mirror.create_run(
+                candidate_id=candidate_id,
+                run_dir=context.paths.runtime_dir / "search_runs" / "candidate_test",
+                status="running",
+                current_stage="direct",
+                started_at="2026-04-27T10:00:00+00:00",
+            )
+            jobs = [
+                materialize_output_eligibility(
+                    {
+                        "title": "Hydrogen Systems Engineer",
+                        "company": "Acme Hydrogen",
+                        "location": "Berlin",
+                        "url": "https://acme.example/jobs/kept",
+                        "canonicalUrl": "https://acme.example/jobs/kept",
+                        "jd": {
+                            "applyUrl": "https://acme.example/jobs/kept",
+                            "finalUrl": "https://acme.example/jobs/kept",
+                        },
+                        "analysis": {
+                            "overallScore": 86,
+                            "recommend": True,
+                        },
+                    },
+                    {},
+                ),
+                materialize_output_eligibility(
+                    {
+                        "title": "Fuel Cell Modeling Engineer",
+                        "company": "Beta Hydrogen",
+                        "location": "Berlin",
+                        "url": "https://beta.example/jobs/history",
+                        "canonicalUrl": "https://beta.example/jobs/history",
+                        "jd": {
+                            "applyUrl": "https://beta.example/jobs/history",
+                            "finalUrl": "https://beta.example/jobs/history",
+                        },
+                        "analysis": {
+                            "overallScore": 82,
+                            "recommend": True,
+                        },
+                    },
+                    {},
+                ),
+            ]
+
+            mirror.replace_bucket_jobs(
+                search_run_id=run_id,
+                candidate_id=candidate_id,
+                job_bucket="all",
+                jobs=jobs,
+            )
+            CandidateJobPoolRepository(context.database).mark_recommended_output_set(
+                candidate_id=candidate_id,
+                job_keys={"https://acme.example/jobs/kept"},
+            )
+
+            records = {
+                record.job_key: record
+                for record in CandidateJobPoolRepository(context.database).list_for_candidate(candidate_id)
+            }
+            payloads = {
+                payload["canonicalUrl"]: payload
+                for payload in CandidateJobPoolRepository(
+                    context.database
+                ).load_recommended_payloads_for_candidate(candidate_id)
+            }
+
+            self.assertEqual(records["https://beta.example/jobs/history"].output_status, "pass")
+            self.assertIn("https://beta.example/jobs/history", payloads)
+            self.assertEqual(
+                payloads["https://beta.example/jobs/history"]["analysis"]["recommendationDisplay"][
+                    "currentFitStatus"
+                ],
+                "historical_only",
+            )
+            self.assertEqual(
+                payloads["https://beta.example/jobs/history"]["analysis"]["recommendationDisplay"][
+                    "reason"
+                ],
+                "current_output_refresh_excluded",
+            )
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

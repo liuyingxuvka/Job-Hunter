@@ -37,8 +37,16 @@ def display_target_role(ui_language: str, job: Any) -> str:
             or str(getattr(job, "bound_target_role_display_name", "") or "").strip()
             or str(getattr(job, "bound_target_role_name_en", "") or "").strip()
         )
+    status = str(getattr(job, "current_target_role_status", "") or "").strip()
+    suffix = ""
+    if status == "needs_rescore":
+        suffix = _t(ui_language, "（历史/待重算）", " (historical / rescore)")
+    elif status == "not_current_fit":
+        suffix = _t(ui_language, "（历史，当前不匹配）", " (historical, not current fit)")
+    elif status == "historical_only":
+        suffix = _t(ui_language, "（历史推荐）", " (historical)")
     if localized:
-        return localized
+        return f"{localized}{suffix}"
     return _t(ui_language, "未绑定", "Unbound")
 
 

@@ -1,13 +1,14 @@
-"""Flowguard model for target-role replacement and stale job analysis bindings.
+"""FlowGuard model for target-role changes and recommendation persistence.
 
 The model covers one narrow boundary:
 
-    search_profiles replacement/deletion -> candidate_jobs JSON cleanup -> runtime analysis write
+    search_profiles deletion/update -> candidate_jobs recommendation state -> runtime analysis write
 
-The production risk is that candidate job payloads can keep an old
-boundTargetRole.profileId after the corresponding search profile has been
-deleted. A later runtime write then treats that stale JSON as live state and
-attempts to write job_analyses with a missing foreign key.
+The intended product rule is cumulative: once a job has reached the visible
+recommendation table, target-role edits must not erase it. Stale or changed
+role bindings may remain as historical evidence, but visible rows must be
+marked needs-rescore/not-current-fit instead of pretending to be current-fit.
+Rows that never reached the visible recommendation table can still be reset.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ NEW_PROFILE_ID = 2
 
 @dataclass(frozen=True)
 class RoleEvent:
-    kind: str  # bootstrap | replace_via_app | unsafe_external_delete | runtime_write
+    kind: str
 
 
 @dataclass(frozen=True)
@@ -34,40 +35,66 @@ class State:
     review_refs: frozenset[int]
     json_bound_profile_id: int | None
     json_target_score_profile_ids: tuple[int, ...]
+    shown_once: bool
     scoring_status: str
     recommendation_status: str
     output_status: str
+    current_fit_status: str
     manual_fields_preserved: bool = True
     fk_failure: bool = False
     runtime_writes: int = 0
-    stale_bindings_cleared: int = 0
+    stale_unshown_cleared: int = 0
+    visible_stale_marked: int = 0
     stale_runtime_writes_skipped: int = 0
 
 
-def clean_old_profile_state() -> State:
+def clean_shown_state() -> State:
     return State(
         valid_profiles=frozenset({OLD_PROFILE_ID}),
         analysis_refs=frozenset({OLD_PROFILE_ID}),
         review_refs=frozenset({OLD_PROFILE_ID}),
         json_bound_profile_id=OLD_PROFILE_ID,
         json_target_score_profile_ids=(OLD_PROFILE_ID,),
+        shown_once=True,
         scoring_status="scored",
         recommendation_status="pass",
         output_status="pass",
+        current_fit_status="current_fit",
     )
 
 
-def dirty_replaced_state() -> State:
-    return State(
+def clean_unshown_state() -> State:
+    return replace(
+        clean_shown_state(),
+        shown_once=False,
+        output_status="reject",
+        current_fit_status="current_fit",
+    )
+
+
+def dirty_replaced_shown_state() -> State:
+    return replace(
+        clean_shown_state(),
         valid_profiles=frozenset({NEW_PROFILE_ID}),
-        analysis_refs=frozenset({OLD_PROFILE_ID}),
-        review_refs=frozenset({OLD_PROFILE_ID}),
-        json_bound_profile_id=OLD_PROFILE_ID,
-        json_target_score_profile_ids=(OLD_PROFILE_ID,),
-        scoring_status="scored",
-        recommendation_status="pass",
-        output_status="pass",
     )
+
+
+def dirty_replaced_unshown_state() -> State:
+    return replace(
+        clean_unshown_state(),
+        valid_profiles=frozenset({NEW_PROFILE_ID}),
+    )
+
+
+def _json_profile_ids(state: State) -> frozenset[int]:
+    ids = set(state.json_target_score_profile_ids)
+    if state.json_bound_profile_id is not None:
+        ids.add(state.json_bound_profile_id)
+    return frozenset(ids)
+
+
+def _has_stale_json_binding(state: State) -> bool:
+    return any(profile_id not in state.valid_profiles for profile_id in _json_profile_ids(state))
 
 
 class ProfileMutation:
@@ -136,60 +163,236 @@ class RelationalOrphanCleanup:
         yield FunctionResult(output=input_obj, new_state=state, label="relational_state_clean")
 
 
-class CandidateJsonBindingCleanup:
-    name = "CandidateJsonBindingCleanup"
-    reads = ("valid_profiles", "json_bound_profile_id", "json_target_score_profile_ids")
+class CandidateRecommendationBindingCleanup:
+    name = "CandidateRecommendationBindingCleanup"
+    reads = (
+        "valid_profiles",
+        "json_bound_profile_id",
+        "json_target_score_profile_ids",
+        "shown_once",
+    )
     writes = (
         "json_bound_profile_id",
         "json_target_score_profile_ids",
         "scoring_status",
         "recommendation_status",
         "output_status",
-        "stale_bindings_cleared",
+        "current_fit_status",
+        "stale_unshown_cleared",
+        "visible_stale_marked",
     )
     accepted_input_type = RoleEvent
     input_description = "profile lifecycle event after relational repair"
-    output_description = "same event after JSON binding cleanup"
-    idempotency = "Repeated cleanup leaves already-unbound jobs pending for rescoring."
+    output_description = "same event after recommendation binding cleanup"
+    idempotency = "Repeated cleanup keeps visible rows marked needs_rescore and leaves unshown rows reset."
 
     def apply(self, input_obj: RoleEvent, state: State) -> Iterable[FunctionResult]:
-        bound_profile_id = (
-            state.json_bound_profile_id
-            if state.json_bound_profile_id in state.valid_profiles
-            else None
+        role_changed = (
+            input_obj.kind == "target_role_update"
+            and state.json_bound_profile_id in state.valid_profiles
         )
-        score_profile_ids = tuple(
-            profile_id
-            for profile_id in state.json_target_score_profile_ids
-            if profile_id in state.valid_profiles
-        )
-        stale_removed = (
-            bound_profile_id != state.json_bound_profile_id
-            or score_profile_ids != state.json_target_score_profile_ids
-        )
-        if stale_removed:
+        needs_recheck = _has_stale_json_binding(state) or role_changed
+        if not needs_recheck:
+            yield FunctionResult(output=input_obj, new_state=state, label="json_binding_clean")
+            return
+
+        if state.shown_once:
             yield FunctionResult(
                 output=input_obj,
                 new_state=replace(
                     state,
-                    json_bound_profile_id=bound_profile_id,
-                    json_target_score_profile_ids=score_profile_ids,
-                    scoring_status="pending",
-                    recommendation_status="pending",
-                    output_status="pending",
-                    stale_bindings_cleared=state.stale_bindings_cleared + 1,
+                    scoring_status="scored",
+                    recommendation_status="pass",
+                    output_status="pass",
+                    current_fit_status="needs_rescore",
+                    visible_stale_marked=state.visible_stale_marked + 1,
                 ),
-                label="stale_json_binding_cleared",
+                label="visible_recommendation_marked_needs_rescore",
             )
             return
-        yield FunctionResult(output=input_obj, new_state=state, label="json_binding_clean")
+
+        yield FunctionResult(
+            output=input_obj,
+            new_state=replace(
+                state,
+                json_bound_profile_id=None,
+                json_target_score_profile_ids=(),
+                scoring_status="pending",
+                recommendation_status="pending",
+                output_status="pending",
+                current_fit_status="none",
+                stale_unshown_cleared=state.stale_unshown_cleared + 1,
+            ),
+            label="unshown_stale_json_binding_cleared",
+        )
 
 
-class NoJsonBindingCleanup(CandidateJsonBindingCleanup):
-    name = "NoJsonBindingCleanup"
+class ResetVisibleRecommendationCleanup(CandidateRecommendationBindingCleanup):
+    name = "ResetVisibleRecommendationCleanup"
 
     def apply(self, input_obj: RoleEvent, state: State) -> Iterable[FunctionResult]:
-        yield FunctionResult(output=input_obj, new_state=state, label="broken_json_cleanup_skipped")
+        role_changed = (
+            input_obj.kind == "target_role_update"
+            and state.json_bound_profile_id in state.valid_profiles
+        )
+        if not (_has_stale_json_binding(state) or role_changed):
+            yield FunctionResult(output=input_obj, new_state=state, label="json_binding_clean")
+            return
+        yield FunctionResult(
+            output=input_obj,
+            new_state=replace(
+                state,
+                json_bound_profile_id=None,
+                json_target_score_profile_ids=(),
+                scoring_status="pending",
+                recommendation_status="pending",
+                output_status="pending",
+                current_fit_status="none",
+                stale_unshown_cleared=state.stale_unshown_cleared + 1,
+            ),
+            label="broken_visible_recommendation_reset",
+        )
+
+
+class KeepVisibleUnlabeledCleanup(CandidateRecommendationBindingCleanup):
+    name = "KeepVisibleUnlabeledCleanup"
+
+    def apply(self, input_obj: RoleEvent, state: State) -> Iterable[FunctionResult]:
+        role_changed = (
+            input_obj.kind == "target_role_update"
+            and state.json_bound_profile_id in state.valid_profiles
+        )
+        if not (_has_stale_json_binding(state) or role_changed):
+            yield FunctionResult(output=input_obj, new_state=state, label="json_binding_clean")
+            return
+        if state.shown_once:
+            yield FunctionResult(
+                output=input_obj,
+                new_state=replace(
+                    state,
+                    recommendation_status="pass",
+                    output_status="pass",
+                    current_fit_status="current_fit",
+                ),
+                label="broken_visible_stale_left_current_fit",
+            )
+            return
+        yield from super().apply(input_obj, state)
+
+
+class CurrentRescoreApplication:
+    name = "CurrentRescoreApplication"
+    reads = ("shown_once", "recommendation_status", "output_status")
+    writes = ("recommendation_status", "output_status", "current_fit_status")
+    accepted_input_type = RoleEvent
+    input_description = "current-role rescore event"
+    output_description = "same event after current-fit status update"
+    idempotency = "Repeated current rejects keep historical visibility stable."
+
+    def apply(self, input_obj: RoleEvent, state: State) -> Iterable[FunctionResult]:
+        if input_obj.kind != "current_rescore_reject":
+            yield FunctionResult(output=input_obj, new_state=state, label="current_rescore_not_requested")
+            return
+        if state.shown_once:
+            yield FunctionResult(
+                output=input_obj,
+                new_state=replace(
+                    state,
+                    recommendation_status="pass",
+                    output_status="pass",
+                    current_fit_status="not_current_fit",
+                ),
+                label="current_reject_preserved_visible_history",
+            )
+            return
+        yield FunctionResult(
+            output=input_obj,
+            new_state=replace(
+                state,
+                recommendation_status="reject",
+                output_status="reject",
+                current_fit_status="not_current_fit",
+            ),
+            label="current_reject_unshown_row",
+        )
+
+
+class CurrentRescoreOverwritesVisibility(CurrentRescoreApplication):
+    name = "CurrentRescoreOverwritesVisibility"
+
+    def apply(self, input_obj: RoleEvent, state: State) -> Iterable[FunctionResult]:
+        if input_obj.kind != "current_rescore_reject":
+            yield FunctionResult(output=input_obj, new_state=state, label="current_rescore_not_requested")
+            return
+        yield FunctionResult(
+            output=input_obj,
+            new_state=replace(
+                state,
+                recommendation_status="reject",
+                output_status="reject",
+                current_fit_status="not_current_fit",
+            ),
+            label="broken_current_reject_erased_visible_history",
+        )
+
+
+class RecommendedOutputSetRefresh:
+    name = "RecommendedOutputSetRefresh"
+    reads = ("shown_once", "recommendation_status", "output_status", "current_fit_status")
+    writes = ("output_status", "current_fit_status")
+    accepted_input_type = RoleEvent
+    input_description = "recommended-output refresh event"
+    output_description = "same event after output visibility reconciliation"
+    idempotency = "Repeated output refreshes keep previously visible rows as historical recommendations."
+
+    def apply(self, input_obj: RoleEvent, state: State) -> Iterable[FunctionResult]:
+        if input_obj.kind != "output_refresh_excludes":
+            yield FunctionResult(output=input_obj, new_state=state, label="output_refresh_not_requested")
+            return
+        if state.shown_once:
+            current_fit_status = (
+                state.current_fit_status
+                if state.current_fit_status in {"needs_rescore", "not_current_fit"}
+                else "historical_only"
+            )
+            yield FunctionResult(
+                output=input_obj,
+                new_state=replace(
+                    state,
+                    recommendation_status="pass",
+                    output_status="pass",
+                    current_fit_status=current_fit_status,
+                ),
+                label="output_refresh_preserved_visible_history",
+            )
+            return
+        yield FunctionResult(
+            output=input_obj,
+            new_state=replace(
+                state,
+                output_status="reject",
+                current_fit_status="historical_only",
+            ),
+            label="output_refresh_rejected_unshown_row",
+        )
+
+
+class OutputRefreshOverwritesVisibility(RecommendedOutputSetRefresh):
+    name = "OutputRefreshOverwritesVisibility"
+
+    def apply(self, input_obj: RoleEvent, state: State) -> Iterable[FunctionResult]:
+        if input_obj.kind != "output_refresh_excludes":
+            yield FunctionResult(output=input_obj, new_state=state, label="output_refresh_not_requested")
+            return
+        yield FunctionResult(
+            output=input_obj,
+            new_state=replace(
+                state,
+                output_status="reject",
+                current_fit_status="historical_only",
+            ),
+            label="broken_output_refresh_erased_visible_history",
+        )
 
 
 class RuntimeAnalysisWrite:
@@ -288,42 +491,43 @@ def no_relational_orphans(state: State, trace) -> InvariantResult:
     return InvariantResult.pass_()
 
 
-def no_stale_json_bindings(state: State, trace) -> InvariantResult:
-    if not trace.steps:
-        return InvariantResult.pass_()
-    stale_ids: set[int] = set()
-    if state.json_bound_profile_id is not None and state.json_bound_profile_id not in state.valid_profiles:
-        stale_ids.add(state.json_bound_profile_id)
-    stale_ids.update(
-        profile_id
-        for profile_id in state.json_target_score_profile_ids
-        if profile_id not in state.valid_profiles
-    )
-    if stale_ids:
-        return InvariantResult.fail(
-            "candidate job JSON still references deleted search profiles",
-            {"stale_profile_ids": tuple(sorted(stale_ids))},
-        )
-    return InvariantResult.pass_()
-
-
-def stale_clears_reset_scoring_outputs(state: State, trace) -> InvariantResult:
+def shown_recommendations_stay_visible(state: State, trace) -> InvariantResult:
     del trace
-    if state.stale_bindings_cleared <= 0:
+    if not state.shown_once:
         return InvariantResult.pass_()
-    if (
-        state.scoring_status,
-        state.recommendation_status,
-        state.output_status,
-    ) != ("pending", "pending", "pending"):
+    if state.recommendation_status != "pass" or state.output_status != "pass":
         return InvariantResult.fail(
-            "stale role-bound jobs were not reset for rescoring",
+            "previously visible recommendation was removed by role cleanup or rescore",
             {
-                "scoring_status": state.scoring_status,
                 "recommendation_status": state.recommendation_status,
                 "output_status": state.output_status,
             },
         )
+    return InvariantResult.pass_()
+
+
+def visible_stale_bindings_are_labeled(state: State, trace) -> InvariantResult:
+    if not trace.steps:
+        return InvariantResult.pass_()
+    if not state.shown_once or state.recommendation_status != "pass" or state.output_status != "pass":
+        return InvariantResult.pass_()
+    if _has_stale_json_binding(state) and state.current_fit_status not in {
+        "needs_rescore",
+        "not_current_fit",
+        "historical_only",
+    }:
+        return InvariantResult.fail(
+            "visible stale target-role binding is not labeled historical/needs-rescore",
+            {"current_fit_status": state.current_fit_status},
+        )
+    return InvariantResult.pass_()
+
+
+def unshown_stale_bindings_are_reset(state: State, trace) -> InvariantResult:
+    if not trace.steps or state.shown_once:
+        return InvariantResult.pass_()
+    if _has_stale_json_binding(state):
+        return InvariantResult.fail("unshown stale target-role binding should be cleared")
     return InvariantResult.pass_()
 
 
@@ -346,14 +550,19 @@ INVARIANTS = (
         predicate=no_relational_orphans,
     ),
     Invariant(
-        name="no_stale_json_bindings",
-        description="Candidate job JSON must not retain stale profile-bound target-role data.",
-        predicate=no_stale_json_bindings,
+        name="shown_recommendations_stay_visible",
+        description="Rows already shown in recommendations remain visible unless user/link state removes them.",
+        predicate=shown_recommendations_stay_visible,
     ),
     Invariant(
-        name="stale_clears_reset_scoring_outputs",
-        description="A stale role-bound analysis is invalidated and queued for rescoring.",
-        predicate=stale_clears_reset_scoring_outputs,
+        name="visible_stale_bindings_are_labeled",
+        description="Visible stale role bindings must be labeled historical/needs-rescore.",
+        predicate=visible_stale_bindings_are_labeled,
+    ),
+    Invariant(
+        name="unshown_stale_bindings_are_reset",
+        description="Rows never shown in recommendations are reset instead of keeping stale bindings.",
+        predicate=unshown_stale_bindings_are_reset,
     ),
     Invariant(
         name="manual_fields_are_not_consumed",
@@ -367,6 +576,9 @@ EXTERNAL_INPUTS = (
     RoleEvent("bootstrap"),
     RoleEvent("replace_via_app"),
     RoleEvent("unsafe_external_delete"),
+    RoleEvent("target_role_update"),
+    RoleEvent("current_rescore_reject"),
+    RoleEvent("output_refresh_excludes"),
     RoleEvent("runtime_write"),
 )
 
@@ -374,7 +586,12 @@ MAX_SEQUENCE_LENGTH = 3
 
 
 def initial_states() -> tuple[State, ...]:
-    return (clean_old_profile_state(), dirty_replaced_state())
+    return (
+        clean_shown_state(),
+        clean_unshown_state(),
+        dirty_replaced_shown_state(),
+        dirty_replaced_unshown_state(),
+    )
 
 
 def build_workflow() -> Workflow:
@@ -382,34 +599,82 @@ def build_workflow() -> Workflow:
         (
             ProfileMutation(),
             RelationalOrphanCleanup(),
-            CandidateJsonBindingCleanup(),
+            CandidateRecommendationBindingCleanup(),
+            CurrentRescoreApplication(),
+            RecommendedOutputSetRefresh(),
             RuntimeAnalysisWrite(),
         ),
-        name="target_role_reset",
+        name="target_role_recommendation_persistence",
     )
 
 
-def build_no_json_cleanup_workflow() -> Workflow:
+def build_reset_visible_workflow() -> Workflow:
     return Workflow(
         (
             ProfileMutation(),
             RelationalOrphanCleanup(),
-            NoJsonBindingCleanup(),
+            ResetVisibleRecommendationCleanup(),
+            CurrentRescoreApplication(),
+            RecommendedOutputSetRefresh(),
             RuntimeAnalysisWrite(),
         ),
-        name="broken_no_json_cleanup",
+        name="broken_reset_visible_recommendations",
     )
 
 
-def build_no_json_cleanup_no_write_guard_workflow() -> Workflow:
+def build_unlabeled_visible_workflow() -> Workflow:
     return Workflow(
         (
             ProfileMutation(),
             RelationalOrphanCleanup(),
-            NoJsonBindingCleanup(),
+            KeepVisibleUnlabeledCleanup(),
+            CurrentRescoreApplication(),
+            RecommendedOutputSetRefresh(),
+            RuntimeAnalysisWrite(),
+        ),
+        name="broken_keep_visible_unlabeled",
+    )
+
+
+def build_rescore_overwrite_workflow() -> Workflow:
+    return Workflow(
+        (
+            ProfileMutation(),
+            RelationalOrphanCleanup(),
+            CandidateRecommendationBindingCleanup(),
+            CurrentRescoreOverwritesVisibility(),
+            RecommendedOutputSetRefresh(),
+            RuntimeAnalysisWrite(),
+        ),
+        name="broken_current_rescore_overwrite",
+    )
+
+
+def build_output_refresh_overwrite_workflow() -> Workflow:
+    return Workflow(
+        (
+            ProfileMutation(),
+            RelationalOrphanCleanup(),
+            CandidateRecommendationBindingCleanup(),
+            CurrentRescoreApplication(),
+            OutputRefreshOverwritesVisibility(),
+            RuntimeAnalysisWrite(),
+        ),
+        name="broken_output_refresh_overwrite",
+    )
+
+
+def build_no_write_guard_workflow() -> Workflow:
+    return Workflow(
+        (
+            ProfileMutation(),
+            RelationalOrphanCleanup(),
+            CandidateRecommendationBindingCleanup(),
+            CurrentRescoreApplication(),
+            RecommendedOutputSetRefresh(),
             RuntimeAnalysisWriteWithoutGuard(),
         ),
-        name="broken_no_json_cleanup_no_write_guard",
+        name="broken_no_runtime_write_guard",
     )
 
 
@@ -419,11 +684,16 @@ __all__ = [
     "MAX_SEQUENCE_LENGTH",
     "RoleEvent",
     "State",
-    "build_no_json_cleanup_no_write_guard_workflow",
-    "build_no_json_cleanup_workflow",
+    "build_no_write_guard_workflow",
+    "build_output_refresh_overwrite_workflow",
+    "build_reset_visible_workflow",
+    "build_rescore_overwrite_workflow",
+    "build_unlabeled_visible_workflow",
     "build_workflow",
-    "clean_old_profile_state",
-    "dirty_replaced_state",
+    "clean_shown_state",
+    "clean_unshown_state",
+    "dirty_replaced_shown_state",
+    "dirty_replaced_unshown_state",
     "initial_states",
     "terminal_predicate",
 ]

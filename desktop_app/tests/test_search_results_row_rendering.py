@@ -99,6 +99,23 @@ class SearchResultsRowRenderingTests(unittest.TestCase):
             "Senior CRM Process Owner",
         )
 
+    def test_display_target_role_marks_historical_rescore_status(self) -> None:
+        from jobflow_desktop_app.app.pages import search_results_rendering
+
+        job = make_job(
+            bound_target_role_name_en="Fuel Cell Systems Engineer",
+            current_target_role_status="needs_rescore",
+        )
+
+        self.assertEqual(
+            search_results_rendering.display_target_role("zh", job),
+            "Fuel Cell Systems Engineer（历史/待重算）",
+        )
+        self.assertEqual(
+            search_results_rendering.display_target_role("en", job),
+            "Fuel Cell Systems Engineer (historical / rescore)",
+        )
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

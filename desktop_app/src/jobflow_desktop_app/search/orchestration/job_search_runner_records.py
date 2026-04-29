@@ -147,6 +147,9 @@ def build_job_records(
         bound_target_role = analysis.get("boundTargetRole")
         if not isinstance(bound_target_role, dict):
             bound_target_role = {}
+        recommendation_display = analysis.get("recommendationDisplay")
+        if not isinstance(recommendation_display, dict):
+            recommendation_display = {}
         bound_profile_id = extract_optional_int(bound_target_role.get("profileId"))
         bound_score = extract_optional_int(analysis.get("targetRoleScore"))
         if bound_score is None:
@@ -182,6 +185,12 @@ def build_job_records(
                 bound_target_role_display_name=str(bound_target_role.get("displayName") or "").strip(),
                 bound_target_role_text=str(bound_target_role.get("targetRoleText") or "").strip(),
                 bound_target_role_score=bound_score,
+                current_target_role_status=str(
+                    recommendation_display.get("currentFitStatus") or ""
+                ).strip(),
+                recommendation_display_reason=str(
+                    recommendation_display.get("reason") or ""
+                ).strip(),
                 source_url=source_url,
                 final_url=final_url,
                 link_status=link_status,

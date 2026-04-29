@@ -92,6 +92,9 @@ class RoleRecommendationsPromptsTests(unittest.TestCase):
         self.assertIn("Treat examples as title-shape examples only", prompt)
         self.assertIn("Scope decision rubric:", prompt)
         self.assertIn("Do not label a role core just because it contains the right domain words", prompt)
+        self.assertIn("different hiring lane", prompt)
+        self.assertIn("different cluster of real job postings", prompt)
+        self.assertIn("job-board query lane", prompt)
 
     def test_role_recommendation_prompt_strengthens_existing_role_distinctness(self) -> None:
         prompt = build_role_recommendation_prompt(
@@ -112,6 +115,7 @@ class RoleRecommendationsPromptsTests(unittest.TestCase):
         self.assertIn("Role-mix and count targets are subordinate to distinctness", prompt)
         self.assertIn("do not return a broad rewrite of that same lane", prompt)
         self.assertIn("if existing roles already cover that same system, test, validation", prompt)
+        self.assertIn("distinctness_check must name the different hiring lane", prompt)
 
     def test_system_prompt_frames_roles_as_market_search_lenses(self) -> None:
         self.assertIn("downstream search lenses", SYSTEM_PROMPT)
@@ -119,6 +123,8 @@ class RoleRecommendationsPromptsTests(unittest.TestCase):
         self.assertIn("keep the title market-facing first", SYSTEM_PROMPT)
         self.assertIn("clearly new market lanes", SYSTEM_PROMPT)
         self.assertIn("distinctness wins", SYSTEM_PROMPT)
+        self.assertIn("wording-only difference is not enough", SYSTEM_PROMPT)
+        self.assertIn("real job-board query lane", SYSTEM_PROMPT)
         self.assertIn("examples in the prompt show title style only", SYSTEM_PROMPT)
         self.assertNotIn("role names should reflect that specificity instead of broad job families", SYSTEM_PROMPT)
 

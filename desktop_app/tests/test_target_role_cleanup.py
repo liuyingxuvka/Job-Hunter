@@ -6,6 +6,7 @@ import unittest
 
 from jobflow_desktop_app.db.bootstrap import initialize_database
 from jobflow_desktop_app.db.repositories.search_runtime import JobAnalysisRepository
+from jobflow_desktop_app.db.repositories.profiles import SearchProfileRecord
 from jobflow_desktop_app.db.target_role_cleanup import analysis_has_stale_target_role_binding
 from jobflow_desktop_app.search.state.runtime_db_mirror import SearchRuntimeMirror
 
@@ -60,8 +61,11 @@ def _insert_stale_candidate_job(
     job_id: int,
     profile_id: int,
     url: str = "https://example.com/jobs/1",
+    role_name: str = "Old Narrow Role",
+    recommendation_status: str = "pass",
+    output_status: str = "pass",
 ) -> None:
-    analysis = _role_bound_analysis(profile_id)
+    analysis = _role_bound_analysis(profile_id, role_name=role_name)
     payload = {
         "title": "Hydrogen Systems Engineer",
         "company": "Acme Hydrogen",
@@ -92,7 +96,7 @@ def _insert_stale_candidate_job(
           analysis_json,
           job_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scored', 'pass', 'pass', 'high', 'applied', 'waiting', 'manual note', 88, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scored', ?, ?, 'high', 'applied', 'waiting', 'manual note', 88, ?, ?)
         """,
         (
             int(candidate_id),
@@ -103,6 +107,8 @@ def _insert_stale_candidate_job(
             "Hydrogen Systems Engineer",
             "Acme Hydrogen",
             "Berlin",
+            recommendation_status,
+            output_status,
             json.dumps(analysis, ensure_ascii=False),
             json.dumps(payload, ensure_ascii=False),
         ),
@@ -125,7 +131,7 @@ class TargetRoleCleanupTests(unittest.TestCase):
             )
         )
 
-    def test_delete_profile_resets_stale_candidate_job_json_and_preserves_manual_fields(self) -> None:
+    def test_delete_profile_marks_visible_stale_recommendation_historical_and_preserves_manual_fields(self) -> None:
         with make_temp_context() as context:
             candidate_id = create_candidate(context)
             old_profile_id = create_profile(context, candidate_id, name="Old Narrow Role")
@@ -201,12 +207,18 @@ class TargetRoleCleanupTests(unittest.TestCase):
                 )
                 fk_rows = connection.execute("PRAGMA foreign_key_check").fetchall()
 
-            self.assertEqual(str(row["analysis_json"]), "")
-            self.assertNotIn("analysis", json.loads(str(row["job_json"])))
-            self.assertEqual(str(row["scoring_status"]), "pending")
-            self.assertEqual(str(row["recommendation_status"]), "pending")
-            self.assertEqual(str(row["output_status"]), "pending")
-            self.assertIsNone(row["match_score"])
+            analysis = json.loads(str(row["analysis_json"]))
+            payload = json.loads(str(row["job_json"]))
+            self.assertEqual(
+                analysis["recommendationDisplay"]["currentFitStatus"],
+                "needs_rescore",
+            )
+            self.assertEqual(analysis["recommendationDisplay"]["reason"], "stale_target_role")
+            self.assertIn("analysis", payload)
+            self.assertEqual(str(row["scoring_status"]), "scored")
+            self.assertEqual(str(row["recommendation_status"]), "pass")
+            self.assertEqual(str(row["output_status"]), "pass")
+            self.assertEqual(int(row["match_score"]), 88)
             self.assertEqual(str(row["interest_level"]), "high")
             self.assertEqual(str(row["applied_status"]), "applied")
             self.assertEqual(str(row["response_status"]), "waiting")
@@ -277,14 +289,98 @@ class TargetRoleCleanupTests(unittest.TestCase):
                 )
                 fk_rows = connection.execute("PRAGMA foreign_key_check").fetchall()
 
+            analysis = json.loads(str(candidate_job["analysis_json"]))
+            self.assertEqual(
+                analysis["recommendationDisplay"]["currentFitStatus"],
+                "needs_rescore",
+            )
+            self.assertEqual(str(candidate_job["scoring_status"]), "scored")
+            self.assertEqual(str(candidate_job["recommendation_status"]), "pass")
+            self.assertEqual(str(candidate_job["output_status"]), "pass")
+            self.assertEqual(int(candidate_job["match_score"]), 88)
+            self.assertEqual(analyses_total, 0)
+            self.assertEqual(review_total, 0)
+            self.assertEqual(fk_rows, [])
+
+    def test_delete_profile_resets_unshown_stale_candidate_job_for_rescore(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context)
+            old_profile_id = create_profile(context, candidate_id, name="Old Narrow Role")
+            create_profile(context, candidate_id, name="New Market Role")
+            with context.database.session() as connection:
+                job_id = _insert_job(connection)
+                _insert_stale_candidate_job(
+                    connection,
+                    candidate_id=candidate_id,
+                    job_id=job_id,
+                    profile_id=old_profile_id,
+                    recommendation_status="pass",
+                    output_status="reject",
+                )
+
+            context.profiles.delete(old_profile_id)
+
+            with context.database.session() as connection:
+                candidate_job = connection.execute(
+                    """
+                    SELECT analysis_json, job_json, scoring_status, recommendation_status, output_status, match_score
+                    FROM candidate_jobs
+                    WHERE candidate_id = ? AND job_id = ?
+                    """,
+                    (candidate_id, job_id),
+                ).fetchone()
+
             self.assertEqual(str(candidate_job["analysis_json"]), "")
+            self.assertNotIn("analysis", json.loads(str(candidate_job["job_json"])))
             self.assertEqual(str(candidate_job["scoring_status"]), "pending")
             self.assertEqual(str(candidate_job["recommendation_status"]), "pending")
             self.assertEqual(str(candidate_job["output_status"]), "pending")
             self.assertIsNone(candidate_job["match_score"])
-            self.assertEqual(analyses_total, 0)
-            self.assertEqual(review_total, 0)
-            self.assertEqual(fk_rows, [])
+
+    def test_profile_update_marks_visible_bound_recommendation_for_rescore(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context)
+            profile_id = create_profile(context, candidate_id, name="Fuel Cell Systems Engineer")
+            with context.database.session() as connection:
+                job_id = _insert_job(connection)
+                _insert_stale_candidate_job(
+                    connection,
+                    candidate_id=candidate_id,
+                    job_id=job_id,
+                    profile_id=profile_id,
+                    role_name="Fuel Cell Systems Engineer",
+                )
+
+            context.profiles.save(
+                SearchProfileRecord(
+                    profile_id=profile_id,
+                    candidate_id=candidate_id,
+                    name="Hydrogen Validation Engineer",
+                    scope_profile="core",
+                    target_role="Hydrogen validation and test roles",
+                    location_preference="",
+                    is_active=True,
+                )
+            )
+
+            with context.database.session() as connection:
+                row = connection.execute(
+                    """
+                    SELECT analysis_json, recommendation_status, output_status
+                    FROM candidate_jobs
+                    WHERE candidate_id = ? AND job_id = ?
+                    """,
+                    (candidate_id, job_id),
+                ).fetchone()
+
+            analysis = json.loads(str(row["analysis_json"]))
+            self.assertEqual(
+                analysis["recommendationDisplay"]["currentFitStatus"],
+                "needs_rescore",
+            )
+            self.assertEqual(analysis["recommendationDisplay"]["reason"], "target_role_changed")
+            self.assertEqual(str(row["recommendation_status"]), "pass")
+            self.assertEqual(str(row["output_status"]), "pass")
 
     def test_job_analysis_repository_skips_missing_profile_id(self) -> None:
         with make_temp_context() as context:

@@ -141,6 +141,42 @@ class SearchProfileRepository:
                 profile_id = int(cursor.lastrowid)
             else:
                 profile_id = int(record.profile_id)
+                existing = connection.execute(
+                    """
+                    SELECT
+                      name,
+                      scope_profile,
+                      target_role,
+                      location_preference,
+                      role_name_i18n,
+                      keyword_focus,
+                      is_active
+                    FROM search_profiles
+                    WHERE id = ?
+                    """,
+                    (profile_id,),
+                ).fetchone()
+                changed = False
+                if existing is not None:
+                    old_values = (
+                        self._safe_text(existing["name"]),
+                        self._safe_text(existing["scope_profile"]),
+                        self._safe_text(existing["target_role"]),
+                        self._safe_text(existing["location_preference"]),
+                        self._safe_text(existing["role_name_i18n"]),
+                        self._safe_text(existing["keyword_focus"]),
+                        bool(existing["is_active"]),
+                    )
+                    new_values = (
+                        name,
+                        scope_profile,
+                        target_role,
+                        location_preference,
+                        role_name_i18n,
+                        keyword_focus,
+                        bool(record.is_active),
+                    )
+                    changed = old_values != new_values
                 connection.execute(
                     """
                     UPDATE search_profiles
@@ -160,6 +196,14 @@ class SearchProfileRepository:
                         profile_id,
                     ),
                 )
+                if changed:
+                    from ..target_role_cleanup import mark_candidate_job_target_role_changed
+
+                    mark_candidate_job_target_role_changed(
+                        connection,
+                        candidate_id=candidate_id,
+                        profile_id=profile_id,
+                    )
         return profile_id
 
     def delete(self, profile_id: int) -> None:

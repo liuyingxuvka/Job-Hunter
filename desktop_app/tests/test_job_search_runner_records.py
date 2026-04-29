@@ -144,6 +144,10 @@ class JobSearchRunnerRecordsTests(unittest.TestCase):
                         "targetRoleText": "Fuel Cell Engineer / 燃料电池工程师",
                         "score": "90",
                     },
+                    "recommendationDisplay": {
+                        "currentFitStatus": "needs_rescore",
+                        "reason": "target_role_changed",
+                    },
                 },
             }
         ]
@@ -156,6 +160,8 @@ class JobSearchRunnerRecordsTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["bound_target_role_profile_id"], 7)
         self.assertEqual(records[0]["bound_target_role_score"], 92)
+        self.assertEqual(records[0]["current_target_role_status"], "needs_rescore")
+        self.assertEqual(records[0]["recommendation_display_reason"], "target_role_changed")
         self.assertEqual(records[0]["match_score"], 92)
         self.assertEqual(records[0]["overall_match_score"], 82)
 

@@ -60,6 +60,8 @@ class JobSearchResult:
     bound_target_role_display_name: str = ""
     bound_target_role_text: str = ""
     bound_target_role_score: int | None = None
+    current_target_role_status: str = ""
+    recommendation_display_reason: str = ""
     source_url: str = ""
     final_url: str = ""
     link_status: str = "source"

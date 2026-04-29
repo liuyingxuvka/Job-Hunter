@@ -6,7 +6,16 @@ from typing import Any
 
 from ...search.output.final_output import has_current_output_eligibility
 from ..connection import Database
-from ..target_role_cleanup import sanitize_job_payload_role_bindings, valid_profile_ids_for_candidate
+from ..target_role_cleanup import (
+    CURRENT_FIT_STATUS_KEY,
+    HISTORICAL_ONLY_STATUS,
+    NEEDS_RESCORE_STATUS,
+    NOT_CURRENT_FIT_STATUS,
+    RECOMMENDATION_DISPLAY_KEY,
+    mark_preserved_recommendation_analysis,
+    sanitize_job_payload_role_bindings,
+    valid_profile_ids_for_candidate,
+)
 
 
 def _text(value: object) -> str:
@@ -242,30 +251,77 @@ class CandidateJobPoolRepository:
         with self.database.session() as connection:
             if normalized_keys:
                 placeholders = ",".join("?" for _ in normalized_keys)
-                connection.execute(
+                rows = connection.execute(
                     f"""
-                    UPDATE candidate_jobs
-                    SET output_status = 'reject',
-                        updated_at = CURRENT_TIMESTAMP
+                    SELECT
+                      id,
+                      analysis_json,
+                      job_json,
+                      recommendation_status,
+                      output_status,
+                      trash_status,
+                      hidden,
+                      not_interested,
+                      review_status_code
+                    FROM candidate_jobs
                     WHERE candidate_id = ?
                       AND recommendation_status = 'pass'
                       AND pool_status = 'active'
                       AND job_key NOT IN ({placeholders})
                     """,
                     (int(candidate_id), *sorted(normalized_keys)),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT
+                      id,
+                      analysis_json,
+                      job_json,
+                      recommendation_status,
+                      output_status,
+                      trash_status,
+                      hidden,
+                      not_interested,
+                      review_status_code
+                    FROM candidate_jobs
+                    WHERE candidate_id = ?
+                      AND recommendation_status = 'pass'
+                      AND pool_status = 'active'
+                    """,
+                    (int(candidate_id),),
+                ).fetchall()
+            reject_updates: list[tuple[int]] = []
+            preserve_updates: list[tuple[str, str, int]] = []
+            for row in rows:
+                if self._sqlite_row_is_visible_recommendation(row):
+                    preserve_updates.append(
+                        self._preserve_visible_recommendation_on_output_refresh(row)
+                    )
+                else:
+                    reject_updates.append((int(row["id"]),))
+            if reject_updates:
+                connection.executemany(
+                    """
+                    UPDATE candidate_jobs
+                    SET output_status = 'reject',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    reject_updates,
                 )
-                return
-            connection.execute(
-                """
-                UPDATE candidate_jobs
-                SET output_status = 'reject',
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE candidate_id = ?
-                  AND recommendation_status = 'pass'
-                  AND pool_status = 'active'
-                """,
-                (int(candidate_id),),
-            )
+            if preserve_updates:
+                connection.executemany(
+                    """
+                    UPDATE candidate_jobs
+                    SET analysis_json = ?,
+                        job_json = ?,
+                        output_status = 'pass',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    preserve_updates,
+                )
 
     def persist_display_i18n(self, *, candidate_id: int, updates: dict[str, dict[str, Any]]) -> None:
         normalized_updates = {
@@ -713,6 +769,10 @@ class CandidateJobPoolRepository:
     def _upsert_pool_rows(connection: Any, rows: list[dict[str, Any]]) -> None:
         if not rows:
             return
+        rows = CandidateJobPoolRepository._preserve_visible_recommendations_on_current_reject(
+            connection,
+            rows,
+        )
         connection.executemany(
             """
             INSERT INTO candidate_jobs (
@@ -849,6 +909,117 @@ class CandidateJobPoolRepository:
               updated_at = CURRENT_TIMESTAMP
             """,
             [CandidateJobPoolRepository._row_values(row) for row in rows],
+        )
+
+    @staticmethod
+    def _preserve_visible_recommendation_on_output_refresh(row: Any) -> tuple[str, str, int]:
+        existing_analysis = _loads_object(row["analysis_json"])
+        existing_payload = _loads_object(row["job_json"])
+        payload_analysis = (
+            existing_payload.get("analysis")
+            if isinstance(existing_payload.get("analysis"), dict)
+            else {}
+        )
+        source_analysis = existing_analysis or payload_analysis
+        display = (
+            source_analysis.get(RECOMMENDATION_DISPLAY_KEY)
+            if isinstance(source_analysis.get(RECOMMENDATION_DISPLAY_KEY), dict)
+            else {}
+        )
+        existing_status = _text(display.get(CURRENT_FIT_STATUS_KEY))
+        status = (
+            existing_status
+            if existing_status in {NEEDS_RESCORE_STATUS, NOT_CURRENT_FIT_STATUS}
+            else HISTORICAL_ONLY_STATUS
+        )
+        preserved_analysis = mark_preserved_recommendation_analysis(
+            source_analysis,
+            status=status,
+            reason="current_output_refresh_excluded",
+        )
+        preserved_payload = dict(existing_payload)
+        if preserved_payload:
+            preserved_payload["analysis"] = preserved_analysis
+        analysis_json = json.dumps(preserved_analysis, ensure_ascii=False)
+        job_json = (
+            json.dumps(preserved_payload, ensure_ascii=False)
+            if preserved_payload
+            else _text(row["job_json"])
+        )
+        return (analysis_json, job_json, int(row["id"]))
+
+    @staticmethod
+    def _preserve_visible_recommendations_on_current_reject(
+        connection: Any,
+        rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        prepared: list[dict[str, Any]] = []
+        for row in rows:
+            if _text(row.get("recommendation_status")) != "reject":
+                prepared.append(row)
+                continue
+            existing = connection.execute(
+                """
+                SELECT
+                  analysis_json,
+                  job_json,
+                  match_score,
+                  recommendation_status,
+                  output_status,
+                  trash_status,
+                  hidden,
+                  not_interested,
+                  review_status_code
+                FROM candidate_jobs
+                WHERE candidate_id = ?
+                  AND job_id = ?
+                """,
+                (int(row["candidate_id"]), int(row["job_id"])),
+            ).fetchone()
+            if existing is None or not CandidateJobPoolRepository._sqlite_row_is_visible_recommendation(existing):
+                prepared.append(row)
+                continue
+            existing_analysis = _loads_object(existing["analysis_json"])
+            existing_payload = _loads_object(existing["job_json"])
+            incoming_analysis = _loads_object(row.get("analysis_json"))
+            preserved_analysis = mark_preserved_recommendation_analysis(
+                existing_analysis,
+                status=NOT_CURRENT_FIT_STATUS,
+                reason="current_rescore_reject",
+            )
+            if incoming_analysis:
+                display = preserved_analysis.setdefault("recommendationDisplay", {})
+                if isinstance(display, dict):
+                    display["latestCurrentEvaluation"] = {
+                        "overallScore": _analysis_score(incoming_analysis),
+                        "recommend": bool(incoming_analysis.get("recommend")),
+                    }
+            preserved_payload = dict(existing_payload)
+            if preserved_payload:
+                preserved_payload["analysis"] = preserved_analysis
+            updated = dict(row)
+            updated["scoring_status"] = "scored"
+            updated["recommendation_status"] = "pass"
+            updated["output_status"] = "pass"
+            updated["analysis_json"] = json.dumps(preserved_analysis, ensure_ascii=False)
+            updated["job_json"] = (
+                json.dumps(preserved_payload, ensure_ascii=False)
+                if preserved_payload
+                else _text(existing["job_json"])
+            )
+            updated["match_score"] = _optional_int(existing["match_score"])
+            prepared.append(updated)
+        return prepared
+
+    @staticmethod
+    def _sqlite_row_is_visible_recommendation(row: Any) -> bool:
+        return (
+            _text(row["recommendation_status"]) == "pass"
+            and _text(row["output_status"]) == "pass"
+            and _text(row["trash_status"]) != "trashed"
+            and not bool(row["hidden"])
+            and not bool(row["not_interested"])
+            and _text(row["review_status_code"]) not in {"rejected", "dropped"}
         )
 
     @staticmethod

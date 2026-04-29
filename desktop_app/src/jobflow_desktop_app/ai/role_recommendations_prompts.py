@@ -198,6 +198,8 @@ def build_role_recommendation_prompt(
                 "If an existing over-specific role is clearly a narrow version of a broader market title, treat that broader title as already covered.",
                 "Do not propose a cleaner market-facing rewrite of an existing role as a new role; the new role must have different day-to-day hiring intent.",
                 "A broader market title is acceptable only when it would retrieve a materially different set of real job postings than the existing roles.",
+                "For every proposed role, the distinctness_check must name the different hiring lane it opens, not just say that wording is different.",
+                "If you cannot explain the different hiring lane in one concrete sentence, discard that role.",
             ]
         )
     else:
@@ -237,7 +239,8 @@ def build_role_recommendation_prompt(
             "2. Read existing roles and remove any family already covered, including close synonyms and nested variants.",
             "3. If a remaining idea is just a better market wording for an existing role, discard it instead of returning it.",
             "4. For each remaining idea, choose the simplest real-market title that still carries one clear domain or function qualifier.",
-            "5. Keep only roles that are distinct from existing roles and from each other. Return fewer roles if necessary.",
+            "5. Keep only roles that open a distinct hiring lane from existing roles and from each other. Return fewer roles if necessary.",
+            "The different hiring lane must be explainable as a different day-to-day job family or employer search cluster.",
             "Role-mix and count targets are subordinate to distinctness. Returning 0 or 1 role is better than filling a bucket with a repeat.",
             "Each role must include scope_profile as one of: core, adjacent, exploratory.",
             "Scope decision rubric:",
@@ -261,6 +264,9 @@ def build_role_recommendation_prompt(
             "Do not return multiple roles that differ only by LT-PEM vs PEM, fuel cell vs electrolyzer, modeling vs degradation modeling, or engineer vs scientist unless the real hiring market treats them as separate job families.",
             "If existing roles already cover modeling, degradation/lifetime, reliability, health monitoring, digital twin, control strategy, test design, or validation as the main hiring intent, do not return a broad rewrite of that same lane.",
             "Do not propose a Systems Engineer, Test Engineer, Validation Engineer, Reliability Engineer, Modeling Engineer, or Simulation Engineer lane if existing roles already cover that same system, test, validation, reliability, modeling, or simulation intent under a narrower title.",
+            "The role must be able to retrieve a different cluster of real job postings, not just the same postings under a more polished title.",
+            "market_search_rationale should identify the job-board query lane this title enables.",
+            "distinctness_check should explicitly contrast the proposed lane against the closest existing role or against another role in this batch.",
             "Prioritize the candidate's demonstrated domain continuity from resume, notes, and self-described directions.",
             "Do not over-index on isolated software/tool keywords if they are not central to the candidate's main work.",
             "Treat any inferred scope label as soft evidence only; do not force the candidate into a legacy default domain if the resume, notes, and self-described directions do not clearly support it.",

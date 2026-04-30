@@ -14,17 +14,17 @@
   <img src="desktop_app/assets/app_icon.png" alt="Job Hunter app icon" width="96">
 </p>
 
-> 面向有经验求职者的本地优先岗位发现工作台：不是一次性搜职位，而是把值得跟踪的公司、岗位和判断持续沉淀下来。
->
 > A local-first job discovery workspace for experienced professionals: not a one-shot job search, but a persistent place to build company memory, role evidence, and follow-up state over time.
 >
-> 本 README 先给中文，再给英文。普通用户请直接看 Windows 下载部分；开发者和协作者再看源码说明。
-> This README starts with Chinese and ends with English. End users should go straight to the Windows download section; developers and collaborators can use the source instructions.
+> 面向有经验求职者的本地优先岗位发现工作台：不是一次性搜职位，而是把值得跟踪的公司、岗位和判断持续沉淀下来。
+>
+> This README starts with English and ends with a full Chinese mirror. End users should go straight to the Windows download section; developers and collaborators can use the source instructions.
+> 本 README 先给英文，再给完整中文镜像。普通用户请直接看 Windows 下载部分；开发者和协作者再看源码说明。
 
 ## Product Preview / 产品预览
 
-截图使用内置 demo candidate 和公开示例链接生成，不包含真实求职者数据。<br>
-Screenshots are generated from the built-in demo candidate and public example links, with no real candidate data.
+Screenshots are generated from the built-in demo candidate and public example links, with no real candidate data.<br>
+截图使用内置 demo candidate 和公开示例链接生成，不包含真实求职者数据。
 
 ### Candidate Directory / 求职者入口
 
@@ -37,211 +37,6 @@ Screenshots are generated from the built-in demo candidate and public example li
 ### Search Feedback Loop / 搜索闭环
 
 ![Job Hunter workflow](docs/images/readme-workflow.svg)
-
-## 中文说明
-
-### 项目定位
-
-Job Hunter 不是又一个职位列表工具。它解决的是一个更长期的问题：当你不是随便跳槽，而是在认真寻找更值得投入的长期方向时，单次搜索很快会失效。你需要记住哪些公司值得盯、哪些岗位已经看过、哪些方向反复出现、哪些线索只是噪音。
-
-所以 Job Hunter 的核心不是“今天帮你抓一批岗位”，而是把每一轮搜索变成积累：先发现和验证具体岗位，再把高质量岗位背后的公司、招聘入口和匹配理由写回本地公司池。下一轮搜索会基于这些历史判断继续推进，而不是重新从零开始。
-
-一句话总结：**短期可以用搜索引擎找岗位；长期需要一个会积累公司判断的求职工作台。**
-
-### 为什么值得长期用
-
-- 不用每次重新解释自己：候选人画像、目标方向、地域偏好和结果状态都保存在本地。
-- 不重复看同一批岗位：系统会保留已发现、已分析和已处理的岗位记录。
-- 不只追热门职位标题：它会跟踪公司、招聘入口和历史匹配信号，更适合专业型、跨领域或命名不标准的岗位。
-- 好岗位会反哺公司池：当某家公司出现高匹配岗位，它会成为后续轮次更值得关注的来源。
-- 结果可持续维护：关注、投递、放弃、Offer 等状态都在同一个工作台里跟进。
-
-### 适合谁
-
-- 已经工作一段时间、具备明确专业能力的中高级求职者
-- 细分行业或专业岗位人群，如系统工程、验证测试、MBSE、数字孪生、可靠性、能源装备等方向
-- 希望跨行业迁移，但不想丢掉核心能力的人
-- 不满足于“职位平台推荐流”，更希望主动建立目标公司池的人
-
-### 搜索逻辑
-
-1. 读取候选人画像和目标岗位方向。
-2. 先发现新的具体岗位，去重并验证岗位是否仍然有效。
-3. 对有效岗位做匹配评分和推荐判断。
-4. 将高质量岗位对应的公司写入或激活公司池。
-5. 再基于公司池继续发现公司官网、ATS 和公开招聘入口。
-6. 把岗位结果、公司信号和用户后续状态写回本地数据库，供下一轮继续使用。
-
-这套流程仍然保持单线、可解释、可调试；区别在于它不是只消费公司池，也会从好岗位反向补强公司池。
-
-### 你应该从哪里开始
-
-如果你只是想直接使用软件，请先看“普通用户”路径；如果你要改代码、排查问题或参与协作，再看“开发者”路径。
-
-#### 普通用户：直接下载 Windows 版本
-
-如果你不是开发者，只是想直接使用软件，请不要从源码开始，也不需要在本地安装 Python。你应该直接去 GitHub Releases 下载 Windows 发布包。
-
-- 最新发布页：
-  [https://github.com/liuyingxuvka/Job-Hunter/releases/latest](https://github.com/liuyingxuvka/Job-Hunter/releases/latest)
-- 所有发布版本：
-  [https://github.com/liuyingxuvka/Job-Hunter/releases](https://github.com/liuyingxuvka/Job-Hunter/releases)
-- 应下载的文件：
-  `Job-Hunter-[version]-win64.zip`
-
-推荐步骤：
-
-1. 打开上面的 `latest release` 链接。
-2. 下载 `Job-Hunter-[version]-win64.zip`。
-3. 解压到一个普通文件夹，不要直接在 zip 压缩包里运行。
-4. 双击 `Jobflow Desktop.exe`。
-5. 如果 Windows 对直接启动 `.exe` 比较严格，再改用 `START_JOBFLOW_DESKTOP.cmd`。
-6. 第一次打开后，在应用里填写 API 设置即可开始使用。
-
-这个发布包已经包含桌面运行时、demo 候选人种子和安全模板。普通用户本地不需要额外安装 Python。
-
-发布包不会包含真实候选人数据库、客户数据、搜索历史、导出结果或运行备份。
-
-打包版会把用户数据库、导出、日志和搜索运行状态保存在本机用户目录下，并在启动后静默检查 GitHub Releases 是否有新版本。有可用更新时，工作台顶部版本胶囊旁边会提示；更新包下载并校验完成后，你可以选择现在重启安装或以后再安装。
-
-#### 开发者：从源码运行
-
-下面这部分只面向开发者和协作者。
-
-开发环境要求：
-
-- Windows 开发环境优先
-- Python 3.10+
-- OpenAI API Key
-
-从 GitHub Release 下载的 Windows 发布包不要求本地单独安装 Python。
-
-可用环境变量：
-
-- `OPENAI_API_KEY`
-- `OPENAI_BASE_URL`
-- `JOBFLOW_OPENAI_MODEL`
-- `AZURE_OPENAI_API_KEY`
-- `AZURE_OPENAI_ENDPOINT`
-- `AZURE_OPENAI_DEPLOYMENT`
-- `JOBFLOW_PYTHON_PATH`
-
-源码启动方式 A：从仓库根目录快速启动
-
-在仓库根目录双击：
-
-```bat
-START_JOBFLOW_DESKTOP.cmd
-```
-
-这个入口会调用 `desktop_app/run_release.ps1`，自动寻找本地 Python，并启动桌面应用。
-
-源码启动方式 B：在 `desktop_app/` 下以开发模式运行
-
-```powershell
-cd .\desktop_app
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -U pip
-.\.venv\Scripts\python -m pip install -e .
-.\.venv\Scripts\jobflow-desktop
-```
-
-如果你是在做 CLI、自动化或 AI 集成，请直接阅读：
-
-- [AI Agent Discovery (English)](docs/AI_AGENT_DISCOVERY.md)
-- [AI Integration Notes](docs/AI_INTEGRATION.md)
-
-这些内容保留在单独文档里，不放在 GitHub 首页 README 展开。
-
-### 当前仓库能做什么
-
-当前仓库主要包含一个正在持续迭代的本地桌面工作台，以及一套 Python 原生的岗位发现、公司池维护和结果管理链路。
-
-已落地能力包括：
-
-- 本地候选人管理：维护姓名、邮箱、当前所在地、目标地区、备注和简历路径
-- AI 目标岗位设立：辅助生成更具体的岗位方向，并维护中英文岗位名称和说明
-- 本地 AI 设置：支持直接填写 API Key 或绑定环境变量，并验证模型可用性
-- 岗位发现与公司池闭环：先发现和验证具体岗位，再将高质量岗位背后的公司写入公司池，后续继续跟踪
-- 搜索结果工作台：查看匹配结果，并维护关注、投递、Offer、放弃等状态
-- 本地优先数据存储：以 SQLite 作为候选人、搜索配置、结果状态和运行数据的主存储；`desktop_app/runtime/search_runs/` 只保留按候选人划分的临时工作目录
-
-### 核心流程
-
-1. 创建候选人档案，导入简历，填写当前所在地、目标地区和补充说明。
-2. 通过 AI 推荐或手动补充方式，建立真正值得追踪的目标岗位方向。
-3. 基于这些岗位方向生成搜索上下文，发现并验证具体岗位，同时维护可复用的目标公司池。
-4. 对岗位进行匹配分析和结果整理，在工作台里持续维护关注、投递和反馈状态。
-
-### 仓库结构
-
-| Path | 说明 |
-| --- | --- |
-| `desktop_app/` | 新版桌面应用，负责候选人工作台、AI 设置、搜索结果查看与后续维护 |
-| `docs/` | GitHub 说明文档，包括产品定位、架构和路线图 |
-| `README_RELEASE.txt` | 面向打包发布目录的简要启动说明 |
-| `START_JOBFLOW_DESKTOP.cmd` | Windows 下的快速启动入口 |
-
-### 当前边界
-
-这个项目目前更接近一个“发现 + 筛选 + 管理”的本地工作台，而不是一个“全自动找工作/自动投递平台”。
-
-当前明确不应过度承诺的内容：
-
-- 不是面向所有求职者的大众化职位推荐产品
-- 不是自动投递系统
-- 不是已经完成商业化打磨的成品桌面软件
-- 不是已经为所有平台和长期维护场景都做完最终工程化定型的产品
-
-### 公开仓库边界
-
-这个仓库公开部分只保留源码、文档、演示种子和安全示例模板；个人简历、公司池、搜索结果、SQLite 数据和运行备份必须留在本地。
-
-当前已经把这套边界写进 `.gitignore`、`scripts/privacy_audit.ps1` 和 GitHub Actions，所以未来同事协作时也会按同一规则执行。
-
-### 支持
-
-如果这个项目对你有帮助，欢迎通过下面的链接请开发者喝杯咖啡：
-
-[通过 PayPal 请开发者喝杯咖啡](https://paypal.me/Yingxuliu)
-
-这只是自愿支持项目维护，不代表购买技术支持、质保、优先服务、商业授权或功能定制。
-
-### 许可
-
-本项目以 [MIT License](LICENSE) 发布。贡献代码、文档或示例时，默认同意将贡献内容按同一许可发布；当前不要求单独签署 CLA。
-
-### 文档导航
-
-- [更新记录](CHANGELOG.md)
-- [许可](LICENSE)
-- [产品定位](docs/PRODUCT_POSITIONING.md)
-- [架构概览](docs/ARCHITECTURE.md)
-- [llms.txt](llms.txt)
-- [AI agent 检索说明（English）](docs/AI_AGENT_DISCOVERY.md)
-- [自动化与 AI 集成说明](docs/AI_INTEGRATION.md)
-- [路线图](docs/ROADMAP.md)
-- [仓库边界](docs/REPOSITORY_BOUNDARY.md)
-- [GitHub 仓库设置建议](docs/GITHUB_REPO_SETUP.md)
-- [贡献说明](CONTRIBUTING.md)
-
-### 贡献与讨论
-
-这个项目欢迎的不只是代码提交，也欢迎思路、实验方向和产品判断。我们尤其欢迎围绕“专业型人才如何更高效找到更匹配职位”这个问题展开合作。
-
-欢迎贡献的方向包括：
-
-- README、文档和 GitHub 展示信息的改进
-- 新的 AI 功能，例如岗位方向生成、匹配解释、排序理由、候选公司摘要、工作流自动化
-- 新的搜索引擎或数据源接入，例如更多 ATS、官网抓取方式、行业特定来源或地区性来源
-- 更好的匹配逻辑、评分策略、候选公司发现方法和搜索启发式
-- 职业发现方法、跨行业迁移策略，以及如何先找到更匹配公司的思路
-- 更好的结果管理、审核状态、导出和工作流体验
-- 新的产品想法、研究问题、评估方法、数据集和用户访谈结论
-
-如果 GitHub Discussions 还没有启用，也欢迎直接开 Issue 来讨论想法。你可以把问题写成功能提案、研究假设、数据源建议，或者“为什么某类专业人才很难被现有平台正确匹配”的分析。
-
-提 Issue 或 PR 前，建议先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## English
 
@@ -447,3 +242,208 @@ Useful contribution areas include:
 If GitHub Discussions is not enabled, opening an Issue is still a valid way to discuss ideas. A proposal can be framed as a feature suggestion, a research hypothesis, a data-source idea, or an analysis of why existing platforms fail to match certain professional profiles well.
 
 Before opening an Issue or PR, please read [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## 中文说明
+
+### 项目定位
+
+Job Hunter 不是又一个职位列表工具。它解决的是一个更长期的问题：当你不是随便跳槽，而是在认真寻找更值得投入的长期方向时，单次搜索很快会失效。你需要记住哪些公司值得盯、哪些岗位已经看过、哪些方向反复出现、哪些线索只是噪音。
+
+所以 Job Hunter 的核心不是“今天帮你抓一批岗位”，而是把每一轮搜索变成积累：先发现和验证具体岗位，再把高质量岗位背后的公司、招聘入口和匹配理由写回本地公司池。下一轮搜索会基于这些历史判断继续推进，而不是重新从零开始。
+
+一句话总结：**短期可以用搜索引擎找岗位；长期需要一个会积累公司判断的求职工作台。**
+
+### 为什么值得长期用
+
+- 不用每次重新解释自己：候选人画像、目标方向、地域偏好和结果状态都保存在本地。
+- 不重复看同一批岗位：系统会保留已发现、已分析和已处理的岗位记录。
+- 不只追热门职位标题：它会跟踪公司、招聘入口和历史匹配信号，更适合专业型、跨领域或命名不标准的岗位。
+- 好岗位会反哺公司池：当某家公司出现高匹配岗位，它会成为后续轮次更值得关注的来源。
+- 结果可持续维护：关注、投递、放弃、Offer 等状态都在同一个工作台里跟进。
+
+### 适合谁
+
+- 已经工作一段时间、具备明确专业能力的中高级求职者
+- 细分行业或专业岗位人群，如系统工程、验证测试、MBSE、数字孪生、可靠性、能源装备等方向
+- 希望跨行业迁移，但不想丢掉核心能力的人
+- 不满足于“职位平台推荐流”，更希望主动建立目标公司池的人
+
+### 搜索逻辑
+
+1. 读取候选人画像和目标岗位方向。
+2. 先发现新的具体岗位，去重并验证岗位是否仍然有效。
+3. 对有效岗位做匹配评分和推荐判断。
+4. 将高质量岗位对应的公司写入或激活公司池。
+5. 再基于公司池继续发现公司官网、ATS 和公开招聘入口。
+6. 把岗位结果、公司信号和用户后续状态写回本地数据库，供下一轮继续使用。
+
+这套流程仍然保持单线、可解释、可调试；区别在于它不是只消费公司池，也会从好岗位反向补强公司池。
+
+### 你应该从哪里开始
+
+如果你只是想直接使用软件，请先看“普通用户”路径；如果你要改代码、排查问题或参与协作，再看“开发者”路径。
+
+#### 普通用户：直接下载 Windows 版本
+
+如果你不是开发者，只是想直接使用软件，请不要从源码开始，也不需要在本地安装 Python。你应该直接去 GitHub Releases 下载 Windows 发布包。
+
+- 最新发布页：
+  [https://github.com/liuyingxuvka/Job-Hunter/releases/latest](https://github.com/liuyingxuvka/Job-Hunter/releases/latest)
+- 所有发布版本：
+  [https://github.com/liuyingxuvka/Job-Hunter/releases](https://github.com/liuyingxuvka/Job-Hunter/releases)
+- 应下载的文件：
+  `Job-Hunter-[version]-win64.zip`
+
+推荐步骤：
+
+1. 打开上面的 `latest release` 链接。
+2. 下载 `Job-Hunter-[version]-win64.zip`。
+3. 解压到一个普通文件夹，不要直接在 zip 压缩包里运行。
+4. 双击 `Jobflow Desktop.exe`。
+5. 如果 Windows 对直接启动 `.exe` 比较严格，再改用 `START_JOBFLOW_DESKTOP.cmd`。
+6. 第一次打开后，在应用里填写 API 设置即可开始使用。
+
+这个发布包已经包含桌面运行时、demo 候选人种子和安全模板。普通用户本地不需要额外安装 Python。
+
+发布包不会包含真实候选人数据库、客户数据、搜索历史、导出结果或运行备份。
+
+打包版会把用户数据库、导出、日志和搜索运行状态保存在本机用户目录下，并在启动后静默检查 GitHub Releases 是否有新版本。有可用更新时，工作台顶部版本胶囊旁边会提示；更新包下载并校验完成后，你可以选择现在重启安装或以后再安装。
+
+#### 开发者：从源码运行
+
+下面这部分只面向开发者和协作者。
+
+开发环境要求：
+
+- Windows 开发环境优先
+- Python 3.10+
+- OpenAI API Key
+
+从 GitHub Release 下载的 Windows 发布包不要求本地单独安装 Python。
+
+可用环境变量：
+
+- `OPENAI_API_KEY`
+- `OPENAI_BASE_URL`
+- `JOBFLOW_OPENAI_MODEL`
+- `AZURE_OPENAI_API_KEY`
+- `AZURE_OPENAI_ENDPOINT`
+- `AZURE_OPENAI_DEPLOYMENT`
+- `JOBFLOW_PYTHON_PATH`
+
+源码启动方式 A：从仓库根目录快速启动
+
+在仓库根目录双击：
+
+```bat
+START_JOBFLOW_DESKTOP.cmd
+```
+
+这个入口会调用 `desktop_app/run_release.ps1`，自动寻找本地 Python，并启动桌面应用。
+
+源码启动方式 B：在 `desktop_app/` 下以开发模式运行
+
+```powershell
+cd .\desktop_app
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -U pip
+.\.venv\Scripts\python -m pip install -e .
+.\.venv\Scripts\jobflow-desktop
+```
+
+如果你是在做 CLI、自动化或 AI 集成，请直接阅读：
+
+- [AI Agent Discovery (English)](docs/AI_AGENT_DISCOVERY.md)
+- [AI Integration Notes](docs/AI_INTEGRATION.md)
+
+这些内容保留在单独文档里，不放在 GitHub 首页 README 展开。
+
+### 当前仓库能做什么
+
+当前仓库主要包含一个正在持续迭代的本地桌面工作台，以及一套 Python 原生的岗位发现、公司池维护和结果管理链路。
+
+已落地能力包括：
+
+- 本地候选人管理：维护姓名、邮箱、当前所在地、目标地区、备注和简历路径
+- AI 目标岗位设立：辅助生成更具体的岗位方向，并维护中英文岗位名称和说明
+- 本地 AI 设置：支持直接填写 API Key 或绑定环境变量，并验证模型可用性
+- 岗位发现与公司池闭环：先发现和验证具体岗位，再将高质量岗位背后的公司写入公司池，后续继续跟踪
+- 搜索结果工作台：查看匹配结果，并维护关注、投递、Offer、放弃等状态
+- 本地优先数据存储：以 SQLite 作为候选人、搜索配置、结果状态和运行数据的主存储；`desktop_app/runtime/search_runs/` 只保留按候选人划分的临时工作目录
+
+### 核心流程
+
+1. 创建候选人档案，导入简历，填写当前所在地、目标地区和补充说明。
+2. 通过 AI 推荐或手动补充方式，建立真正值得追踪的目标岗位方向。
+3. 基于这些岗位方向生成搜索上下文，发现并验证具体岗位，同时维护可复用的目标公司池。
+4. 对岗位进行匹配分析和结果整理，在工作台里持续维护关注、投递和反馈状态。
+
+### 仓库结构
+
+| Path | 说明 |
+| --- | --- |
+| `desktop_app/` | 新版桌面应用，负责候选人工作台、AI 设置、搜索结果查看与后续维护 |
+| `docs/` | GitHub 说明文档，包括产品定位、架构和路线图 |
+| `README_RELEASE.txt` | 面向打包发布目录的简要启动说明 |
+| `START_JOBFLOW_DESKTOP.cmd` | Windows 下的快速启动入口 |
+
+### 当前边界
+
+这个项目目前更接近一个“发现 + 筛选 + 管理”的本地工作台，而不是一个“全自动找工作/自动投递平台”。
+
+当前明确不应过度承诺的内容：
+
+- 不是面向所有求职者的大众化职位推荐产品
+- 不是自动投递系统
+- 不是已经完成商业化打磨的成品桌面软件
+- 不是已经为所有平台和长期维护场景都做完最终工程化定型的产品
+
+### 公开仓库边界
+
+这个仓库公开部分只保留源码、文档、演示种子和安全示例模板；个人简历、公司池、搜索结果、SQLite 数据和运行备份必须留在本地。
+
+当前已经把这套边界写进 `.gitignore`、`scripts/privacy_audit.ps1` 和 GitHub Actions，所以未来同事协作时也会按同一规则执行。
+
+### 支持
+
+如果这个项目对你有帮助，欢迎通过下面的链接请开发者喝杯咖啡：
+
+[通过 PayPal 请开发者喝杯咖啡](https://paypal.me/Yingxuliu)
+
+这只是自愿支持项目维护，不代表购买技术支持、质保、优先服务、商业授权或功能定制。
+
+### 许可
+
+本项目以 [MIT License](LICENSE) 发布。贡献代码、文档或示例时，默认同意将贡献内容按同一许可发布；当前不要求单独签署 CLA。
+
+### 文档导航
+
+- [更新记录](CHANGELOG.md)
+- [许可](LICENSE)
+- [产品定位](docs/PRODUCT_POSITIONING.md)
+- [架构概览](docs/ARCHITECTURE.md)
+- [llms.txt](llms.txt)
+- [AI agent 检索说明（English）](docs/AI_AGENT_DISCOVERY.md)
+- [自动化与 AI 集成说明](docs/AI_INTEGRATION.md)
+- [路线图](docs/ROADMAP.md)
+- [仓库边界](docs/REPOSITORY_BOUNDARY.md)
+- [GitHub 仓库设置建议](docs/GITHUB_REPO_SETUP.md)
+- [贡献说明](CONTRIBUTING.md)
+
+### 贡献与讨论
+
+这个项目欢迎的不只是代码提交，也欢迎思路、实验方向和产品判断。我们尤其欢迎围绕“专业型人才如何更高效找到更匹配职位”这个问题展开合作。
+
+欢迎贡献的方向包括：
+
+- README、文档和 GitHub 展示信息的改进
+- 新的 AI 功能，例如岗位方向生成、匹配解释、排序理由、候选公司摘要、工作流自动化
+- 新的搜索引擎或数据源接入，例如更多 ATS、官网抓取方式、行业特定来源或地区性来源
+- 更好的匹配逻辑、评分策略、候选公司发现方法和搜索启发式
+- 职业发现方法、跨行业迁移策略，以及如何先找到更匹配公司的思路
+- 更好的结果管理、审核状态、导出和工作流体验
+- 新的产品想法、研究问题、评估方法、数据集和用户访谈结论
+
+如果 GitHub Discussions 还没有启用，也欢迎直接开 Issue 来讨论想法。你可以把问题写成功能提案、研究假设、数据源建议，或者“为什么某类专业人才很难被现有平台正确匹配”的分析。
+
+提 Issue 或 PR 前，建议先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。

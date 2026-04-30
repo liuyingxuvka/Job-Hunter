@@ -114,3 +114,272 @@
 - Next actions:
   - Run the next packaged-app QA to verify visible historical/current-fit labels in the real desktop UI.
   - If recommendation persistence changes again, add a replay adapter that projects real `candidate_jobs` rows into the FlowGuard state model.
+
+## 2026-04-30 - Final Output Detail Verification
+
+- Task id: `final-output-detail-verification-20260430`
+- Project: Job-Hunter
+- Task summary: require current detail-page verification before new jobs enter final recommendations.
+- Trigger reason: the workflow changes recommendation output visibility, cached eligibility stamps, detail-page evidence requirements, and historical recommendation preservation.
+- Model files:
+  - `.flowguard/final_output_verification/model.py`
+  - `.flowguard/final_output_verification/run_checks.py`
+- Commands run:
+  - `python -c "import flowguard; print(flowguard.SCHEMA_VERSION)"`
+  - `python .flowguard/final_output_verification/run_checks.py`
+  - `python -m unittest desktop_app.tests.test_final_output desktop_app.tests.test_runtime_config_builder desktop_app.tests.test_stage_executor_resume_pending desktop_app.tests.test_job_search_runner_manual_tracking`
+  - `python -m unittest desktop_app.tests.test_candidate_job_pool desktop_app.tests.test_job_search_runner_db_reads desktop_app.tests.test_job_search_runner_records desktop_app.tests.test_job_search_runner_unit desktop_app.tests.test_direct_job_discovery_stage desktop_app.tests.test_search_results_regressions`
+  - `python -m compileall -q desktop_app\src\jobflow_desktop_app .flowguard\final_output_verification`
+  - `python -m unittest discover desktop_app\tests`
+- Findings:
+  - Correct model passed 78 explored traces with no invariant violations.
+  - Broken no-verify output exposed expired, generic, and unreachable new recommendations entering final output without a valid detail-page stamp.
+  - Broken apply-link output exposed apply-form links becoming the primary click target, violating the product rule that users open a job detail page.
+  - Broken historical recheck exposed routine rechecking of already visible historical recommendations.
+  - Production code now enables post-verify by default for main and resume/finalize runs, requires checked post-verify for new final output, rejects skipped post-verify when checks are required, and preserves already visible historical recommendations without routine recheck.
+- Counterexamples:
+  - New expired detail page with an apply link became visible when final output ignored the detail verification stamp.
+  - New valid detail page used apply as the primary output when the output policy preferred apply links.
+  - Historical visible recommendation was rechecked during output refresh.
+- Skipped steps:
+  - Production conformance replay was skipped; focused unit tests cover final output, runtime config, pool, runner, direct-discovery, and search-results projections.
+  - Interactive desktop GUI QA was not run in this pass.
+- Friction points:
+  - One PowerShell quoting attempt broke while recording the adoption-finish command; executable checks themselves passed and a corrected adoption-finish entry was recorded.
+- Next actions:
+  - Run a small real search smoke with fresh results to observe postVerify cost and final recommendation yield.
+
+
+## final-output-detail-verification-20260430 - Require current detail-page verification before new jobs enter final recommendations
+
+- Project: Job-Hunter
+- Trigger reason: The change affects recommendation output visibility, cached eligibility stamps, and historical recommendation preservation.
+- Status: in_progress
+- Skill decision: used_flowguard
+- Started: 2026-04-30T07:34:01+00:00
+- Ended: 2026-04-30T07:34:01+00:00
+- Duration seconds: 0.000
+- Commands OK: True
+
+### Model Files
+- none recorded
+
+### Commands
+- none recorded
+
+### Findings
+- none recorded
+
+### Counterexamples
+- none recorded
+
+### Friction Points
+- none recorded
+
+### Skipped Steps
+- none recorded
+
+### Next Actions
+- none recorded
+
+
+## final-output-detail-verification-20260430 - Require current detail-page verification before new jobs enter final recommendations
+
+- Project: Job-Hunter
+- Trigger reason: The change affects recommendation output visibility, cached eligibility stamps, and historical recommendation preservation.
+- Status: completed
+- Skill decision: used_flowguard
+- Started: 2026-04-30T07:45:08+00:00
+- Ended: 2026-04-30T07:45:08+00:00
+- Duration seconds: 0.000
+- Commands OK: False
+
+### Model Files
+- .flowguard/final_output_verification/model.py
+- .flowguard/final_output_verification/run_checks.py
+
+### Commands
+- OK (0.000s): `python -c "import flowguard; print(flowguard.SCHEMA_VERSION)"`
+- OK (0.000s): `python .flowguard/final_output_verification/run_checks.py`
+- OK (0.000s): `python -m unittest desktop_app.tests.test_final_output desktop_app.tests.test_runtime_config_builder desktop_app.tests.test_stage_executor_resume_pending desktop_app.tests.test_job_search_runner_manual_tracking`
+- OK (0.000s): `python -m unittest desktop_app.tests.test_candidate_job_pool desktop_app.tests.test_job_search_runner_db_reads desktop_app.tests.test_job_search_runner_records desktop_app.tests.test_job_search_runner_unit desktop_app.tests.test_direct_job_discovery_stage desktop_app.tests.test_search_results_regressions`
+- OK (0.000s): `python -m compileall -q desktop_app\src\jobflow_desktop_app .flowguard\final_output_verification`
+- OK (0.000s): `python -m unittest discover desktop_app\tests`
+- FAIL (0.000s): `python -m flowguard adoption-finish ... --command "python -c \"import flowguard; print(flowguard.SCHEMA_VERSION)\""`
+
+### Findings
+- Correct model passed 78 explored traces with no invariant violations.
+- Broken no-verify output exposed expired/generic/unreachable new recommendations entering final output without a valid detail-page stamp.
+- Broken apply-link output exposed apply-form links becoming the primary click target, which violates the product requirement that the user opens the job detail page.
+- Broken historical recheck exposed routine rechecking of already visible historical recommendations.
+
+### Counterexamples
+- New expired detail page with an apply link became visible when final output ignored the detail verification stamp.
+- New valid detail page used apply as primary output when the output policy preferred apply links.
+- Historical visible recommendation was rechecked during output refresh.
+
+### Friction Points
+- PowerShell quoting broke the first adoption-finish attempt that embedded a python -c command.
+
+### Skipped Steps
+- Production conformance replay was skipped; focused unit tests cover the final_output, runtime-config, pool, runner, direct-discovery, and search-results projections.
+- Interactive desktop GUI QA was not run in this pass.
+
+### Next Actions
+- Run a small real search smoke with fresh results to observe postVerify cost and final recommendation yield.
+
+
+## role-scope-prompt-20260430 - Tighten AI target-role scope labels around search radius
+
+- Project: Job-Hunter
+- Trigger reason: The change affects AI target-role recommendation behavior and visible core/adjacent/exploratory labels.
+- Status: completed
+- Skill decision: used_flowguard
+- Started: 2026-04-30T09:13:00+00:00
+- Ended: 2026-04-30T09:31:45+00:00
+
+### Model Files
+- .flowguard/role_scope_prompt/model.py
+- .flowguard/role_scope_prompt/run_checks.py
+
+### Commands
+- OK: `python -c "import flowguard; print(flowguard.SCHEMA_VERSION)"`
+- OK: `python .flowguard/role_scope_prompt/run_checks.py`
+- OK: `python scripts/role_recommendation_sandbox.py --candidate-id 2 --runs 3 --timeout 180 --save-prompt --out-dir runtime/role_scope_prompt_sandbox/baseline_real`
+- OK: `python scripts/role_recommendation_sandbox.py --candidate-id 2 --runs 5 --timeout 180 --save-prompt --out-dir runtime/role_scope_prompt_sandbox/iteration1`
+- OK: `python scripts/role_recommendation_sandbox.py --candidate-id 2 --runs 5 --timeout 180 --save-prompt --out-dir runtime/role_scope_prompt_sandbox/iteration2`
+- BLOCKED: `python scripts/role_recommendation_sandbox.py --candidate-id 2 --runs 5 --timeout 180 --save-prompt --out-dir runtime/role_scope_prompt_sandbox/iteration3`
+- OK: `python -m unittest desktop_app.tests.test_role_recommendations_prompts desktop_app.tests.test_target_direction_recommendations desktop_app.tests.test_role_recommendations_parse desktop_app.tests.test_role_recommendations_text`
+- OK: `python -m compileall -q desktop_app\src\jobflow_desktop_app .flowguard\role_scope_prompt`
+
+### Findings
+- Correct model passed 136 explored traces with no invariant violations.
+- Broken function-shift policy exposed the old failure mode: mainline evidence could be demoted when the practical work setting changed.
+- Broken mix-forced policy exposed the quota failure mode: requested role mix could force a wrong scope label.
+- Broken restrictive-nearby policy exposed the opposite failure mode: nearby transferable domains could be blocked instead of treated as adjacent.
+- Real sandbox baseline and two prompt iterations confirmed the old prompt overused adjacent/exploratory for same-radius roles; the final real sandbox was blocked by OpenAI `insufficient_quota`.
+
+### Skipped Steps
+- Production conformance replay is not applicable; this was a prompt-only behavioral boundary without durable state writes.
+- Final live LLM sandbox after the last prompt tightening was not run because the API returned HTTP 429 `insufficient_quota`.
+
+### Next Actions
+- When API quota is available, rerun the role recommendation sandbox once against the final prompt and inspect whether same-domain technical/professional roles stay core while nearby transferable domains land in adjacent.
+
+
+## final-output-detail-verification-20260430 - Require current detail-page verification before new jobs enter final recommendations
+
+- Project: Job-Hunter
+- Trigger reason: The change affects recommendation output visibility, cached eligibility stamps, and historical recommendation preservation.
+- Status: completed
+- Skill decision: used_flowguard
+- Started: 2026-04-30T07:45:31+00:00
+- Ended: 2026-04-30T07:45:31+00:00
+- Duration seconds: 0.000
+- Commands OK: True
+
+### Model Files
+- .flowguard/final_output_verification/model.py
+- .flowguard/final_output_verification/run_checks.py
+
+### Commands
+- OK (0.000s): `python -c "import flowguard; print(flowguard.SCHEMA_VERSION)"`
+- OK (0.000s): `python .flowguard/final_output_verification/run_checks.py`
+- OK (0.000s): `python -m unittest desktop_app.tests.test_final_output desktop_app.tests.test_runtime_config_builder desktop_app.tests.test_stage_executor_resume_pending desktop_app.tests.test_job_search_runner_manual_tracking`
+- OK (0.000s): `python -m unittest desktop_app.tests.test_candidate_job_pool desktop_app.tests.test_job_search_runner_db_reads desktop_app.tests.test_job_search_runner_records desktop_app.tests.test_job_search_runner_unit desktop_app.tests.test_direct_job_discovery_stage desktop_app.tests.test_search_results_regressions`
+- OK (0.000s): `python -m compileall -q desktop_app\src\jobflow_desktop_app .flowguard\final_output_verification`
+- OK (0.000s): `python -m unittest discover desktop_app\tests`
+
+### Findings
+- Correct model passed 78 explored traces with no invariant violations.
+- Broken no-verify output exposed expired/generic/unreachable new recommendations entering final output without a valid detail-page stamp.
+- Broken apply-link output exposed apply-form links becoming the primary click target, which violates the product requirement that the user opens the job detail page.
+- Broken historical recheck exposed routine rechecking of already visible historical recommendations.
+
+### Counterexamples
+- New expired detail page with an apply link became visible when final output ignored the detail verification stamp.
+- New valid detail page used apply as primary output when the output policy preferred apply links.
+- Historical visible recommendation was rechecked during output refresh.
+
+### Friction Points
+- PowerShell quoting broke one adoption-finish attempt, but executable checks themselves passed.
+
+### Skipped Steps
+- Production conformance replay was skipped; focused unit tests cover the final_output, runtime-config, pool, runner, direct-discovery, and search-results projections.
+- Interactive desktop GUI QA was not run in this pass.
+
+### Next Actions
+- Run a small real search smoke with fresh results to observe postVerify cost and final recommendation yield.
+
+
+## daily-qa-local-freshness - Add local source freshness gate to Jobflow Desktop daily QA
+
+- Project: Job-Hunter
+- Trigger reason: Daily packaged-app QA must choose between current package, rebuilt local package, or stop when peer/local edits are in progress.
+- Status: completed
+- Skill decision: used_flowguard
+- Started: 2026-04-30T10:29:55+00:00
+- Ended: 2026-04-30T10:29:55+00:00
+- Duration seconds: 0.000
+- Commands OK: True
+
+### Model Files
+- .flowguard/daily_qa_preflight/model.py
+- .flowguard/daily_qa_preflight/run_checks.py
+
+### Commands
+- OK (0.000s): `python .flowguard/daily_qa_preflight/run_checks.py`
+- OK (0.000s): `python -m unittest desktop_app.tests.test_daily_desktop_qa_preflight desktop_app.tests.test_release_update_manifest`
+- OK (0.000s): `python -m compileall -q scripts\daily_desktop_qa_preflight.py .flowguard\daily_qa_preflight`
+
+### Findings
+- Correct model passed seven abstract preflight signals; broken GitHub-only and build-during-active variants produced the expected counterexamples.
+- Dry-run preflight currently reports needs_rebuild because local package-relevant source changes are stable and newer than the current packaged EXE.
+
+### Counterexamples
+- none recorded
+
+### Friction Points
+- none recorded
+
+### Skipped Steps
+- Packaging and GUI launch were not run in this implementation pass; the automation will run them on its next scheduled/apply run after validation passes.
+
+### Next Actions
+- Next daily QA run should use scripts/daily_desktop_qa_preflight.py --apply --json and stop if validation/build fails or local edits are active.
+
+
+## job-validation-flow-20260430 - Model early link validation plus final evidence gate
+
+- Project: Job-Hunter
+- Trigger reason: The proposed search-flow change affects token cost, job validity verification, output eligibility, and recommendation visibility.
+- Status: completed
+- Skill decision: used_flowguard
+
+### Model Files
+- .flowguard/job_validation_flow/model.py
+- .flowguard/job_validation_flow/run_checks.py
+
+### Commands
+- OK: `python -c "import flowguard; print(flowguard.SCHEMA_VERSION)"`
+- OK: `python .flowguard/job_validation_flow/run_checks.py`
+
+### Findings
+- The current direct-discovery pattern can score and recommend live-looking jobs but still produce an empty final list when postVerify is skipped.
+- A final-only verification strategy avoids bad visible links, but wastes scoring and binding work on clearly invalid links.
+- The modeled best path is early hard-invalid dropping plus evidence collection, followed by a final gate that accepts strong prior evidence or runs postVerify for uncertain recommended jobs.
+
+### Skipped Steps
+- No production code was changed in this design pass.
+- Conformance replay against production state was skipped because this model only compares proposed control-flow policies.
+
+### Next Actions
+- If approved, update direct discovery and company-source paths so early validation writes reusable detail-page evidence and the final output gate consumes that evidence instead of requiring a separate postVerify field in all cases.
+
+### Implementation Follow-Up - 2026-04-30
+- Implemented the modeled path in production code: direct-discovery jobs now fetch deterministic detail evidence before scoring, hard-invalid links are rejected before scoring, reachable dynamic pages can use postVerify fallback, and final output refresh performs a live HTTP recheck of the chosen output URL.
+- Additional smoke finding: historical output preservation could keep stale 404 rows visible even after the rebuilt final set excluded them. The repository now treats the freshly rebuilt and live-rechecked output set as authoritative.
+- Validation:
+  - OK: `python .flowguard/job_validation_flow/run_checks.py`
+  - OK: `python -m unittest desktop_app.tests.test_direct_job_discovery_stage desktop_app.tests.test_company_sources desktop_app.tests.test_search_session_orchestrator desktop_app.tests.test_search_session_resume_gate desktop_app.tests.test_job_search_runner_manual_tracking desktop_app.tests.test_job_search_runner_unit desktop_app.tests.test_job_search_runner_records desktop_app.tests.test_final_output desktop_app.tests.test_candidate_job_pool`
+  - OK: real 10-minute smoke run `search_run_id=20`; direct discovery rejected 2 invalid links before scoring, final refresh produced 6 visible recommendations, and manual probe of all 6 displayed links returned HTTP 200.

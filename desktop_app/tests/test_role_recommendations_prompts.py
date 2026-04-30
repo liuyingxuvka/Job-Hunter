@@ -79,29 +79,31 @@ class RoleRecommendationsPromptsTests(unittest.TestCase):
         self.assertIn("market-facing job-board title", prompt)
         self.assertIn("prefer 3-6 meaningful words", prompt)
         self.assertIn("Put technical specificity in role.description_zh and role.description_en", prompt)
-        self.assertIn("Good role.name_en shape examples", prompt)
-        self.assertIn("<Domain> Performance Engineer", prompt)
-        self.assertIn("Application Engineer, <Product Systems>", prompt)
-        self.assertIn("Bad role.name_en examples:", prompt)
-        self.assertIn("LT-PEM Fuel Cell Degradation Lifetime Multi-Physics Modeling Specialist", prompt)
-        self.assertIn("cover different practical work settings", prompt)
+        self.assertIn("cover genuinely different market hiring lanes", prompt)
         self.assertIn("market_search_rationale", prompt)
         self.assertIn("distinctness_check", prompt)
+        self.assertIn("Scope labels describe search radius and career distance", prompt)
+        self.assertIn("not a simple job-function taxonomy", prompt)
+        self.assertIn("Decide the natural scope before satisfying the requested mix", prompt)
+        self.assertIn("do not change the label", prompt)
+        self.assertIn("Do not demote a close-evidence role from core", prompt)
+        self.assertIn("Do not promote a distant role to core", prompt)
         self.assertIn("Exploratory does not mean unrelated", prompt)
-        self.assertIn("Do not jump to battery-only, generic consulting", prompt)
-        self.assertIn("Treat examples as title-shape examples only", prompt)
+        self.assertIn("Do not apply global industry bans", prompt)
         self.assertIn("Scope decision rubric:", prompt)
-        self.assertIn("Do not label a role core just because it contains the right domain words", prompt)
+        self.assertIn("changed practical work setting can still be core", prompt)
         self.assertIn("different hiring lane", prompt)
         self.assertIn("different cluster of real job postings", prompt)
         self.assertIn("job-board query lane", prompt)
+        self.assertNotIn("battery-only", prompt)
+        self.assertNotIn("LT-PEM Fuel Cell", prompt)
 
     def test_role_recommendation_prompt_strengthens_existing_role_distinctness(self) -> None:
         prompt = build_role_recommendation_prompt(
             self._candidate(),
             existing_roles=[
-                ("LT-PEM System Dynamics Engineer (Multi-Physics)", "Existing narrow role"),
-                ("Fuel Cell Performance Engineer", "Existing market-facing role"),
+                ("Specialized System Dynamics Engineer", "Existing narrow role"),
+                ("Domain Performance Engineer", "Existing market-facing role"),
             ],
             resume_result=ResumeReadResult(text="resume excerpt", source_type=".txt"),
         )
@@ -112,9 +114,9 @@ class RoleRecommendationsPromptsTests(unittest.TestCase):
         self.assertIn("treat that broader title as already covered", prompt)
         self.assertIn("cleaner market-facing rewrite of an existing role", prompt)
         self.assertIn("materially different set of real job postings", prompt)
-        self.assertIn("Role-mix and count targets are subordinate to distinctness", prompt)
+        self.assertIn("Role-mix and count targets are subordinate to distinctness and scope correctness", prompt)
         self.assertIn("do not return a broad rewrite of that same lane", prompt)
-        self.assertIn("if existing roles already cover that same system, test, validation", prompt)
+        self.assertIn("Do not propose a broader title when existing roles already cover the same hiring intent", prompt)
         self.assertIn("distinctness_check must name the different hiring lane", prompt)
 
     def test_system_prompt_frames_roles_as_market_search_lenses(self) -> None:
@@ -125,8 +127,26 @@ class RoleRecommendationsPromptsTests(unittest.TestCase):
         self.assertIn("distinctness wins", SYSTEM_PROMPT)
         self.assertIn("wording-only difference is not enough", SYSTEM_PROMPT)
         self.assertIn("real job-board query lane", SYSTEM_PROMPT)
-        self.assertIn("examples in the prompt show title style only", SYSTEM_PROMPT)
+        self.assertIn("Scope labels describe search radius and career distance", SYSTEM_PROMPT)
+        self.assertIn("Never relabel a role as core, adjacent, or exploratory just to satisfy the requested mix", SYSTEM_PROMPT)
+        self.assertIn("Do not apply global industry bans", SYSTEM_PROMPT)
         self.assertNotIn("role names should reflect that specificity instead of broad job families", SYSTEM_PROMPT)
+
+    def test_scope_prompt_assets_avoid_domain_specific_example_anchors(self) -> None:
+        prompt_text = "\n".join([SYSTEM_PROMPT, MANUAL_ROLE_ENRICH_PROMPT])
+
+        forbidden_anchor_text = (
+            "Fuel Cell",
+            "Hydrogen Systems",
+            "LT-PEM",
+            "battery-only",
+            "Systems Integration & Test Engineer",
+            "HIL/SIL",
+            "Good role.name_en shape examples",
+            "Bad role.name_en examples",
+        )
+        for forbidden in forbidden_anchor_text:
+            self.assertNotIn(forbidden, prompt_text)
 
     def test_build_manual_role_enrich_prompt_includes_required_scope_profile(self) -> None:
         prompt = build_manual_role_enrich_prompt(
@@ -140,18 +160,20 @@ class RoleRecommendationsPromptsTests(unittest.TestCase):
         self.assertIn("Required scope_profile: exploratory", prompt)
         self.assertIn("must stay inside that requested scope_profile", prompt)
         self.assertIn("Scope decision rubric:", prompt)
-        self.assertIn("make the selected scope visible", prompt)
+        self.assertIn("make the selected search radius visible", prompt)
         self.assertIn("preserve it or add only one short qualifier", prompt)
         self.assertIn("Put that evidence in the descriptions", prompt)
+        self.assertIn("Do not apply global industry bans", prompt)
 
     def test_manual_role_enrich_prompt_asset_defines_visible_scope_fit(self) -> None:
         self.assertIn("downstream search lens", MANUAL_ROLE_ENRICH_PROMPT)
         self.assertIn("user has already chosen the role type", MANUAL_ROLE_ENRICH_PROMPT)
         self.assertIn("preserve it or add only one short qualifier", MANUAL_ROLE_ENRICH_PROMPT)
         self.assertIn("usually 3-7 meaningful words", MANUAL_ROLE_ENRICH_PROMPT)
-        self.assertIn("Core means direct continuation", MANUAL_ROLE_ENRICH_PROMPT)
-        self.assertIn("Adjacent means familiar domain", MANUAL_ROLE_ENRICH_PROMPT)
-        self.assertIn("Exploratory means farther repositioning", MANUAL_ROLE_ENRICH_PROMPT)
+        self.assertIn("Scope labels describe search radius and career distance", MANUAL_ROLE_ENRICH_PROMPT)
+        self.assertIn("changed practical work setting can still be core", MANUAL_ROLE_ENRICH_PROMPT)
+        self.assertIn("nearby transferable domain", MANUAL_ROLE_ENRICH_PROMPT)
+        self.assertIn("larger career narrative shift than adjacent", MANUAL_ROLE_ENRICH_PROMPT)
 
 
 if __name__ == "__main__":  # pragma: no cover

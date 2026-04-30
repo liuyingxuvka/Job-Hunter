@@ -150,6 +150,20 @@ class DirectJobDiscoveryStageTests(unittest.TestCase):
             verify_inputs.append([dict(item) for item in jobs])
             return verified_jobs
 
+        def fake_enrich(job, *, config, client, timeout_seconds):
+            del config
+            del client
+            del timeout_seconds
+            enriched = dict(job)
+            enriched["jd"] = {
+                "ok": True,
+                "status": 200,
+                "finalUrl": enriched["url"],
+                "applyUrl": f"{enriched['url']}/apply",
+                "rawText": "Responsibilities include PEM fuel cell degradation modeling. Qualifications. Apply now.",
+            }
+            return enriched
+
         with (
             patch(
                 "jobflow_desktop_app.search.stages.executor_direct_job_stage.discover_direct_jobs_for_candidate",
@@ -158,6 +172,10 @@ class DirectJobDiscoveryStageTests(unittest.TestCase):
             patch(
                 "jobflow_desktop_app.search.stages.executor_direct_job_stage.verify_and_prerank_direct_jobs",
                 side_effect=fake_verify,
+            ),
+            patch(
+                "jobflow_desktop_app.search.stages.executor_direct_job_stage.enrich_job_with_details",
+                side_effect=fake_enrich,
             ),
             patch(
                 "jobflow_desktop_app.search.stages.executor_direct_job_stage.JobAnalysisService.score_job_fit",
@@ -197,6 +215,7 @@ class DirectJobDiscoveryStageTests(unittest.TestCase):
         )
         self.assertEqual(direct_job["analysis"]["overallScore"], 82)
         self.assertTrue(direct_job["analysis"]["recommend"])
+        self.assertTrue(direct_job["analysis"]["eligibleForOutput"])
         self.assertEqual(len(mirror.bucket_jobs["recommended"]), 1)
 
         company = next(item for item in mirror.candidate_company_pool if item["name"] == "Existing Co")
@@ -234,6 +253,196 @@ class DirectJobDiscoveryStageTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 1)
         self.assertIn("search unavailable", result.payload["error"])
         self.assertEqual(result.payload["rawJobs"], 0)
+
+    def test_direct_stage_rejects_invalid_link_before_scoring(self) -> None:
+        mirror = _Mirror()
+        config = {
+            "candidate": {
+                "semanticProfile": {"summary": "Fuel-cell degradation modeling engineer"},
+                "targetRoles": [{"displayName": "Fuel Cell Modeling Engineer"}],
+            },
+            "search": {"model": "gpt-5-nano"},
+            "analysis": {"model": "gpt-5", "lowTokenMode": True},
+            "directJobDiscovery": {"enabled": True, "maxJobsPerRound": 10},
+        }
+        discovered_jobs = [
+            {
+                "title": "Fuel Cell Modeling Engineer",
+                "company": "Existing Co",
+                "location": "Aachen",
+                "url": "https://jobs.existing.example/jobs/expired-123",
+                "summary": "Model PEM fuel cell degradation and lifetime.",
+            },
+        ]
+        verified_jobs = [
+            {
+                **discovered_jobs[0],
+                "canonicalUrl": "https://jobs.existing.example/jobs/expired-123",
+                "directJobVerification": {
+                    "isLiveJobPage": True,
+                    "hasApplyEntry": True,
+                    "fastFitScore": 84,
+                    "reason": "AI thought this was current",
+                },
+                "source": "direct_job_discovery",
+                "sourceType": "direct_job_discovery",
+            }
+        ]
+
+        def fake_invalid_enrich(job, *, config, client, timeout_seconds):
+            del config
+            del client
+            del timeout_seconds
+            enriched = dict(job)
+            enriched["jd"] = {
+                "ok": False,
+                "status": 404,
+                "finalUrl": enriched["url"],
+                "applyUrl": "",
+                "rawText": "",
+            }
+            return enriched
+
+        with (
+            patch(
+                "jobflow_desktop_app.search.stages.executor_direct_job_stage.discover_direct_jobs_for_candidate",
+                return_value=discovered_jobs,
+            ),
+            patch(
+                "jobflow_desktop_app.search.stages.executor_direct_job_stage.verify_and_prerank_direct_jobs",
+                return_value=verified_jobs,
+            ),
+            patch(
+                "jobflow_desktop_app.search.stages.executor_direct_job_stage.enrich_job_with_details",
+                side_effect=fake_invalid_enrich,
+            ),
+            patch(
+                "jobflow_desktop_app.search.stages.executor_direct_job_stage.JobAnalysisService.score_job_fit",
+            ) as score_job_fit,
+        ):
+            result = run_direct_job_discovery_stage_db(
+                runtime_mirror=mirror,
+                search_run_id=701,
+                candidate_id=9,
+                run_dir=Path("C:/tmp/run"),
+                config=config,
+                client_instance=SimpleNamespace(),
+                progress_callback=None,
+            )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.payload["rejectedJobs"], 1)
+        self.assertEqual(result.payload["scoredJobs"], 0)
+        self.assertEqual(result.payload["recommendedJobs"], 0)
+        score_job_fit.assert_not_called()
+        rejected_job = next(
+            item
+            for item in mirror.bucket_jobs["all"]
+            if item["url"] == "https://jobs.existing.example/jobs/expired-123"
+        )
+        self.assertTrue(rejected_job["analysis"]["prefilterRejected"])
+        self.assertEqual(mirror.bucket_jobs["recommended"], [])
+
+    def test_direct_stage_post_verifies_reachable_dynamic_page_before_output(self) -> None:
+        mirror = _Mirror()
+        config = {
+            "candidate": {
+                "semanticProfile": {"summary": "Fuel-cell degradation modeling engineer"},
+                "targetRoles": [{"displayName": "Fuel Cell Modeling Engineer"}],
+            },
+            "search": {"model": "gpt-5-nano"},
+            "analysis": {"model": "gpt-5", "lowTokenMode": True, "postVerifyEnabled": True},
+            "directJobDiscovery": {"enabled": True, "maxJobsPerRound": 10},
+        }
+        discovered_jobs = [
+            {
+                "title": "Fuel Cell Modeling Engineer",
+                "company": "Existing Co",
+                "location": "Aachen",
+                "url": "https://jobs.existing.example/jobs/dynamic-123",
+                "summary": "Model PEM fuel cell degradation and lifetime.",
+            },
+        ]
+        verified_jobs = [
+            {
+                **discovered_jobs[0],
+                "canonicalUrl": "https://jobs.existing.example/jobs/dynamic-123",
+                "directJobVerification": {
+                    "isLiveJobPage": True,
+                    "hasApplyEntry": True,
+                    "fastFitScore": 84,
+                    "reason": "current dynamic page",
+                },
+                "source": "direct_job_discovery",
+                "sourceType": "direct_job_discovery",
+            }
+        ]
+
+        def fake_reachable_enrich(job, *, config, client, timeout_seconds):
+            del config
+            del client
+            del timeout_seconds
+            enriched = dict(job)
+            enriched["jd"] = {
+                "ok": False,
+                "status": 200,
+                "finalUrl": enriched["url"],
+                "applyUrl": "",
+                "rawText": "",
+            }
+            return enriched
+
+        with (
+            patch(
+                "jobflow_desktop_app.search.stages.executor_direct_job_stage.discover_direct_jobs_for_candidate",
+                return_value=discovered_jobs,
+            ),
+            patch(
+                "jobflow_desktop_app.search.stages.executor_direct_job_stage.verify_and_prerank_direct_jobs",
+                return_value=verified_jobs,
+            ),
+            patch(
+                "jobflow_desktop_app.search.stages.executor_direct_job_stage.enrich_job_with_details",
+                side_effect=fake_reachable_enrich,
+            ),
+            patch(
+                "jobflow_desktop_app.search.stages.executor_direct_job_stage.JobAnalysisService.score_job_fit",
+                return_value={"overallScore": 82, "recommend": True, "reason": "strong fit"},
+            ),
+            patch(
+                "jobflow_desktop_app.search.stages.executor_direct_job_stage.JobAnalysisService.evaluate_target_roles_for_job",
+                return_value=None,
+            ),
+            patch(
+                "jobflow_desktop_app.search.stages.executor_direct_job_stage.JobAnalysisService.prepare_analysis_for_storage",
+                side_effect=lambda analysis, role_binding, config: dict(analysis),
+            ),
+            patch(
+                "jobflow_desktop_app.search.stages.executor_direct_job_stage.JobAnalysisService.post_verify_recommended_job",
+                return_value={
+                    "isValidJobPage": True,
+                    "recommend": True,
+                    "location": "Aachen",
+                    "finalUrl": "https://jobs.existing.example/jobs/dynamic-123",
+                },
+            ) as post_verify,
+        ):
+            result = run_direct_job_discovery_stage_db(
+                runtime_mirror=mirror,
+                search_run_id=702,
+                candidate_id=9,
+                run_dir=Path("C:/tmp/run"),
+                config=config,
+                client_instance=SimpleNamespace(),
+                progress_callback=None,
+            )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.payload["postVerifyJobs"], 1)
+        post_verify.assert_called_once()
+        [recommended_job] = mirror.bucket_jobs["recommended"]
+        self.assertTrue(recommended_job["analysis"]["eligibleForOutput"])
+        self.assertFalse(recommended_job["analysis"]["postVerifySkipped"])
 
 
 if __name__ == "__main__":

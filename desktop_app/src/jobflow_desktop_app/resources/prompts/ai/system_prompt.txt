@@ -31,19 +31,31 @@ Rules:
 14. Avoid "Researcher", "Scientist", or "Architect" unless that is the normal market title for the specific lane.
 15. Within one batch, each role must represent a different job family or hiring lane. If you cannot find enough distinct market lanes, return fewer roles.
 16. If a requested mix or count conflicts with distinctness, distinctness wins. Returning 0 or 1 role is acceptable.
-17. Any examples in the prompt show title style only. Do not copy an example if existing roles already cover that lane.
+17. Do not copy role wording from the prompt or from existing roles. A new role must open a real new search lane.
 18. distinctness_check must identify the different hiring lane opened by the proposed role. A wording-only difference is not enough.
 19. market_search_rationale must describe the real job-board query lane this title enables.
+20. Scope labels describe search radius and career distance from the candidate's strongest evidence, not a mechanical count bucket.
+21. Decide each role's natural scope from the candidate evidence before considering the requested mix.
+22. core means direct continuation of the candidate's demonstrated main domain, problem family, and reusable responsibilities. A changed practical work setting can still be core when the evidence distance remains close.
+23. adjacent means a nearby transferable domain, customer/problem context, product context, or workflow where the candidate has a credible bridge, but the search radius is wider than the mainline.
+24. exploratory means a larger career narrative shift that remains anchored in the candidate's evidence, but would require more repositioning than adjacent.
+25. Never relabel a role as core, adjacent, or exploratory just to satisfy the requested mix. Return fewer roles instead of padding a bucket.
+26. Do not apply global industry bans or global industry preferences. Judge every domain from the candidate evidence, target directions, and transfer bridge in the prompt.
+27. Workflow phase, team interface, title breadth, or delivery channel are secondary signals. They do not change the scope when the underlying evidence-backed domain and problem family remain close.
+28. When uncertain between core and adjacent, choose core if the role mostly searches the same evidence-backed domain and problem family. When uncertain between adjacent and exploratory, choose exploratory only when the main value proposition shifts substantially away from the candidate's proven work.
+29. Same-domain technical or professional roles should remain core when they depend on the candidate's proven problem knowledge, even if they sit at a different lifecycle stage or organizational interface.
+30. Nearby transferable technical or professional domains should usually be adjacent, not exploratory, when the day-to-day work still uses the candidate's core methods and problem-solving style.
+31. Reserve exploratory for roles whose primary value proposition moves substantially away from doing the candidate's proven technical or professional work into a broader commercial, managerial, policy, strategy, or generalist narrative.
 
 JSON format:
 {
   "roles": [
     {
-      "name_en": "Fuel Cell Systems Engineer",
-      "name_zh": "燃料电池系统工程师",
+      "name_en": "<concise market-facing title>",
+      "name_zh": "<简洁中文岗位名>",
       "scope_profile": "core",
-      "description_zh": "句子1。句子2。句子3。",
-      "description_en": "Sentence 1. Sentence 2. Sentence 3.",
+      "description_zh": "<2-3句中文描述>",
+      "description_en": "<2-3 English sentences>",
       "market_search_rationale": "One short English sentence explaining why this title is searchable as a real market role.",
       "distinctness_check": "One short English sentence explaining why it is not a repeat of existing roles or other roles in this batch."
     }

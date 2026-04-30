@@ -253,9 +253,9 @@ class RuntimeConfigBuilderTests(unittest.TestCase):
             self.assertIn("maxJobsToAnalyzePerRun", runtime_config["analysis"])
             self.assertIn("jdFetchMaxJobsPerRun", runtime_config["analysis"])
             self.assertIn("postVerifyMaxJobsPerRun", runtime_config["analysis"])
-            self.assertFalse(runtime_config["analysis"]["postVerifyEnabled"])
+            self.assertTrue(runtime_config["analysis"]["postVerifyEnabled"])
             self.assertFalse(runtime_config["analysis"]["postVerifyUseWebSearch"])
-            self.assertFalse(runtime_config["analysis"]["postVerifyRequireChecked"])
+            self.assertTrue(runtime_config["analysis"]["postVerifyRequireChecked"])
             self.assertEqual(
                 runtime_config["fetch"]["timeoutMs"],
                 runtime_config_builder.HTTP_REQUEST_TIMEOUT_MS,
@@ -568,9 +568,9 @@ class RuntimeConfigBuilderTests(unittest.TestCase):
         self.assertNotIn("maxCompaniesPerCall", config["companyDiscovery"])
         self.assertNotIn("maxJobsToAnalyzePerRun", config["analysis"])
         self.assertNotIn("postVerifyMaxJobsPerRun", config["analysis"])
-        self.assertFalse(config["analysis"]["postVerifyEnabled"])
+        self.assertTrue(config["analysis"]["postVerifyEnabled"])
         self.assertFalse(config["analysis"]["postVerifyUseWebSearch"])
-        self.assertFalse(config["analysis"]["postVerifyRequireChecked"])
+        self.assertTrue(config["analysis"]["postVerifyRequireChecked"])
 
     def test_build_runtime_env_keeps_env_mode_api_key_from_named_variable(self) -> None:
         settings = SimpleNamespace(

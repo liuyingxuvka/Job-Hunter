@@ -35,16 +35,36 @@ Each scheduled test should:
 
 1. Run predictive KB preflight.
 2. Read `AGENTS.md`, this document, and the local private profile pointer.
-3. Open the current packaged `Jobflow Desktop.exe`.
-4. If yesterday ended with a rebuilt package, first verify the repaired UI/flow before starting a new search run.
-5. Confirm the active candidate identity from app data without exposing private resume contents.
-6. State the day's test focus in the report before interacting deeply.
-7. Prefer real GUI use over direct database inspection, but use the database to verify persistence and counts.
-8. Capture screenshots for important states.
-9. Use one hour as the default daily timebox. Choose two, three, or four hours only when the day's focus needs a longer run.
-10. Stop at the planned timebox unless the user explicitly asks for a longer run.
-11. Save a concise Chinese report under `runtime/daily_app_tests/YYYY-MM-DD/`.
-12. Run KB postflight and record reusable lessons.
+3. Run the local freshness preflight before opening the app:
+
+   ```powershell
+   python scripts\daily_desktop_qa_preflight.py --apply --json
+   ```
+
+4. If the preflight reports `blocked_in_progress`, stop the daily test before launching the app. Report that local package-relevant code is still changing and that the next run should retry after the active edits settle.
+5. If the preflight reports `validation_failed` or `build_failed`, stop before launching the app and report the failing command. Do not fall back to an older package for that day's test.
+6. If the preflight reports `rebuilt`, use the new EXE path returned by the preflight and trust the updated local private profile pointer.
+7. If the preflight reports `use_current`, open the current packaged `Jobflow Desktop.exe` from the private profile pointer.
+8. If yesterday ended with a rebuilt package, first verify the repaired UI/flow before starting a new search run.
+9. Confirm the active candidate identity from app data without exposing private resume contents.
+10. State the day's test focus in the report before interacting deeply.
+11. Prefer real GUI use over direct database inspection, but use the database to verify persistence and counts.
+12. Capture screenshots for important states.
+13. Use one hour as the default daily timebox. Choose two, three, or four hours only when the day's focus needs a longer run.
+14. Stop at the planned timebox unless the user explicitly asks for a longer run.
+15. Save a concise Chinese report under `runtime/daily_app_tests/YYYY-MM-DD/`.
+16. Run KB postflight and record reusable lessons.
+
+## Local Freshness Preflight
+
+The packaged app's own update check only compares the installed version with GitHub Releases. Daily QA must also check the local worktree before starting:
+
+- If package-relevant local files are still changing, or `.git/index.lock` exists, stop and notify instead of building or launching.
+- If package-relevant local changes are stable, run the desktop test suite, build a fresh local package, update `runtime/private/yingxu_profile_context.md`, then run the rebuilt package.
+- If validation or packaging fails, stop and report the failure. Do not continue with the older EXE, because that would test stale behavior.
+- If there are no package-relevant local changes and the current EXE is newer than the package source files, continue with the current private-profile EXE.
+
+The preflight writes its JSON evidence to `runtime/daily_app_tests/YYYY-MM-DD/local_freshness_preflight.json`.
 
 ## Default Focus Rotation
 

@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from ...search.output.final_output import has_current_output_eligibility
+from ...search.output.final_output import OUTPUT_ELIGIBILITY_RULE_VERSION, has_current_output_eligibility
 from ..connection import Database
 from ..target_role_cleanup import (
     CURRENT_FIT_STATUS_KEY,
@@ -291,15 +291,7 @@ class CandidateJobPoolRepository:
                     """,
                     (int(candidate_id),),
                 ).fetchall()
-            reject_updates: list[tuple[int]] = []
-            preserve_updates: list[tuple[str, str, int]] = []
-            for row in rows:
-                if self._sqlite_row_is_visible_recommendation(row):
-                    preserve_updates.append(
-                        self._preserve_visible_recommendation_on_output_refresh(row)
-                    )
-                else:
-                    reject_updates.append((int(row["id"]),))
+            reject_updates = [(int(row["id"]),) for row in rows]
             if reject_updates:
                 connection.executemany(
                     """
@@ -309,18 +301,6 @@ class CandidateJobPoolRepository:
                     WHERE id = ?
                     """,
                     reject_updates,
-                )
-            if preserve_updates:
-                connection.executemany(
-                    """
-                    UPDATE candidate_jobs
-                    SET analysis_json = ?,
-                        job_json = ?,
-                        output_status = 'pass',
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                    """,
-                    preserve_updates,
                 )
 
     def persist_display_i18n(self, *, candidate_id: int, updates: dict[str, dict[str, Any]]) -> None:
@@ -1013,9 +993,12 @@ class CandidateJobPoolRepository:
 
     @staticmethod
     def _sqlite_row_is_visible_recommendation(row: Any) -> bool:
+        analysis = _loads_object(row["analysis_json"])
         return (
             _text(row["recommendation_status"]) == "pass"
             and _text(row["output_status"]) == "pass"
+            and analysis.get("eligibleForOutput") is True
+            and _optional_int(analysis.get("outputEligibilityRuleVersion")) == OUTPUT_ELIGIBILITY_RULE_VERSION
             and _text(row["trash_status"]) != "trashed"
             and not bool(row["hidden"])
             and not bool(row["not_interested"])

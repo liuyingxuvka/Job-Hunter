@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 try:
     from ._helpers import create_candidate, create_profile, make_temp_context
@@ -46,6 +47,26 @@ class JobSearchRunnerUnitTests(unittest.TestCase):
 
     def _stamp_for_output(self, job: dict) -> dict:
         return materialize_output_eligibility(job, self._default_runtime_config())
+
+    def _patch_output_link_recheck(self, *, status: int = 200):
+        def fake_fetch_job_details(url, *, config, timeout_seconds):
+            del config
+            del timeout_seconds
+            return {
+                "ok": status < 400,
+                "status": status,
+                "finalUrl": url,
+                "redirected": False,
+                "rawText": "Responsibilities Qualifications Apply now" if status < 400 else "",
+                "applyUrl": url if status < 400 else "",
+                "fetchedAt": "2026-04-16T10:00:00+00:00",
+                "extracted": {},
+            }
+
+        return patch(
+            "jobflow_desktop_app.search.orchestration.job_search_runner_runtime_io.fetch_job_details",
+            side_effect=fake_fetch_job_details,
+        )
 
     def _run_dir(self, context, candidate_id: int) -> Path:
         run_dir = context.paths.runtime_dir / "search_runs" / f"candidate_{candidate_id}"
@@ -323,26 +344,27 @@ class JobSearchRunnerUnitTests(unittest.TestCase):
                 ],
             )
 
-            count = runner._refresh_python_recommended_output_json(
-                run_dir,
-                {
-                    "candidate": {"scopeProfile": "hydrogen_mainline"},
-                    "search": {
-                        "allowPlatformListings": False,
-                        "platformListingDomains": ["linkedin.com"],
+            with self._patch_output_link_recheck():
+                count = runner._refresh_python_recommended_output_json(
+                    run_dir,
+                    {
+                        "candidate": {"scopeProfile": "hydrogen_mainline"},
+                        "search": {
+                            "allowPlatformListings": False,
+                            "platformListingDomains": ["linkedin.com"],
+                        },
+                        "filters": {
+                            "excludeUnavailableLinks": True,
+                            "excludeAggregatorLinks": True,
+                            "preferDirectEmployerSite": True,
+                        },
+                        "analysis": {
+                            "postVerifyEnabled": False,
+                            "postVerifyRequireChecked": True,
+                        },
+                        "output": {"recommendedMode": "replace"},
                     },
-                    "filters": {
-                        "excludeUnavailableLinks": True,
-                        "excludeAggregatorLinks": True,
-                        "preferDirectEmployerSite": True,
-                    },
-                    "analysis": {
-                        "postVerifyEnabled": False,
-                        "postVerifyRequireChecked": True,
-                    },
-                    "output": {"recommendedMode": "replace"},
-                },
-            )
+                )
 
             self.assertEqual(count, 1)
             recommended_jobs = runner.runtime_mirror.load_latest_bucket_jobs(
@@ -394,11 +416,12 @@ class JobSearchRunnerUnitTests(unittest.TestCase):
                 jobs=[job],
             )
 
-            count = runner._refresh_python_recommended_output_json(
-                run_dir,
-                self._default_runtime_config(),
-                search_run_id=old_run_id,
-            )
+            with self._patch_output_link_recheck():
+                count = runner._refresh_python_recommended_output_json(
+                    run_dir,
+                    self._default_runtime_config(),
+                    search_run_id=old_run_id,
+                )
 
             self.assertEqual(count, 1)
             self.assertEqual(
@@ -409,6 +432,53 @@ class JobSearchRunnerUnitTests(unittest.TestCase):
                 len(runner.runtime_mirror.load_run_bucket_jobs(search_run_id=new_run_id, job_bucket="recommended")),
                 1,
             )
+
+    def test_refresh_python_recommended_output_drops_hard_invalid_live_link(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context, name="Demo Candidate")
+            create_profile(context, candidate_id, name="Systems Engineer", is_active=True)
+            runner, run_dir, search_run_id = self._seed_run(context, candidate_id)
+            job = {
+                "title": "Fuel Cell Reliability Engineer",
+                "company": "Acme Hydrogen",
+                "location": "Berlin, Germany",
+                "url": "https://acme.example.com/careers/jobs/expired",
+                "dateFound": "2026-04-14T12:00:00Z",
+                "summary": "Hydrogen durability diagnostics role.",
+                "sourceType": "company",
+                "jd": {
+                    "applyUrl": "https://acme.example.com/jobposting/disabled.html",
+                    "finalUrl": "https://acme.example.com/careers/jobs/expired",
+                    "status": 200,
+                    "ok": True,
+                    "rawText": "Responsibilities Qualifications Apply now",
+                },
+                "analysis": {
+                    "recommend": True,
+                    "overallScore": 74,
+                    "matchScore": 74,
+                    "fitTrack": "hydrogen_core",
+                },
+            }
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=search_run_id,
+                candidate_id=candidate_id,
+                job_bucket="all",
+                jobs=[job],
+            )
+
+            with self._patch_output_link_recheck(status=404):
+                count = runner._refresh_python_recommended_output_json(
+                    run_dir,
+                    self._default_runtime_config(),
+                    search_run_id=search_run_id,
+                )
+
+            self.assertEqual(count, 0)
+            self.assertEqual(runner.load_recommended_jobs(candidate_id), [])
+            records = runner.runtime_mirror.candidate_jobs.list_for_candidate(candidate_id)
+            self.assertEqual(records[0].recommendation_status, "pass")
+            self.assertEqual(records[0].output_status, "reject")
 
     def test_refresh_python_recommended_output_keeps_localization_target_role_binding(self) -> None:
         with make_temp_context() as context:
@@ -488,27 +558,28 @@ class JobSearchRunnerUnitTests(unittest.TestCase):
                 ],
             )
 
-            count = runner._refresh_python_recommended_output_json(
-                run_dir,
-                {
-                    "candidate": {"scopeProfile": ""},
-                    "search": {
-                        "allowPlatformListings": False,
-                        "platformListingDomains": ["linkedin.com"],
+            with self._patch_output_link_recheck():
+                count = runner._refresh_python_recommended_output_json(
+                    run_dir,
+                    {
+                        "candidate": {"scopeProfile": ""},
+                        "search": {
+                            "allowPlatformListings": False,
+                            "platformListingDomains": ["linkedin.com"],
+                        },
+                        "filters": {
+                            "excludeUnavailableLinks": True,
+                            "excludeAggregatorLinks": True,
+                            "preferDirectEmployerSite": True,
+                        },
+                        "analysis": {
+                            "postVerifyEnabled": False,
+                            "postVerifyRequireChecked": True,
+                            "recommendScoreThreshold": 50,
+                        },
+                        "output": {"recommendedMode": "replace"},
                     },
-                    "filters": {
-                        "excludeUnavailableLinks": True,
-                        "excludeAggregatorLinks": True,
-                        "preferDirectEmployerSite": True,
-                    },
-                    "analysis": {
-                        "postVerifyEnabled": False,
-                        "postVerifyRequireChecked": True,
-                        "recommendScoreThreshold": 50,
-                    },
-                    "output": {"recommendedMode": "replace"},
-                },
-            )
+                )
 
             self.assertEqual(count, 1)
             recommended = runner.load_recommended_jobs(candidate_id)

@@ -16,25 +16,21 @@
 
 > A local-first job discovery workspace for experienced professionals: not a one-shot job search, but a persistent place to build company memory, role evidence, and follow-up state over time.
 >
-> 面向有经验求职者的本地优先岗位发现工作台：不是一次性搜职位，而是把值得跟踪的公司、岗位和判断持续沉淀下来。
->
-> This README starts with English and ends with a full Chinese mirror. End users should go straight to the Windows download section; developers and collaborators can use the source instructions.
-> 本 README 先给英文，再给完整中文镜像。普通用户请直接看 Windows 下载部分；开发者和协作者再看源码说明。
+> English lead content comes first; a full Chinese mirror follows below. End users should go straight to the Windows download section; developers and collaborators can use the source instructions.
 
-## Product Preview / 产品预览
+## Product Preview
 
-Screenshots are generated from the built-in demo candidate and public example links, with no real candidate data.<br>
-截图使用内置 demo candidate 和公开示例链接生成，不包含真实求职者数据。
+Screenshots are generated from the built-in demo candidate and public example links, with no real candidate data.
 
-### Candidate Directory / 求职者入口
+### Candidate Directory
 
 ![Job Hunter candidate entry](docs/images/readme-screenshot-directory.png)
 
-### Job Search Workspace / 岗位搜索工作台
+### Job Search Workspace
 
 ![Job Hunter search workspace](docs/images/readme-screenshot-search-results.png)
 
-### Search Feedback Loop / 搜索闭环
+### Search Feedback Loop
 
 ![Job Hunter workflow](docs/images/readme-workflow.svg)
 

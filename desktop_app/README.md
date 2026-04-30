@@ -1,7 +1,6 @@
 # Jobflow Desktop App
 
-> This document includes a full English version and a full Chinese mirror. English comes first, followed by Chinese.
-> 本说明包含完整英文版本和完整中文镜像。英文在前，中文在后。
+> English lead content comes first; a full Chinese mirror follows below.
 
 ## English
 

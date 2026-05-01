@@ -10,6 +10,18 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-05-01
+
+### Fixed
+
+- Fixed live search-result polling so unchanged visible jobs do not rebuild the table, which prevents the final recommendations table from jumping back to the top while a search is still running.
+- Preserved table scroll position during necessary live-result rerenders.
+- Hardened Windows release checksum generation by replacing the brittle `Get-FileHash` dependency with a .NET SHA256 helper.
+
+### Added
+
+- Added FlowGuard coverage for live search-result refresh/scroll behavior and the v0.9.4 release gate.
+
 ## [0.9.3] - 2026-04-30
 
 ### Changed

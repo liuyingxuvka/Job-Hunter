@@ -394,3 +394,148 @@
   - OK: `python .flowguard/role_scope_prompt/run_checks.py`
   - OK: `python -m unittest desktop_app.tests.test_candidate_job_pool desktop_app.tests.test_direct_job_discovery_stage desktop_app.tests.test_final_output desktop_app.tests.test_job_search_runner_manual_tracking desktop_app.tests.test_job_search_runner_unit desktop_app.tests.test_role_recommendations_prompts desktop_app.tests.test_runtime_config_builder desktop_app.tests.test_daily_desktop_qa_preflight`
 - Skipped: full release packaging and GUI smoke; this was a branch integration pass, and unrelated local release-script edits were intentionally left out of the merge commit.
+
+
+## search-results-scroll-refresh-20260501 - Prevent live search result polling from resetting table scroll when visible jobs do not change
+
+- Project: Job-Hunter
+- Trigger reason: The change affects live UI refresh idempotency and user scroll state during running searches.
+- Status: in_progress
+- Skill decision: used_flowguard
+- Started: 2026-05-01T11:20:31+00:00
+- Ended: 2026-05-01T11:20:31+00:00
+- Duration seconds: 0.000
+- Commands OK: True
+
+### Model Files
+- none recorded
+
+### Commands
+- none recorded
+
+### Findings
+- none recorded
+
+### Counterexamples
+- none recorded
+
+### Friction Points
+- none recorded
+
+### Skipped Steps
+- none recorded
+
+### Next Actions
+- none recorded
+
+
+## search-results-scroll-refresh-20260501 - Prevent live search result polling from resetting table scroll when visible jobs do not change
+
+- Project: Job-Hunter
+- Trigger reason: The change affects live UI refresh idempotency and user scroll state during running searches.
+- Status: completed
+- Skill decision: used_flowguard
+- Started: 2026-05-01T11:23:29+00:00
+- Ended: 2026-05-01T11:23:29+00:00
+- Duration seconds: 0.000
+- Commands OK: True
+
+### Model Files
+- .flowguard/search_results_scroll_refresh/model.py
+- .flowguard/search_results_scroll_refresh/run_checks.py
+
+### Commands
+- OK (0.000s): `python .flowguard/search_results_scroll_refresh/run_checks.py`
+- OK (0.000s): `python -m unittest desktop_app.tests.test_search_results_live_runtime`
+- OK (0.000s): `python -m unittest desktop_app.tests.test_search_results_compact_step`
+- OK (0.000s): `python -m unittest desktop_app.tests.test_search_results_regressions desktop_app.tests.test_search_results_live_state desktop_app.tests.test_search_results_live_runtime desktop_app.tests.test_search_results_compact_step`
+- OK (0.000s): `python -m compileall -q desktop_app/src/jobflow_desktop_app .flowguard/search_results_scroll_refresh`
+
+### Findings
+- Correct model passed; no-op live polls skip table rebuilds and changed-job renders preserve scroll.
+- Real bug was the compact results renderer not recording the live results signature, causing every timer tick to look like a data change.
+- Runtime now records the signature after any render and compact/base render paths restore table scroll after rebuild.
+
+### Counterexamples
+- Broken compact renderer without signature write repeats renders for unchanged jobs and can reset a scrolled table to top.
+- Broken changed-render policy resets scroll to top when a real new job arrives while the user is scrolled down.
+
+### Friction Points
+- none recorded
+
+### Skipped Steps
+- Production conformance replay was skipped; focused Qt/unit tests cover the live polling and compact table projection.
+
+### Next Actions
+- Verify in the next packaged desktop QA run that scrolling final recommendations during an active search stays stable.
+
+
+## github-release-0-9-4-20260501 - Prepare and publish Job-Hunter v0.9.4 after upgrade smoke and local desktop fixes
+
+- Project: Job-Hunter
+- Trigger reason: Publishing has ordered version, privacy, build, tag, push, GitHub Release, and update smoke side effects.
+- Status: in_progress
+- Skill decision: used_flowguard
+- Started: 2026-05-01T11:43:01+00:00
+- Ended: 2026-05-01T11:43:01+00:00
+- Duration seconds: 0.000
+- Commands OK: True
+
+### Model Files
+- none recorded
+
+### Commands
+- none recorded
+
+### Findings
+- none recorded
+
+### Counterexamples
+- none recorded
+
+### Friction Points
+- none recorded
+
+### Skipped Steps
+- none recorded
+
+### Next Actions
+- none recorded
+
+
+## github-release-0-9-4-20260501 - Prepare and publish Job-Hunter v0.9.4 after upgrade smoke and local desktop fixes
+
+- Project: Job-Hunter
+- Trigger reason: Publishing has ordered version, privacy, build, tag, push, GitHub Release, and update smoke side effects.
+- Status: completed
+- Skill decision: use_flowguard
+- Started: 2026-05-01T11:58:58+00:00
+- Ended: 2026-05-01T11:58:58+00:00
+- Duration seconds: 0.000
+- Commands OK: True
+
+### Model Files
+- .flowguard/github_release_publish/model.py
+- .flowguard/github_release_publish/run_checks.py
+
+### Commands
+- OK (0.000s): `python .flowguard\github_release_publish\run_checks.py`
+- OK (0.000s): `python -m unittest discover desktop_app\tests`
+- OK (0.000s): `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_windows_release.ps1 -OutputRoot runtime\local_app\release-0.9.4`
+- OK (0.000s): `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\privacy_audit.ps1 -Scope repo`
+
+### Findings
+- Updater replacement from v0.9.2 to v0.9.3 worked and manual relaunch reported v0.9.3; visible auto-reopen was not reliable enough and should remain a UX follow-up.
+- Local v0.9.4 package launched and workspace header reported v0.9.4.
+
+### Counterexamples
+- none recorded
+
+### Friction Points
+- none recorded
+
+### Skipped Steps
+- none recorded
+
+### Next Actions
+- After push/tag, verify GitHub Release v0.9.4 assets and update manifest.

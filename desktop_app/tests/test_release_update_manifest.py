@@ -14,6 +14,9 @@ class ReleaseUpdateManifestTests(unittest.TestCase):
         self.assertIn("update-manifest.json", script)
         self.assertIn("ConvertTo-Json", script)
         self.assertIn("sha256", script)
+        self.assertIn("Get-Sha256Hex", script)
+        self.assertIn("System.Security.Cryptography.SHA256", script)
+        self.assertNotIn("Get-FileHash", script)
 
     def test_release_workflow_uploads_update_manifest_assets(self) -> None:
         workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8-sig")

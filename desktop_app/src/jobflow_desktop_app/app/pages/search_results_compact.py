@@ -206,15 +206,17 @@ class SearchResultsCompactStep(SearchResultsStep):
         return card
 
     def _render_visible_jobs(self, visible_jobs) -> int:
-        self.table.setRowCount(0)
+        scroll_position = self._table_scroll_position()
         self._populate_compact_table(
             self.table,
             visible_jobs,
             checkbox_cell_factory=self._make_delete_checkbox_cell,
         )
         rendered = len(visible_jobs)
+        self._live_results_signature = self._jobs_signature(visible_jobs)
         self._apply_compact_visual_order()
         self._apply_compact_display_overrides()
+        self._restore_table_scroll_position(scroll_position)
         return rendered
 
     def _make_delete_checkbox_cell(self, job_key: str) -> QWidget:

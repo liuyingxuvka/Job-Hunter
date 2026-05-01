@@ -169,6 +169,49 @@ class SearchResultsCompactStepTests(unittest.TestCase):
 
             self.assertEqual(compact.table.columnWidth(1), 333)
 
+    def test_compact_step_preserves_scroll_on_live_rerender(self) -> None:
+        with make_temp_context() as context:
+            fake_runner = FakeJobSearchRunner()
+            with patch(
+                "jobflow_desktop_app.app.pages.search_results.JobSearchRunner",
+                return_value=fake_runner,
+            ):
+                compact = SearchResultsCompactStep(context, ui_language="zh")
+            self.addCleanup(compact.deleteLater)
+
+            compact.resize(1200, 520)
+            compact.show()
+            jobs = [
+                make_job(
+                    title=f"Role {index:02d}",
+                    company="Acme Robotics",
+                    url=f"https://example.com/jobs/{index:02d}",
+                    date_found=f"2026-04-{index + 1:02d}T12:00:00Z",
+                )
+                for index in range(30)
+            ]
+            compact._render_visible_jobs(jobs)
+            process_events()
+
+            vertical_bar = compact.table.verticalScrollBar()
+            vertical_bar.setValue(vertical_bar.maximum())
+            process_events()
+            scrolled_value = vertical_bar.value()
+            self.assertGreater(scrolled_value, 0)
+
+            changed_jobs = list(jobs)
+            changed_jobs[0] = make_job(
+                title="Role 00 Updated",
+                company="Acme Robotics",
+                url="https://example.com/jobs/00",
+                date_found="2026-04-01T12:00:00Z",
+            )
+
+            compact._render_visible_jobs(changed_jobs)
+            process_events()
+
+            self.assertEqual(vertical_bar.value(), min(scrolled_value, vertical_bar.maximum()))
+
     def test_compact_step_uses_shorter_score_found_time_and_link_display(self) -> None:
         with make_temp_context() as context:
             fake_runner = FakeJobSearchRunner()

@@ -646,7 +646,21 @@ class SearchResultsStep(QWidget):
     def _render_jobs(self, jobs: list[JobSearchResult]) -> int:
         return self._render_visible_jobs(self._visible_jobs(jobs))
 
+    def _table_scroll_position(self) -> tuple[int, int]:
+        return (
+            self.table.verticalScrollBar().value(),
+            self.table.horizontalScrollBar().value(),
+        )
+
+    def _restore_table_scroll_position(self, position: tuple[int, int]) -> None:
+        vertical_value, horizontal_value = position
+        vertical_bar = self.table.verticalScrollBar()
+        horizontal_bar = self.table.horizontalScrollBar()
+        vertical_bar.setValue(min(max(0, vertical_value), vertical_bar.maximum()))
+        horizontal_bar.setValue(min(max(0, horizontal_value), horizontal_bar.maximum()))
+
     def _render_visible_jobs(self, visible_jobs: list[JobSearchResult]) -> int:
+        scroll_position = self._table_scroll_position()
         self.table.setRowCount(0)
         for row_index, job in enumerate(visible_jobs):
             job_key = self._job_key(job)
@@ -670,6 +684,7 @@ class SearchResultsStep(QWidget):
                 on_status_changed=self._on_status_changed,
             )
         self._live_results_signature = self._jobs_signature(visible_jobs)
+        self._restore_table_scroll_position(scroll_position)
         return len(visible_jobs)
 
     def _make_link_cell(self, url: str, prefer_detail_label: bool) -> QLabel:

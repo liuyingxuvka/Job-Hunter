@@ -108,6 +108,7 @@ def refresh_live_results(page) -> None:
         visible_count = len(visible_jobs_list)
         if signature != page._live_results_signature:
             visible_count = page._render_visible_jobs(visible_jobs_list)
+            page._live_results_signature = signature
             page._live_results_last_count = visible_count
         detail_text = _t(
             page.ui_language,

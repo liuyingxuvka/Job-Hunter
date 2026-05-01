@@ -13,10 +13,11 @@ except ImportError:  # pragma: no cover - unittest discover from tests dir
 
 
 class _FakePage:
-    def __init__(self, runner, jobs: list[object]) -> None:
+    def __init__(self, runner, jobs: list[object], *, renderer_records_signature: bool = True) -> None:
         self.ui_language = "zh"
         self.current_candidate_id = 1
         self.hidden_job_keys: set[str] = set()
+        self.renderer_records_signature = renderer_records_signature
         self._search_session = SearchSessionState(
             phase="running",
             owner_candidate_id=1,
@@ -49,7 +50,8 @@ class _FakePage:
     def _render_visible_jobs(self, visible_jobs: list[object]) -> int:
         self.render_calls += 1
         self.rendered_visible_jobs.append(list(visible_jobs))
-        self._live_results_signature = search_results_live_runtime.jobs_signature(visible_jobs)
+        if self.renderer_records_signature:
+            self._live_results_signature = search_results_live_runtime.jobs_signature(visible_jobs)
         return len(visible_jobs)
 
 
@@ -98,6 +100,31 @@ class SearchResultsLiveRuntimeTests(unittest.TestCase):
             self.assertEqual(fake_page.progress_detail_calls, [])
             self.assertEqual(fake_page.busy_messages, [])
             self.assertEqual(fake_page._live_results_signature, search_results_live_runtime.jobs_signature(jobs))
+
+    def test_refresh_live_results_records_signature_after_render(self) -> None:
+        runner = FakeJobSearchRunner()
+        jobs = [
+            make_job(
+                title="Newest Role",
+                company="Acme Robotics",
+                url="https://example.com/jobs/new",
+                date_found="2026-04-14T12:00:00Z",
+            )
+        ]
+        runner.load_live_jobs = lambda _candidate_id: list(jobs)  # type: ignore[method-assign]
+        runner.set_progress(SimpleNamespace(status="running", stage="main", elapsed_seconds=87))
+        fake_page = _FakePage(runner, jobs, renderer_records_signature=False)
+        fake_page._search_session.worker_thread = SimpleNamespace(isRunning=lambda: True)
+        fake_page._is_search_running = lambda candidate_id=None: candidate_id in (None, 1)
+
+        search_results_live_runtime.refresh_live_results(fake_page)
+        search_results_live_runtime.refresh_live_results(fake_page)
+
+        self.assertEqual(fake_page.render_calls, 1)
+        self.assertEqual(
+            fake_page._live_results_signature,
+            search_results_live_runtime.jobs_signature(jobs),
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -105,6 +105,23 @@ function Copy-DirectoryContents {
   Copy-Item -Path ($items | ForEach-Object { $_.FullName }) -Destination $Destination -Recurse -Force
 }
 
+function Get-Sha256Hex {
+  param([string]$Path)
+
+  $stream = [System.IO.File]::OpenRead($Path)
+  try {
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      $bytes = $sha256.ComputeHash($stream)
+      return ([System.BitConverter]::ToString($bytes) -replace "-", "").ToLowerInvariant()
+    } finally {
+      $sha256.Dispose()
+    }
+  } finally {
+    $stream.Dispose()
+  }
+}
+
 $pythonSpec = Resolve-PythonExe -RequestedPath $PythonExe
 $releaseVersion = Resolve-Version -RequestedVersion $Version
 $versionTuple = Convert-VersionTuple -VersionText $releaseVersion
@@ -257,7 +274,7 @@ if (-not $SkipZip) {
     Pop-Location
   }
 
-  $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  $hash = Get-Sha256Hex -Path $zipPath
   Set-Content -LiteralPath $checksumPath -Value "$hash *$(Split-Path -Leaf $zipPath)" -Encoding ascii
 
   $manifest = [ordered]@{

@@ -15,7 +15,8 @@ from ..analysis.scoring_contract import overall_score, passes_unified_recommenda
 
 
 Job = dict[str, Any]
-OUTPUT_ELIGIBILITY_RULE_VERSION = 1
+OUTPUT_ELIGIBILITY_RULE_VERSION = 2
+HISTORICAL_RECOMMENDATION_MARKER = "_existingRecommendedRow"
 
 TRACK_CLUSTER_LABEL = {
     "direct_fit": "Direct-Fit",
@@ -91,6 +92,11 @@ UNAVAILABLE_SIGNAL_RE = re.compile(
     flags=re.IGNORECASE,
 )
 
+UNAVAILABLE_URL_RE = re.compile(
+    r"(/|^)(disabled|expired|closed|unavailable)([./?#]|$)|jobposting/disabled",
+    flags=re.IGNORECASE,
+)
+
 JD_BODY_SIGNAL_RE = re.compile(
     r"\b(responsibilities|requirements|qualifications|what you will do|what you'll do|about the role"
     r"|preferred qualifications|minimum qualifications|apply now|submit your application)\b|岗位职责|任职要求|岗位要求|申请方式",
@@ -122,6 +128,15 @@ def _config_bool(config: Mapping[str, Any] | None, *path: str, default: bool = F
     if current is None:
         return default
     return bool(current)
+
+
+def post_verify_required(config: Mapping[str, Any] | None) -> bool:
+    return _config_bool(config, "analysis", "postVerifyEnabled", default=False) and _config_bool(
+        config,
+        "analysis",
+        "postVerifyRequireChecked",
+        default=True,
+    )
 
 
 def _config_value(config: Mapping[str, Any] | None, *path: str, default: Any = None) -> Any:
@@ -327,6 +342,10 @@ def has_unavailable_signal(text: object) -> bool:
     return bool(UNAVAILABLE_SIGNAL_RE.search(str(text or "")))
 
 
+def has_unavailable_url_signal(url: object) -> bool:
+    return bool(UNAVAILABLE_URL_RE.search(str(url or "")))
+
+
 def has_jd_body_signal(text: object) -> bool:
     return bool(JD_BODY_SIGNAL_RE.search(str(text or "")))
 
@@ -410,6 +429,8 @@ def choose_output_job_url(job: Mapping[str, Any], config: Mapping[str, Any] | No
             continue
         if is_allowed_platform_listing_url(normalized, config):
             continue
+        if has_unavailable_url_signal(normalized):
+            continue
         if not is_specific_job_detail_url(normalized):
             continue
         return normalized
@@ -437,16 +458,93 @@ def has_reliable_output_link(job: Mapping[str, Any], config: Mapping[str, Any] |
         return False
     post_verify_enabled = _config_bool(config, "analysis", "postVerifyEnabled", default=False)
     post_verify_url = normalize_job_url(_config_value(job, "analysis", "postVerify", "finalUrl", default=""))
+    post_verify_valid = _config_value(job, "analysis", "postVerify", "isValidJobPage", default=False) is True
+    if post_verify_required(config) and not has_current_detail_page_evidence(job):
+        if not (post_verify_enabled and post_verify_valid and has_current_link_reachability_evidence(job)):
+            return False
     apply_url = normalize_job_url(_config_value(job, "jd", "applyUrl", default=""))
     final_url = normalize_job_url(_config_value(job, "jd", "finalUrl", default=""))
     original_url = normalize_job_url(job.get("url") or "")
     if post_verify_enabled and post_verify_url and output_url == post_verify_url:
-        return _config_value(job, "analysis", "postVerify", "isValidJobPage", default=False) is True
+        return post_verify_valid
     if apply_url and output_url == apply_url:
         return True
     if output_url in {final_url, original_url} and is_applyable_job_page(job):
         return True
     return False
+
+
+def has_current_detail_page_evidence(job: Mapping[str, Any]) -> bool:
+    job = normalize_output_link_evidence(job)
+    jd = job.get("jd")
+    if not isinstance(jd, Mapping):
+        return False
+    if jd.get("ok") is not True:
+        return False
+    try:
+        status = int(jd.get("status") or 0)
+    except (TypeError, ValueError):
+        status = 0
+    if status >= 400:
+        return False
+    detail_url = normalize_job_url(
+        _config_value(job, "analysis", "postVerify", "finalUrl", default="")
+        or _config_value(job, "jd", "finalUrl", default="")
+        or job.get("url")
+        or job.get("canonicalUrl")
+        or ""
+    )
+    if not detail_url:
+        return False
+    if (
+        has_unavailable_url_signal(detail_url)
+        or is_likely_parking_host(detail_url)
+        or is_generic_careers_url(detail_url)
+        or is_aggregator_host(detail_url)
+    ):
+        return False
+    if not is_specific_job_detail_url(detail_url):
+        return False
+    if has_explicit_unavailable_job_signal(job):
+        return False
+    raw_text = str(jd.get("rawText") or jd.get("text") or "").strip()
+    if raw_text and not has_jd_body_signal(raw_text) and is_likely_landing_page_text(raw_text):
+        return False
+    return True
+
+
+def has_current_link_reachability_evidence(job: Mapping[str, Any]) -> bool:
+    job = normalize_output_link_evidence(job)
+    jd = job.get("jd")
+    if not isinstance(jd, Mapping):
+        return False
+    try:
+        status = int(jd.get("status") or 0)
+    except (TypeError, ValueError):
+        status = 0
+    if status <= 0 or status >= 400:
+        return False
+    detail_url = normalize_job_url(
+        _config_value(job, "analysis", "postVerify", "finalUrl", default="")
+        or _config_value(job, "jd", "finalUrl", default="")
+        or job.get("url")
+        or job.get("canonicalUrl")
+        or ""
+    )
+    if not detail_url:
+        return False
+    if (
+        has_unavailable_url_signal(detail_url)
+        or is_likely_parking_host(detail_url)
+        or is_generic_careers_url(detail_url)
+        or is_aggregator_host(detail_url)
+    ):
+        return False
+    if not is_specific_job_detail_url(detail_url):
+        return False
+    if has_explicit_unavailable_job_signal(job):
+        return False
+    return True
 
 
 def has_meaningful_output_title(job: Mapping[str, Any]) -> bool:
@@ -468,6 +566,8 @@ def is_unavailable_job(job: Mapping[str, Any], config: Mapping[str, Any] | None)
     if not _config_bool(config, "filters", "excludeUnavailableLinks", default=True):
         return False
     url = job.get("url") or ""
+    if has_unavailable_url_signal(url):
+        return True
     if (
         _config_bool(config, "filters", "excludeAggregatorLinks", default=True)
         and is_aggregator_host(url)
@@ -485,7 +585,14 @@ def is_unavailable_job(job: Mapping[str, Any], config: Mapping[str, Any] | None)
     if status in {404, 410, 451}:
         return True
     final_url = str(_config_value(job, "jd", "finalUrl", default="") or "").strip()
-    if final_url and (is_likely_parking_host(final_url) or is_generic_careers_url(final_url)):
+    apply_url = str(_config_value(job, "jd", "applyUrl", default="") or job.get("applyUrl") or "").strip()
+    if final_url and (
+        has_unavailable_url_signal(final_url)
+        or is_likely_parking_host(final_url)
+        or is_generic_careers_url(final_url)
+    ):
+        return True
+    if apply_url and has_unavailable_url_signal(apply_url):
         return True
     if _config_value(job, "jd", "redirected", default=False) and final_url:
         redirected_to_job_like = has_job_signal(title="", url=final_url, summary="")
@@ -519,7 +626,12 @@ def passes_final_output_check(job: Mapping[str, Any], config: Mapping[str, Any] 
             summary=job.get("summary") or "",
         ) and bool(re.search(r"/jobs/view/[^/?#]+", platform_url, re.IGNORECASE))
 
-    if is_likely_parking_host(output_url) or is_generic_careers_url(output_url) or is_aggregator_host(output_url):
+    if (
+        has_unavailable_url_signal(output_url)
+        or is_likely_parking_host(output_url)
+        or is_generic_careers_url(output_url)
+        or is_aggregator_host(output_url)
+    ):
         return False
     if not is_specific_job_detail_url(output_url):
         return False
@@ -608,7 +720,64 @@ def should_restore_historical_recommended_job(job: Mapping[str, Any], config: Ma
         return False
     if has_explicit_unavailable_job_signal(job):
         return False
-    return is_output_eligible(job, config)
+    return has_historical_recommendation_retention_eligibility(job, config)
+
+
+def has_historical_recommendation_retention_eligibility(
+    job: Mapping[str, Any],
+    config: Mapping[str, Any] | None,
+) -> bool:
+    if _config_value(job, "analysis", "recommend", default=False) is not True:
+        return False
+    if not passes_unified_recommendation_threshold(job, threshold=config):
+        return False
+    if not has_meaningful_output_title(job):
+        return False
+    output_url = choose_output_job_url(job, config)
+    if not output_url:
+        return False
+    if is_likely_parking_host(output_url) or is_generic_careers_url(output_url) or is_aggregator_host(output_url):
+        return False
+    if has_explicit_unavailable_job_signal(job):
+        return False
+    return True
+
+
+def _mark_existing_recommended_row(job: Mapping[str, Any]) -> Job:
+    marked = dict(job)
+    marked[HISTORICAL_RECOMMENDATION_MARKER] = True
+    return marked
+
+
+def _is_existing_recommended_row(job: Mapping[str, Any]) -> bool:
+    return job.get(HISTORICAL_RECOMMENDATION_MARKER) is True
+
+
+def _strip_internal_output_markers(job: Mapping[str, Any]) -> Job:
+    cleaned = dict(job)
+    cleaned.pop(HISTORICAL_RECOMMENDATION_MARKER, None)
+    return cleaned
+
+
+def materialize_historical_recommendation_retention(
+    job: Mapping[str, Any],
+    config: Mapping[str, Any] | None,
+) -> Job:
+    normalized = enrich_recommended_job(job, config)
+    analysis = normalized.get("analysis")
+    normalized_analysis = dict(analysis) if isinstance(analysis, Mapping) else {}
+    normalized["analysis"] = normalized_analysis
+    normalized_analysis["eligibleForOutput"] = True
+    normalized_analysis["outputEligibilityReason"] = "historical_recommendation_retained"
+    normalized_analysis["outputEligibilityRuleVersion"] = OUTPUT_ELIGIBILITY_RULE_VERSION
+    normalized_analysis["outputEligibilityPolicyKey"] = output_eligibility_policy_key(config)
+    output_url = choose_output_job_url(normalized, config)
+    if output_url:
+        normalized["outputUrl"] = output_url
+    canonical_url = canonical_job_url(normalized)
+    if canonical_url:
+        normalized["canonicalUrl"] = canonical_url
+    return _strip_internal_output_markers(normalized)
 
 
 def infer_source_quality(job: Mapping[str, Any], config: Mapping[str, Any] | None) -> str:
@@ -767,13 +936,16 @@ def enrich_recommended_job(job: Mapping[str, Any], config: Mapping[str, Any] | N
 def pass_post_verify(job: Mapping[str, Any], config: Mapping[str, Any] | None, *, require_recommend: bool) -> bool:
     if is_limited_platform_listing_job(job, config):
         return True
-    if _config_value(job, "analysis", "postVerifySkipped", default=False) is True:
-        return True
-    if not _config_bool(config, "analysis", "postVerifyEnabled", default=False):
+    enabled = _config_bool(config, "analysis", "postVerifyEnabled", default=False)
+    require_checked = _config_bool(config, "analysis", "postVerifyRequireChecked", default=True)
+    if not enabled:
         return True
     verified = _config_value(job, "analysis", "postVerify", default={})
-    require_checked = _config_bool(config, "analysis", "postVerifyRequireChecked", default=True)
     if not isinstance(verified, Mapping) or not verified:
+        if has_current_detail_page_evidence(job):
+            return True
+        if _config_value(job, "analysis", "postVerifySkipped", default=False) is True and not require_checked:
+            return True
         return not require_checked
     if verified.get("isValidJobPage") is not True:
         return False
@@ -795,6 +967,12 @@ def _materialize_final_recommended_jobs(
     materialized_jobs: list[Job] = []
     for job in jobs:
         if not isinstance(job, Mapping):
+            continue
+        if _is_existing_recommended_row(job):
+            if has_historical_recommendation_retention_eligibility(job, config):
+                materialized_jobs.append(
+                    materialize_historical_recommendation_retention(job, config)
+                )
             continue
         stamped = materialize_output_eligibility(enrich_recommended_job(job, config), config)
         analysis = stamped.get("analysis")
@@ -857,7 +1035,7 @@ def rebuild_recommended_output_payload(
         ]
         existing_rows = [
             {
-                "job": enrich_recommended_job(job, config),
+                "job": _mark_existing_recommended_row(enrich_recommended_job(job, config)),
                 "dateFound": str(job.get("dateFound") or "").strip(),
                 "interest": str(job.get("interest") or "").strip(),
                 "appliedDate": str(job.get("appliedDate") or "").strip(),
@@ -880,8 +1058,12 @@ def rebuild_recommended_output_payload(
             if isinstance(row.get("job"), Mapping)
             else None,
             key_for_job=lambda job: build_final_output_dedupe_key(job, config),
-            passes_unified_threshold=lambda job: is_output_eligible(job, config),
-            passes_final_output_check=lambda job: is_output_eligible(job, config),
+            passes_unified_threshold=lambda job: has_historical_recommendation_retention_eligibility(job, config)
+            if _is_existing_recommended_row(job)
+            else is_output_eligible(job, config),
+            passes_final_output_check=lambda job: has_historical_recommendation_retention_eligibility(job, config)
+            if _is_existing_recommended_row(job)
+            else is_output_eligible(job, config),
             has_manual_tracking=has_manual_tracking,
             prefers_candidate_over_existing=lambda existing, candidate: prefers_candidate_over_existing(
                 existing,

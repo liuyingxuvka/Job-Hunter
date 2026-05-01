@@ -1,9 +1,17 @@
 from __future__ import annotations
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
 from ...ai.role_recommendations import CandidateSemanticProfile
-from ..output.final_output import rebuild_recommended_output_payload
+from ..companies.company_sources_enrichment import fetch_job_details
+from ..output.final_output import (
+    choose_output_job_url,
+    has_unavailable_url_signal,
+    is_unavailable_job,
+    materialize_output_eligibility,
+    rebuild_recommended_output_payload,
+)
 from ..output.manual_tracking_store import overlay_manual_fields_onto_jobs
 from ..output.tracker_xlsx import write_tracker_xlsx
 from ..run_state import job_identity_key, job_item_key
@@ -42,6 +50,73 @@ def _merge_jobs_by_runtime_key(runner, jobs: list[dict]) -> list[dict]:
             runner._merge_job_item(existing, item) if existing is not None else dict(item)
         )
     return list(merged_jobs.values())
+
+
+def _final_output_link_recheck_timeout_seconds(config: dict | None) -> int:
+    raw_fetch_config = config.get("fetch") if isinstance(config, Mapping) else {}
+    fetch_config = raw_fetch_config if isinstance(raw_fetch_config, Mapping) else {}
+    try:
+        timeout_ms = int(fetch_config.get("timeoutMs") or 12000)
+    except (TypeError, ValueError):
+        timeout_ms = 12000
+    return max(3, min(15, int(timeout_ms / 1000) or 12))
+
+
+def _merge_output_link_details(job: dict, details: Mapping[str, object], output_url: str) -> dict:
+    merged = dict(job)
+    existing_jd = merged.get("jd")
+    jd = dict(existing_jd) if isinstance(existing_jd, Mapping) else {}
+    jd.update(
+        {
+            "fetchedAt": str(details.get("fetchedAt") or datetime.now(timezone.utc).replace(microsecond=0).isoformat()),
+            "ok": bool(details.get("ok")),
+            "status": int(details.get("status") or 0),
+            "finalUrl": str(details.get("finalUrl") or output_url).strip(),
+            "redirected": bool(details.get("redirected")),
+            "rawText": str(details.get("rawText") or jd.get("rawText") or ""),
+            "applyUrl": str(details.get("applyUrl") or jd.get("applyUrl") or ""),
+            "outputLinkRechecked": True,
+        }
+    )
+    merged["jd"] = jd
+    merged["outputUrl"] = output_url
+    return merged
+
+
+def _hard_invalid_output_link(details: Mapping[str, object], output_url: str) -> bool:
+    try:
+        status = int(details.get("status") or 0)
+    except (TypeError, ValueError):
+        status = 0
+    final_url = str(details.get("finalUrl") or output_url or "").strip()
+    if status in {404, 410, 451}:
+        return True
+    return has_unavailable_url_signal(output_url) or has_unavailable_url_signal(final_url)
+
+
+def _recheck_recommended_output_links(jobs: list[dict], config: dict | None) -> list[dict]:
+    checked_jobs: list[dict] = []
+    for item in jobs:
+        if not isinstance(item, dict):
+            continue
+        output_url = str(item.get("outputUrl") or choose_output_job_url(item, config) or "").strip()
+        if not output_url:
+            continue
+        details = fetch_job_details(
+            output_url,
+            config=config,
+            timeout_seconds=_final_output_link_recheck_timeout_seconds(config),
+        )
+        if _hard_invalid_output_link(details, output_url):
+            continue
+        rechecked = _merge_output_link_details(item, details, output_url)
+        if is_unavailable_job(rechecked, config):
+            continue
+        materialized = materialize_output_eligibility(rechecked, config)
+        analysis = materialized.get("analysis")
+        if isinstance(analysis, Mapping) and analysis.get("eligibleForOutput") is True:
+            checked_jobs.append(materialized)
+    return checked_jobs
 
 
 def _load_cumulative_bucket_jobs(
@@ -315,6 +390,7 @@ def refresh_python_recommended_output_json(
     payload_jobs = result.payload.get("jobs", [])
     if isinstance(payload_jobs, list):
         payload_jobs = overlay_manual_fields_onto_jobs(payload_jobs, manual_by_alias)
+        payload_jobs = _recheck_recommended_output_links(payload_jobs, config or {})
         result.payload["jobs"] = payload_jobs
         if review_states is not None and candidate_id is not None:
             review_states.merge_manual_fields_from_jobs(

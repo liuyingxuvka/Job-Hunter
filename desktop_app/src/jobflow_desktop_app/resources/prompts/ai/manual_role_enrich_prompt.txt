@@ -23,16 +23,22 @@ Rules:
 10. Return scope_profile as one of: core, adjacent, exploratory.
 11. Keep role.name_en concise and searchable, usually 3-7 meaningful words.
 12. Do not add extra methods, acronyms, products, or proof points to the title just to demonstrate fit. Put that evidence in the descriptions.
-13. Core means direct continuation of the candidate's strongest demonstrated responsibilities and engineering problem type.
-14. Adjacent means familiar domain or product context, but a different main function such as application, validation, systems, customer-facing, product, or operational work.
-15. Exploratory means farther repositioning with a real anchor in the candidate's domain, customers, tools, or engineering workflow.
-16. Do not describe an exploratory role as if it were a core continuation, and do not make a core role sound like a broad pivot.
+13. Scope labels describe search radius and career distance from the candidate's strongest evidence.
+14. Core means direct continuation of the candidate's demonstrated main domain, problem family, and reusable responsibilities. A changed practical work setting can still be core when the evidence distance remains close.
+15. Adjacent means a nearby transferable domain, customer/problem context, product context, or workflow with a clear bridge from the candidate evidence, but wider than the mainline.
+16. Exploratory means a larger career narrative shift than adjacent, still anchored in the candidate's evidence but broader, less proven, or more repositioning-heavy.
+17. Do not apply global industry bans or global industry preferences. Judge the role from the candidate evidence, target directions, and transfer bridge in the prompt.
+18. Workflow phase, team interface, title breadth, role seniority, and delivery channel are secondary signals; they do not change scope when the underlying evidence-backed domain and problem family remain close.
+19. When uncertain between core and adjacent, choose core if the role mostly searches the same evidence-backed domain and problem family.
+20. Nearby transferable technical or professional domains should usually be adjacent, not exploratory, when the day-to-day work still uses the candidate's core methods and problem-solving style.
+21. Reserve exploratory for roles whose main value proposition moves substantially away from doing the candidate's proven technical or professional work.
+22. Do not describe an exploratory role as if it were a core continuation, and do not make a core role sound like a broad pivot.
 
 JSON format:
 {
   "scope_profile": "adjacent",
-  "name_en": "Systems Integration & Test Engineer (HIL/SIL Automation)",
-  "name_zh": "系统集成与测试工程师（HIL/SIL 自动化）",
-  "description_zh": "句子1。句子2。句子3。",
-  "description_en": "Sentence 1. Sentence 2. Sentence 3."
+  "name_en": "<concise market-facing title>",
+  "name_zh": "<简洁中文岗位名>",
+  "description_zh": "<2-3句中文描述>",
+  "description_en": "<2-3 English sentences>"
 }

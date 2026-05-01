@@ -12,6 +12,7 @@ from ...prompt_assets import load_prompt_asset
 from ..analysis.service import JobAnalysisService, ResponseRequestClient
 from ..companies.company_sources_enrichment import (
     build_found_job_records,
+    enrich_job_with_details,
     merge_company_source_jobs,
 )
 from ..companies.discovery import build_company_identity_keys, merge_unique_strings, normalize_url
@@ -19,8 +20,12 @@ from ..companies.pool_store import merge_companies_into_master
 from ..companies.sources_helpers import dedupe_jobs_by_normalized_url, has_job_signal
 from ..output.final_output import (
     canonical_job_url,
+    has_current_detail_page_evidence,
+    has_current_link_reachability_evidence,
     infer_region_tag,
     infer_source_quality,
+    is_unavailable_job,
+    materialize_output_eligibility,
     is_specific_job_detail_url,
     normalize_job_url,
 )
@@ -216,7 +221,7 @@ def run_direct_job_discovery_stage_db(
             progress_callback,
         )
 
-        scored_jobs, scoring_failures = _score_live_direct_jobs(
+        scored_jobs, scoring_failures, link_rejections, link_unconfirmed, scored_count, post_verify_count = _score_live_direct_jobs(
             client_instance,
             config=config,
             run_dir=run_dir,
@@ -266,8 +271,9 @@ def run_direct_job_discovery_stage_db(
     message = (
         "Python direct job discovery completed. "
         f"Found {len(discovered_jobs)} candidate job(s); skipped {skipped_existing} already-seen job(s); "
-        f"verified {len(live_jobs)} live job(s); scored {len(scored_jobs)}; "
-        f"recommended {recommended_count}; upserted {upserted_companies} company(s)."
+        f"verified {len(live_jobs)} live job(s); rejected {link_rejections} invalid link(s); "
+        f"left {link_unconfirmed} unconfirmed link(s); scored {scored_count}; "
+        f"post-verified {post_verify_count}; recommended {recommended_count}; upserted {upserted_companies} company(s)."
     )
     if scoring_failures > 0:
         message = f"{message} Suspended {scoring_failures} job(s) after scoring failures."
@@ -279,7 +285,10 @@ def run_direct_job_discovery_stage_db(
         raw_jobs=len(discovered_jobs),
         skipped_existing=skipped_existing,
         verified_jobs=len(live_jobs),
-        scored_jobs=len(scored_jobs),
+        rejected_jobs=link_rejections,
+        unconfirmed_jobs=link_unconfirmed,
+        scored_jobs=scored_count,
+        post_verify_jobs=post_verify_count,
         recommended_jobs=recommended_count,
         upserted_companies=upserted_companies,
     )
@@ -295,7 +304,10 @@ def _direct_stage_result(
     raw_jobs: int = 0,
     skipped_existing: int = 0,
     verified_jobs: int = 0,
+    rejected_jobs: int = 0,
+    unconfirmed_jobs: int = 0,
     scored_jobs: int = 0,
+    post_verify_jobs: int = 0,
     recommended_jobs: int = 0,
     upserted_companies: int = 0,
     error: str = "",
@@ -304,7 +316,10 @@ def _direct_stage_result(
         "rawJobs": max(0, int(raw_jobs)),
         "skippedExisting": max(0, int(skipped_existing)),
         "verifiedJobs": max(0, int(verified_jobs)),
+        "rejectedJobs": max(0, int(rejected_jobs)),
+        "unconfirmedJobs": max(0, int(unconfirmed_jobs)),
         "scoredJobs": max(0, int(scored_jobs)),
+        "postVerifyJobs": max(0, int(post_verify_jobs)),
         "recommendedJobs": max(0, int(recommended_jobs)),
         "upsertedCompanies": max(0, int(upserted_companies)),
     }
@@ -436,26 +451,54 @@ def _score_live_direct_jobs(
     search_run_id: int,
     jobs: list[Mapping[str, Any]],
     cancel_event: Any | None = None,
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int, int, int, int, int]:
     candidate_profile = _load_candidate_profile_payload(config, run_dir)
     data_availability_note = _build_data_availability_note(candidate_profile)
     scored_jobs: list[dict[str, Any]] = []
     scoring_failures = 0
+    link_rejections = 0
+    link_unconfirmed = 0
+    scored_count = 0
+    post_verify_count = 0
     for job in jobs:
         if _cancel_requested(cancel_event):
             break
+        prepared_job, detail_status = _prepare_live_direct_job_for_scoring(
+            client,
+            config=config,
+            search_run_id=search_run_id,
+            job=job,
+        )
+        if detail_status == "rejected":
+            link_rejections += 1
+            scored_jobs.append(prepared_job)
+            continue
+        if detail_status not in {"ready", "post_verify_ready"}:
+            link_unconfirmed += 1
+            continue
+        require_post_verify = detail_status == "post_verify_ready"
         scored_job = _score_direct_job(
             client,
             config=config,
             candidate_profile=candidate_profile,
             data_availability_note=data_availability_note,
             search_run_id=search_run_id,
-            job=job,
+            job=prepared_job,
+            require_post_verify=require_post_verify,
         )
         if not _analysis_completed(scored_job.get("analysis")):
             scoring_failures += 1
+        else:
+            scored_count += 1
+            analysis = scored_job.get("analysis")
+            if (
+                require_post_verify
+                and isinstance(analysis, Mapping)
+                and isinstance(analysis.get("postVerify"), Mapping)
+            ):
+                post_verify_count += 1
         scored_jobs.append(scored_job)
-    return scored_jobs, scoring_failures
+    return scored_jobs, scoring_failures, link_rejections, link_unconfirmed, scored_count, post_verify_count
 
 
 def _write_direct_job_buckets(
@@ -639,16 +682,20 @@ def _normalize_verified_job(raw_job: Mapping[str, Any], *, config: Mapping[str, 
         "location": str(raw_job.get("location") or "").strip(),
         "url": final_url,
         "canonicalUrl": final_url,
+        "finalUrl": final_url,
         "datePosted": str(raw_job.get("datePosted") or "").strip(),
         "dateFound": _now_iso(),
         "summary": str(raw_job.get("summary") or "").strip(),
         "availabilityHint": str(raw_job.get("reason") or "").strip(),
         "applyUrl": normalize_job_url(raw_job.get("applyUrl") or ""),
+        "aiPreRankReason": str(raw_job.get("reason") or "").strip(),
         "source": "direct_job_discovery",
         "sourceType": "direct_job_discovery",
         "directJobVerification": {
             "isLiveJobPage": bool(raw_job.get("isLiveJobPage")),
             "hasApplyEntry": bool(raw_job.get("hasApplyEntry")),
+            "finalUrl": final_url,
+            "applyUrl": normalize_job_url(raw_job.get("applyUrl") or ""),
             "fastFitScore": _clamp_score(raw_job.get("fastFitScore")),
             "reason": str(raw_job.get("reason") or "").strip(),
             "verifiedAt": _now_iso(),
@@ -659,6 +706,63 @@ def _normalize_verified_job(raw_job: Mapping[str, Any], *, config: Mapping[str, 
     return job
 
 
+def _prepare_live_direct_job_for_scoring(
+    client: ResponseRequestClient,
+    *,
+    config: Mapping[str, Any],
+    search_run_id: int,
+    job: Mapping[str, Any],
+) -> tuple[dict[str, Any], str]:
+    try:
+        enriched = enrich_job_with_details(
+            job,
+            config=config,
+            client=client,
+            timeout_seconds=_direct_detail_timeout_seconds(config),
+        )
+    except Exception as exc:
+        failed = dict(job)
+        failed["processingState"] = record_technical_failure(
+            failed.get("processingState"),
+            run_id=search_run_id,
+            reason=str(exc or "").strip() or "direct_job_detail_fetch_failure",
+        )
+        return failed, "unconfirmed"
+    if has_current_detail_page_evidence(enriched):
+        return enriched, "ready"
+    if has_current_link_reachability_evidence(enriched):
+        return enriched, "post_verify_ready"
+    if is_unavailable_job(enriched, config):
+        rejected = dict(enriched)
+        rejected["analysis"] = {
+            "prefilterRejected": True,
+            "recommend": False,
+            "overallScore": 0,
+            "matchScore": 0,
+            "reason": "direct_job_link_unavailable",
+            "updatedAt": _now_iso(),
+        }
+        rejected["processingState"] = clear_work_unit_state()
+        return rejected, "rejected"
+    return enriched, "unconfirmed"
+
+
+def _direct_detail_timeout_seconds(config: Mapping[str, Any]) -> int | None:
+    direct_config = config.get("directJobDiscovery") if isinstance(config.get("directJobDiscovery"), Mapping) else {}
+    raw_value = direct_config.get("timeoutSeconds")
+    if raw_value in (None, ""):
+        return None
+    try:
+        return max(1, int(raw_value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _direct_post_verify_enabled(config: Mapping[str, Any]) -> bool:
+    analysis_config = config.get("analysis") if isinstance(config.get("analysis"), Mapping) else {}
+    return bool(analysis_config.get("postVerifyEnabled"))
+
+
 def _score_direct_job(
     client: ResponseRequestClient,
     *,
@@ -667,6 +771,7 @@ def _score_direct_job(
     data_availability_note: str,
     search_run_id: int,
     job: Mapping[str, Any],
+    require_post_verify: bool = False,
 ) -> dict[str, Any]:
     working_job = dict(job)
     try:
@@ -689,10 +794,26 @@ def _score_direct_job(
             role_binding,
             config=config,
         )
+        analysis_payload.pop("postVerify", None)
         analysis_payload["postVerifySkipped"] = True
         analysis_payload["updatedAt"] = _now_iso()
+        if require_post_verify and _direct_post_verify_enabled(config) and analysis_payload.get("recommend") is True:
+            post_verify = JobAnalysisService.post_verify_recommended_job(
+                client,
+                config=config,
+                job=working_job,
+            )
+            analysis_payload["postVerify"] = post_verify
+            working_job["postVerify"] = post_verify
+            analysis_payload["postVerifySkipped"] = False
+            verified_location = str(post_verify.get("location") or "").strip()
+            if verified_location:
+                analysis_payload["location"] = verified_location
+                if not str(working_job.get("location") or "").strip():
+                    working_job["location"] = verified_location
         working_job["analysis"] = analysis_payload
         working_job["processingState"] = clear_work_unit_state()
+        working_job = materialize_output_eligibility(working_job, config)
     except Exception as exc:
         working_job["processingState"] = record_technical_failure(
             working_job.get("processingState"),

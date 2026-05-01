@@ -96,7 +96,8 @@ def filter_displayable_recommended_jobs(
 
 
 def resolve_job_links(item: dict) -> tuple[str, str, str]:
-    source_url = str(item.get("url") or "").strip()
+    output_url = str(item.get("outputUrl") or "").strip()
+    source_url = str(output_url or item.get("url") or "").strip()
     canonical_url = str(item.get("canonicalUrl") or "").strip()
     analysis = item.get("analysis")
     if not isinstance(analysis, dict):
@@ -110,15 +111,15 @@ def resolve_job_links(item: dict) -> tuple[str, str, str]:
 
     verified_final_url = str(post_verify.get("finalUrl") or "").strip()
     if verified_final_url and runtime_config_builder.coerce_bool(post_verify.get("isValidJobPage")):
-        return source_url, verified_final_url, "verified_final"
+        return source_url, output_url or verified_final_url, "verified_final"
 
     apply_url = str(jd.get("applyUrl") or item.get("applyUrl") or "").strip()
     if apply_url:
-        return source_url, apply_url, "apply"
+        return source_url, output_url or apply_url, "apply"
 
     final_url = str(jd.get("finalUrl") or item.get("finalUrl") or "").strip()
     if final_url:
-        return source_url, final_url, "final"
+        return source_url, output_url or final_url, "final"
 
     if canonical_url:
         return source_url, canonical_url, "canonical"

@@ -656,7 +656,7 @@ class CandidateJobPoolRepositoryTests(unittest.TestCase):
                 "current_rescore_reject",
             )
 
-    def test_output_set_refresh_preserves_previously_visible_recommendation(self) -> None:
+    def test_output_set_refresh_rejects_previously_visible_recommendation_not_in_final_set(self) -> None:
         with make_temp_context() as context:
             candidate_id = create_candidate(context)
             mirror = SearchRuntimeMirror(context.database)
@@ -728,20 +728,10 @@ class CandidateJobPoolRepositoryTests(unittest.TestCase):
                 ).load_recommended_payloads_for_candidate(candidate_id)
             }
 
-            self.assertEqual(records["https://beta.example/jobs/history"].output_status, "pass")
-            self.assertIn("https://beta.example/jobs/history", payloads)
-            self.assertEqual(
-                payloads["https://beta.example/jobs/history"]["analysis"]["recommendationDisplay"][
-                    "currentFitStatus"
-                ],
-                "historical_only",
-            )
-            self.assertEqual(
-                payloads["https://beta.example/jobs/history"]["analysis"]["recommendationDisplay"][
-                    "reason"
-                ],
-                "current_output_refresh_excluded",
-            )
+            self.assertEqual(records["https://acme.example/jobs/kept"].output_status, "pass")
+            self.assertEqual(records["https://beta.example/jobs/history"].output_status, "reject")
+            self.assertIn("https://acme.example/jobs/kept", payloads)
+            self.assertNotIn("https://beta.example/jobs/history", payloads)
 
 
 if __name__ == "__main__":  # pragma: no cover

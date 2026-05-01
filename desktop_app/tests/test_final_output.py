@@ -193,6 +193,8 @@ class FinalOutputTests(unittest.TestCase):
             score=77,
             verified=None,
         )
+        unchecked["canonicalUrl"] = unchecked["url"]
+        unchecked.pop("jd", None)
         checked = self._job(
             title="Hydrogen Diagnostics Engineer",
             url="https://acme.example.com/careers/jobs/44444",
@@ -220,6 +222,50 @@ class FinalOutputTests(unittest.TestCase):
             "https://acme.example.com/careers/jobs/44444",
         )
 
+    def test_post_verify_gate_accepts_current_detail_evidence_without_ai_post_verify(self) -> None:
+        unchecked = self._job(
+            title="Hydrogen Diagnostics Engineer",
+            url="https://acme.example.com/careers/jobs/33333",
+            apply_url="https://acme.example.com/careers/jobs/33333/apply",
+            score=77,
+            verified=None,
+        )
+        unchecked["analysis"]["postVerifySkipped"] = True
+
+        result = rebuild_recommended_output_payload(
+            all_jobs=[unchecked],
+            existing_recommended_jobs=[],
+            config=self._config(mode="replace", post_verify_enabled=True),
+            generated_at="2026-04-14T12:30:00Z",
+        )
+
+        jobs = result.payload["jobs"]
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]["url"], "https://acme.example.com/careers/jobs/33333")
+        self.assertTrue(jobs[0]["analysis"]["eligibleForOutput"])
+
+    def test_failed_post_verify_overrides_current_detail_evidence(self) -> None:
+        failed = self._job(
+            title="Hydrogen Diagnostics Engineer",
+            url="https://acme.example.com/careers/jobs/33333",
+            apply_url="https://acme.example.com/careers/jobs/33333/apply",
+            score=77,
+            verified={
+                "isValidJobPage": False,
+                "recommend": False,
+                "finalUrl": "https://acme.example.com/careers/jobs/33333",
+            },
+        )
+
+        result = rebuild_recommended_output_payload(
+            all_jobs=[failed],
+            existing_recommended_jobs=[],
+            config=self._config(mode="replace", post_verify_enabled=True),
+            generated_at="2026-04-14T12:30:00Z",
+        )
+
+        self.assertEqual(result.payload["jobs"], [])
+
     def test_post_verify_disabled_does_not_block_final_output(self) -> None:
         unchecked = self._job(
             title="Hydrogen Diagnostics Engineer",
@@ -245,7 +291,7 @@ class FinalOutputTests(unittest.TestCase):
         self.assertEqual(jobs[0]["title"], "Hydrogen Diagnostics Engineer")
         self.assertEqual(jobs[0]["outputUrl"], "https://acme.example.com/careers/jobs/55555/apply")
 
-    def test_post_verify_skipped_flag_allows_output_even_when_main_config_requires_check(self) -> None:
+    def test_post_verify_skipped_flag_blocks_output_when_main_config_requires_check(self) -> None:
         skipped = self._job(
             title="Hydrogen Diagnostics Engineer",
             url="https://acme.example.com/careers/jobs/66666",
@@ -254,6 +300,8 @@ class FinalOutputTests(unittest.TestCase):
             verified=None,
         )
         skipped["analysis"]["postVerifySkipped"] = True
+        skipped["canonicalUrl"] = skipped["url"]
+        skipped.pop("jd", None)
 
         result = rebuild_recommended_output_payload(
             all_jobs=[skipped],
@@ -263,8 +311,85 @@ class FinalOutputTests(unittest.TestCase):
         )
 
         jobs = result.payload["jobs"]
+        self.assertEqual(jobs, [])
+
+    def test_append_mode_retains_existing_history_without_new_post_verify(self) -> None:
+        existing_job = self._job(
+            title="Fuel Cell Reliability Engineer",
+            url="https://acme.example.com/careers/jobs/12345",
+            apply_url="https://acme.example.com/careers/jobs/12345/apply",
+            score=72,
+            date_found="2026-04-01T09:00:00Z",
+        )
+        existing_job["analysis"].pop("postVerify", None)
+
+        result = rebuild_recommended_output_payload(
+            all_jobs=[],
+            existing_recommended_jobs=[existing_job],
+            config=self._config(mode="append", post_verify_enabled=True),
+            generated_at="2026-04-30T12:30:00Z",
+        )
+
+        jobs = result.payload["jobs"]
         self.assertEqual(len(jobs), 1)
-        self.assertEqual(jobs[0]["title"], "Hydrogen Diagnostics Engineer")
+        self.assertEqual(jobs[0]["title"], "Fuel Cell Reliability Engineer")
+        self.assertEqual(
+            jobs[0]["analysis"]["outputEligibilityReason"],
+            "historical_recommendation_retained",
+        )
+
+    def test_post_verify_requires_current_detail_fetch_evidence(self) -> None:
+        job = self._job(
+            title="Hydrogen Diagnostics Engineer",
+            url="https://acme.example.com/careers/jobs/77777",
+            apply_url="https://acme.example.com/careers/jobs/77777/apply",
+            score=77,
+            verified={
+                "isValidJobPage": True,
+                "recommend": True,
+                "finalUrl": "https://acme.example.com/careers/jobs/77777",
+            },
+        )
+        job["jd"]["ok"] = False
+        job["jd"]["status"] = 0
+        job["jd"]["rawText"] = ""
+
+        result = rebuild_recommended_output_payload(
+            all_jobs=[job],
+            existing_recommended_jobs=[],
+            config=self._config(mode="replace", post_verify_enabled=True),
+            generated_at="2026-04-30T12:30:00Z",
+        )
+
+        self.assertEqual(result.payload["jobs"], [])
+
+    def test_post_verify_can_rescue_reachable_dynamic_detail_page(self) -> None:
+        job = self._job(
+            title="Hydrogen Diagnostics Engineer",
+            url="https://acme.example.com/careers/jobs/88888",
+            apply_url="",
+            score=77,
+            verified={
+                "isValidJobPage": True,
+                "recommend": True,
+                "finalUrl": "https://acme.example.com/careers/jobs/88888",
+            },
+        )
+        job["jd"]["ok"] = False
+        job["jd"]["status"] = 200
+        job["jd"]["rawText"] = ""
+        job["jd"]["finalUrl"] = "https://acme.example.com/careers/jobs/88888"
+
+        result = rebuild_recommended_output_payload(
+            all_jobs=[job],
+            existing_recommended_jobs=[],
+            config=self._config(mode="replace", post_verify_enabled=True),
+            generated_at="2026-04-30T12:30:00Z",
+        )
+
+        jobs = result.payload["jobs"]
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]["outputUrl"], "https://acme.example.com/careers/jobs/88888")
 
     def test_passes_final_output_check_accepts_resolved_apply_url_when_source_url_missing(self) -> None:
         job = self._job(
@@ -285,6 +410,25 @@ class FinalOutputTests(unittest.TestCase):
             final_url="",
             score=72,
         )
+
+        result = rebuild_recommended_output_payload(
+            all_jobs=[job],
+            existing_recommended_jobs=[],
+            config=self._config(mode="replace"),
+            generated_at="2026-04-14T12:30:00Z",
+        )
+
+        self.assertEqual(result.payload["jobs"], [])
+
+    def test_disabled_apply_url_is_not_treated_as_live_output(self) -> None:
+        job = self._job(
+            title="Fuel Cell Reliability Engineer",
+            url="https://acme.example.com/careers/jobs/12345",
+            apply_url="https://jobdb.example.com/jobdb/public/jobposting/disabled.html",
+            final_url="https://acme.example.com/careers/jobs/12345",
+            score=72,
+        )
+        job["jd"]["rawText"] = "Responsibilities Qualifications Apply now"
 
         result = rebuild_recommended_output_payload(
             all_jobs=[job],

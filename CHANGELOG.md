@@ -10,6 +10,11 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-04-30
+
+### Changed
+
+- Improve recommendation validation, role-scope prompts, and final job-link verification.
 ## [0.9.2] - 2026-04-29
 
 ### Changed

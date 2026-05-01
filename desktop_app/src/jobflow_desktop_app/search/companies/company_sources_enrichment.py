@@ -4,6 +4,7 @@ import json
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Callable
+from urllib.error import HTTPError
 
 from ...ai.client import build_json_schema_request, build_text_input_messages, parse_response_json
 from ...prompt_assets import load_prompt_asset
@@ -465,6 +466,20 @@ def fetch_job_details(
             "applyUrl": apply_url,
             "fetchedAt": now_iso(),
             "locationHint": location_hint,
+        }
+    except HTTPError as exc:
+        return {
+            "ok": False,
+            "status": int(getattr(exc, "code", 0) or 0),
+            "contentType": "",
+            "finalUrl": normalized_url,
+            "redirected": False,
+            "extracted": {},
+            "rawText": "",
+            "applyUrl": "",
+            "fetchedAt": now_iso(),
+            "locationHint": "",
+            "error": f"HTTP {int(getattr(exc, 'code', 0) or 0)}",
         }
     except Exception as exc:
         return {

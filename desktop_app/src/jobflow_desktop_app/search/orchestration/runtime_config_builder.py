@@ -798,11 +798,9 @@ def apply_runtime_config_resume_pending_stage(*, sources_config: dict, company_d
         analysis_config,
         {
             "scoringUseWebSearch": False,
-            # Resume/finalize should focus on clearing queued jobs, not spend
-            # extra budget on the optional post-verify pass.
-            "postVerifyEnabled": False,
+            "postVerifyEnabled": True,
             "postVerifyUseWebSearch": False,
-            "postVerifyRequireChecked": False,
+            "postVerifyRequireChecked": True,
         },
     )
 def apply_runtime_config_main_stage(*, search_config: dict, sources_config: dict, company_discovery_config: dict, direct_job_discovery_config: dict, analysis_config: dict, translation_config: dict, adaptive_search_config: dict, fetch_config: dict, output_config: dict) -> None:
@@ -849,11 +847,9 @@ def apply_runtime_config_main_stage(*, search_config: dict, sources_config: dict
         analysis_config,
         {
             "scoringUseWebSearch": False,
-            # Post-verify remains opt-in in the main stage; default runs should
-            # not spend extra web-search budget on a second verification pass.
-            "postVerifyEnabled": False,
+            "postVerifyEnabled": True,
             "postVerifyUseWebSearch": False,
-            "postVerifyRequireChecked": False,
+            "postVerifyRequireChecked": True,
             "maxJobsToAnalyzePerRun": adaptive_strategy["analysis_work_cap"],
             "jdFetchMaxJobsPerRun": adaptive_strategy["analysis_work_cap"],
             "postVerifyMaxJobsPerRun": adaptive_strategy["analysis_work_cap"],

@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 DESKTOP_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = DESKTOP_ROOT / "src"
@@ -64,6 +65,13 @@ class JobSearchRunnerManualTrackingTests(unittest.TestCase):
                                 "finalUrl": "https://example.com/jobs/a/apply",
                             },
                         },
+                        "jd": {
+                            "ok": True,
+                            "status": 200,
+                            "finalUrl": "https://example.com/jobs/a",
+                            "applyUrl": "https://example.com/jobs/a/apply",
+                            "rawText": "Responsibilities Qualifications Apply now",
+                        },
                     }
                 ],
             )
@@ -91,13 +99,26 @@ class JobSearchRunnerManualTrackingTests(unittest.TestCase):
                 ],
             )
 
-            count = runner._refresh_python_recommended_output_json(
-                run_dir,
-                {
-                    "output": {"recommendedMode": "replace"},
-                    "analysis": {"postVerifyEnabled": True, "postVerifyRequireChecked": True},
+            with patch(
+                "jobflow_desktop_app.search.orchestration.job_search_runner_runtime_io.fetch_job_details",
+                return_value={
+                    "ok": True,
+                    "status": 200,
+                    "finalUrl": "https://example.com/jobs/a/apply",
+                    "redirected": False,
+                    "rawText": "Responsibilities Qualifications Apply now",
+                    "applyUrl": "https://example.com/jobs/a/apply",
+                    "fetchedAt": "2026-04-16T10:00:00+00:00",
+                    "extracted": {},
                 },
-            )
+            ):
+                count = runner._refresh_python_recommended_output_json(
+                    run_dir,
+                    {
+                        "output": {"recommendedMode": "replace"},
+                        "analysis": {"postVerifyEnabled": True, "postVerifyRequireChecked": True},
+                    },
+                )
 
             self.assertEqual(count, 1)
             payload = runner.runtime_mirror.load_latest_bucket_jobs(

@@ -70,6 +70,12 @@ In one sentence: **search engines are useful for today; Job Hunter is for buildi
 
 The flow stays sequential and inspectable. The difference is that it can learn from both directions: companies lead to jobs, and good jobs strengthen the company pool.
 
+### AI-Native Search Logic
+
+Job Hunter does not treat AI as a chat layer wrapped around a fixed keyword search. It uses AI where hard-coded software rules are weakest: unstable role titles, ambiguous responsibility descriptions, adjacent-domain transitions, whether a company may need a capability, and why a role is worth tracking.
+
+The deterministic parts still stay ordinary and inspectable: local storage, run state, result history, review status, and desktop workflow. AI handles the open-ended language and matching layer so complex job-search judgment does not have to be forced into fixed keywords and exhaustive rule lists.
+
 ### Where To Start
 
 If you only want to use the app, follow the end-user path first. If you want to modify code, debug behavior, or collaborate on development, use the developer path below.
@@ -274,6 +280,12 @@ Job Hunter 不是又一个职位列表工具。它解决的是一个更长期的
 6. 把岗位结果、公司信号和用户后续状态写回本地数据库，供下一轮继续使用。
 
 这套流程仍然保持单线、可解释、可调试；区别在于它不是只消费公司池，也会从好岗位反向补强公司池。
+
+### AI 原生搜索逻辑
+
+Job Hunter 不是在传统关键词搜索外面套一层 AI 聊天助手，而是把 AI 用在传统硬编码规则最难覆盖的地方：岗位标题不稳定、职责描述模糊、相邻行业迁移、公司是否可能需要某种能力，以及为什么一个岗位值得继续追踪。
+
+确定性的部分仍然由普通软件负责：本地数据库、运行状态、结果历史、评审状态和桌面工作流。AI 负责的是开放式语言理解和匹配判断层，避免把复杂求职场景硬塞进固定关键词和穷举规则里。
 
 ### 你应该从哪里开始
 

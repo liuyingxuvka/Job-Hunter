@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from ..output.final_output import has_current_output_eligibility
+from ..analysis.scoring_contract import unified_recommend_threshold
+from ..output.final_output import (
+    MATERIALIZED_OUTPUT_SOURCE,
+    decide_source_aware_final_recommendation_visibility,
+)
 from ..run_state import extract_overall_score as state_extract_overall_score
 from . import runtime_config_builder
 from .job_result_i18n import normalize_display_i18n
@@ -35,6 +39,8 @@ def extract_optional_int(value: object) -> int | None:
 def analysis_blocks_live_review(analysis: object) -> bool:
     if not isinstance(analysis, dict):
         return False
+    if bool(analysis.get("prefilterRejected")):
+        return True
     if bool(analysis.get("landingPageNoise")) or bool(analysis.get("signalOnlyNoise")):
         return True
     if analysis.get("isJobPosting") is False and not bool(analysis.get("recommend")):
@@ -42,29 +48,48 @@ def analysis_blocks_live_review(analysis: object) -> bool:
     return False
 
 
-def filter_review_ready_jobs(jobs: list[dict]) -> list[dict]:
+def filter_review_ready_jobs(
+    jobs: list[dict],
+    *,
+    require_recommend: bool = False,
+    config: dict[str, Any] | None = None,
+) -> list[dict]:
     ready_jobs: list[dict] = []
     for item in jobs:
         if not isinstance(item, dict):
             continue
         analysis = item.get("analysis", {})
-        if extract_overall_score(analysis) is None:
+        score = extract_overall_score(analysis)
+        if score is None:
             continue
+        if require_recommend:
+            if not isinstance(analysis, dict) or not bool(analysis.get("recommend")):
+                continue
+            if score < unified_recommend_threshold(config):
+                continue
         ready_jobs.append(item)
     return ready_jobs
 
 
-def filter_live_review_jobs(jobs: list[dict]) -> list[dict]:
+def filter_live_review_jobs(
+    jobs: list[dict],
+    *,
+    config: dict[str, Any] | None = None,
+) -> list[dict]:
     return [
         item
-        for item in filter_review_ready_jobs(jobs)
+        for item in filter_review_ready_jobs(
+            jobs,
+            require_recommend=True,
+            config=config,
+        )
         if not analysis_blocks_live_review(item.get("analysis"))
     ]
 
 
 def passes_displayable_recommendation_threshold(
     item: dict,
-    threshold: int = 50,
+    threshold: int = 20,
     *,
     config: dict[str, Any] | None = None,
 ) -> bool:
@@ -76,16 +101,17 @@ def passes_displayable_recommendation_threshold(
     if not bool(analysis.get("recommend")):
         return False
     eligibility_config = config or {"analysis": {"recommendScoreThreshold": threshold}}
-    return bool(analysis.get("eligibleForOutput")) and has_current_output_eligibility(
+    return decide_source_aware_final_recommendation_visibility(
         item,
         eligibility_config,
-    )
+        source=MATERIALIZED_OUTPUT_SOURCE,
+    ).visible
 
 
 def filter_displayable_recommended_jobs(
     jobs: list[dict],
     *,
-    threshold: int = 50,
+    threshold: int = 20,
     config: dict[str, Any] | None = None,
 ) -> list[dict]:
     return [
@@ -97,7 +123,7 @@ def filter_displayable_recommended_jobs(
 
 def resolve_job_links(item: dict) -> tuple[str, str, str]:
     output_url = str(item.get("outputUrl") or "").strip()
-    source_url = str(output_url or item.get("url") or "").strip()
+    source_url = str(item.get("url") or item.get("canonicalUrl") or output_url or "").strip()
     canonical_url = str(item.get("canonicalUrl") or "").strip()
     analysis = item.get("analysis")
     if not isinstance(analysis, dict):

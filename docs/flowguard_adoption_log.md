@@ -539,3 +539,212 @@
 
 ### Next Actions
 - After push/tag, verify GitHub Release v0.9.4 assets and update manifest.
+
+
+## recommendation-table-gate-20260502 - Final recommendation table gating, score floor, and dedupe repair
+
+- Project: Job-Hunter
+- Trigger reason: The change affects durable recommendation/output status, final table projection, score threshold, duplicate handling, and output drop reasons.
+- Status: completed
+- Skill decision: use_flowguard
+- Started: 2026-05-02T10:28:59+00:00
+- Ended: 2026-05-02T10:54:17+00:00
+- Commands OK: True
+
+### Model Files
+- .flowguard/recommendation_table_gate/model.py
+- .flowguard/recommendation_table_gate/run_checks.py
+
+### Commands
+- OK: `python .flowguard\recommendation_table_gate\run_checks.py`
+- OK: `python .flowguard\final_output_verification\run_checks.py`
+- OK: `python -m compileall -q desktop_app/src/jobflow_desktop_app .flowguard/recommendation_table_gate`
+- OK: `python -m unittest desktop_app.tests.test_scoring_contract desktop_app.tests.test_final_output desktop_app.tests.test_job_search_runner_records desktop_app.tests.test_run_state desktop_app.tests.test_runtime_job_sync desktop_app.tests.test_candidate_job_pool desktop_app.tests.test_search_results_regressions desktop_app.tests.test_search_results_status desktop_app.tests.test_search_results_compact_step`
+- OK: `python -m unittest discover desktop_app\tests`
+
+### Findings
+- Correct model passed: final table rows require score >= 20, non-prefilter-rejected AI recommendations, valid final output, and duplicate collapse before projection.
+- Broken live-pool projection model produced counterexamples for below-floor and non-final rows entering the final table.
+- Existing final-output detail verification model still passed after the table-gating changes.
+
+### Counterexamples
+- A broken projection that renders live-pool decisions can show a score-19 row and AI reject rows in the final table.
+
+### Skipped Steps
+- Production database conformance replay was skipped; focused unit tests and the full desktop test suite cover the affected projection, output, pool, and dedupe paths.
+
+### Next Actions
+- Verify in the next packaged desktop QA run that the user-facing table shows final recommendations only and that more jobs appear under the new score floor without showing reject/skipped rows.
+
+
+## recommendation-quality-audit-20260502 - Final recommendation correctness, missed jobs, duplicates, and stale policy reads
+
+- Project: Job-Hunter
+- Trigger reason: The user requested a FlowGuard audit of whether final job recommendations meet the standard, miss eligible jobs, or duplicate identical jobs.
+- Status: completed
+- Skill decision: use_flowguard
+- Ended: 2026-05-02T15:03:47+00:00
+
+### Model Files
+- .flowguard/recommendation_table_gate/model.py
+- .flowguard/recommendation_table_gate/run_checks.py
+
+### Commands
+- OK: `python .flowguard\recommendation_table_gate\run_checks.py`
+- OK: `python -m compileall -q desktop_app/src/jobflow_desktop_app .flowguard/recommendation_table_gate`
+- OK: `python -m unittest desktop_app.tests.test_final_output desktop_app.tests.test_job_search_runner_records desktop_app.tests.test_job_search_runner_db_reads desktop_app.tests.test_candidate_job_pool`
+- OK: `python -m unittest discover desktop_app\tests`
+
+### Findings
+- Correct model passed invariants for final recommendation standards, no missed eligible final keys, no duplicate final keys, and no stale policy stamps in the final table.
+- Broken variants produced expected counterexamples: old 50-point threshold misses score-20 jobs, missing dedupe duplicates a final key, live-pool projection shows non-final rows, and status-only pool reads show stale policy rows.
+- Production read path now filters candidate-pool recommended rows by current output eligibility, using the latest non-empty run config and the effective refresh config.
+
+### Counterexamples
+- Old 50-point gate hides a score-20 job that the intended policy should recommend.
+- Status-only pool loader displays a stale `pass` row even though its output-policy stamp is no longer current.
+
+### Skipped Steps
+- Loop/stuck review was skipped because the modeled recommendation-table gate is acyclic; fetch/retry behavior was represented as finite link-recheck inputs.
+
+### Next Actions
+- In the next live desktop QA run, change the recommendation threshold or post-verify setting and confirm final table counts update without showing stale rows.
+
+
+## recommendation-flow-complexity-audit-20260502 - Read-only review of final recommendation flow complexity
+
+- Project: Job-Hunter
+- Trigger reason: The user asked whether the FlowGuard-modeled recommendation flow has become too branchy or patch-on-patch.
+- Status: completed
+- Skill decision: use_flowguard
+- Mode: read_only_audit
+
+### Commands
+- OK: `python -c "import flowguard; print(flowguard.SCHEMA_VERSION)"`
+- OK: `python .flowguard\recommendation_table_gate\run_checks.py`
+
+### Findings
+- The current model still passes the final recommendation invariants: final rows meet policy, eligible keys are not missed, duplicate final keys collapse, and stale policy stamps stay hidden.
+- The real code now has multiple visibility decision surfaces: final output rebuild, candidate-pool readback, runner record filtering, durable status fields, review/user visibility flags, and historical append-mode retention.
+- Some branches are necessary product protections, especially score/recommend gating, output-link checks, dedupe, review hiding, stale policy stamps, and historical retention.
+- The patch-on-patch risk is real where `analysis.eligibleForOutput`, `recommendation_status`, `output_status`, and display filters all participate in the same user-facing visibility decision.
+
+### Next Actions
+- Prefer a future consolidation pass that extracts one final visibility decision object/helper and routes table, pool summary, and output refresh through it, rather than adding more reader-side filters.
+
+
+## recommendation-visibility-consolidation-20260502 - Model planned final recommendation visibility consolidation before production migration
+
+- Project: Job-Hunter
+- Trigger reason: The user requested FlowGuard equivalence simulation before simplifying final recommendation display logic.
+- Status: completed
+- Skill decision: used_flowguard
+- Started: 2026-05-02T15:24:12+00:00
+- Ended: 2026-05-02T15:24:12+00:00
+- Duration seconds: 0.000
+- Commands OK: True
+
+### Model Files
+- .flowguard/recommendation_visibility_consolidation/model.py
+- .flowguard/recommendation_visibility_consolidation/run_checks.py
+
+### Commands
+- OK (0.000s): `python .flowguard\recommendation_visibility_consolidation\run_checks.py`
+- OK (0.000s): `python -m compileall -q .flowguard\recommendation_visibility_consolidation`
+
+### Findings
+- Corrected unified visibility helper model is equivalent to current behavior across fresh output, pool readback, historical retention, stale policy, no-config fallback, and dedupe cases.
+
+### Counterexamples
+- Naive recompute-all simplification hides a current stamped pool row with sparse evidence and shows a stale policy row; migration must keep source context.
+
+### Friction Points
+- none recorded
+
+### Skipped Steps
+- none recorded
+
+### Next Actions
+- Only migrate production code to a unified helper that preserves source context and materialized stamp semantics.
+
+
+## recommendation-chain-oracle-equivalence-20260502 - Model full-chain recommendation equivalence under fixed oracle assumptions
+
+- Project: Job-Hunter
+- Trigger reason: The user asked to validate whether fixed prompt, search, URL, AI, and state assumptions are enough for equivalence before migration.
+- Status: completed
+- Skill decision: used_flowguard
+- Started: 2026-05-02T15:43:09+00:00
+- Ended: 2026-05-02T15:43:09+00:00
+- Duration seconds: 0.000
+- Commands OK: True
+
+### Model Files
+- .flowguard/recommendation_chain_oracle_equivalence/model.py
+- .flowguard/recommendation_chain_oracle_equivalence/run_checks.py
+
+### Commands
+- OK (0.000s): `python .flowguard\recommendation_chain_oracle_equivalence\run_checks.py`
+- OK (0.000s): `python -m compileall -q .flowguard\recommendation_chain_oracle_equivalence`
+
+### Findings
+- Under frozen search, prompt, AI, URL, config, DB, review, clock, and ordering oracles, the source-aware proposed chain matched legacy outputs across 306 finite symbolic sequences and 595 traces.
+- Assumption-break review covered 9 upstream drift cases and observed 9 expected violations, so the model rejects a global equivalence claim when any fixed-oracle assumption is not true.
+
+### Counterexamples
+- A naive recompute-all simplification still fails under fixed oracles: a current stamped pool row with sparse final-output evidence is visible in legacy readback but hidden by naive fresh recomputation.
+- Prompt, AI, URL, config, DB, review, clock, search, or order drift invalidates full-chain equivalence unless those oracles are frozen or replayed from captured inputs.
+
+### Friction Points
+- none recorded
+
+### Skipped Steps
+- Production conformance replay against a captured live run was skipped because this turn only modeled conditional equivalence assumptions and did not migrate production code.
+
+### Next Actions
+- Only use the equivalence claim for a migration that preserves source-aware visibility and replays or freezes all upstream oracles.
+
+
+## recommendation-visibility-helper-migration-20260502 - Migrate final recommendation visibility to a source-aware unified helper
+
+- Project: Job-Hunter
+- Trigger reason: The user approved implementing the FlowGuard-modeled new chain and requested step-by-step testing to avoid new bugs.
+- Status: completed
+- Skill decision: used_flowguard
+- Started: 2026-05-02T16:02:36+00:00
+- Ended: 2026-05-02T16:02:36+00:00
+- Duration seconds: 0.000
+- Commands OK: True
+
+### Model Files
+- .flowguard/recommendation_chain_oracle_equivalence/model.py
+- .flowguard/recommendation_chain_oracle_equivalence/run_checks.py
+- .flowguard/recommendation_visibility_consolidation/model.py
+- .flowguard/recommendation_visibility_consolidation/run_checks.py
+
+### Commands
+- OK (0.000s): `python .flowguard\recommendation_chain_oracle_equivalence\run_checks.py`
+- OK (0.000s): `python .flowguard\recommendation_visibility_consolidation\run_checks.py`
+- OK (0.000s): `python -m unittest desktop_app.tests.test_final_output`
+- OK (0.000s): `python -m unittest desktop_app.tests.test_job_search_runner_records`
+- OK (0.000s): `python -m unittest desktop_app.tests.test_candidate_job_pool`
+- OK (0.000s): `python -m unittest desktop_app.tests.test_job_search_runner_db_reads`
+- OK (0.000s): `python -m unittest desktop_app.tests.test_search_results_regressions desktop_app.tests.test_search_results_compact_step desktop_app.tests.test_search_results_status`
+- OK (0.000s): `python -m unittest discover desktop_app\tests`
+- OK (0.000s): `python -m compileall -q desktop_app/src/jobflow_desktop_app .flowguard/recommendation_chain_oracle_equivalence .flowguard/recommendation_visibility_consolidation`
+
+### Findings
+- Implemented a source-aware final recommendation visibility helper in final_output.py and routed fresh output, materialized output filtering, pool readback, historical retention, runner display filtering, and refresh drop reasons through it.
+- The helper preserves source semantics: fresh output recomputes eligibility, pool readback trusts current materialized stamps plus row status, and historical append uses retention eligibility.
+
+### Counterexamples
+- The FlowGuard negative control still rejects naive recompute-all behavior because it hides current stamped pool rows with sparse evidence and can show stale policy rows.
+
+### Friction Points
+- none recorded
+
+### Skipped Steps
+- No live desktop/browser smoke was run; this change is backend/search-output logic and was covered by FlowGuard plus unittest suites.
+
+### Next Actions
+- In the next live desktop QA run, verify that final recommendations, counts, and hidden/rejected rows match expectations after a search refresh.

@@ -6,7 +6,11 @@ from pathlib import Path
 from ...ai.role_recommendations import CandidateSemanticProfile
 from ..companies.company_sources_enrichment import fetch_job_details
 from ..output.final_output import (
+    MATERIALIZED_OUTPUT_SOURCE,
+    build_final_output_dedupe_key,
     choose_output_job_url,
+    decide_source_aware_final_recommendation_visibility,
+    enrich_recommended_job,
     has_unavailable_url_signal,
     is_unavailable_job,
     materialize_output_eligibility,
@@ -35,6 +39,18 @@ def _latest_runtime_config(runner, candidate_id: int) -> dict:
     except Exception:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _merge_runtime_config(base: dict | None, override: dict | None) -> dict:
+    merged = dict(base) if isinstance(base, dict) else {}
+    if not isinstance(override, dict):
+        return merged
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_runtime_config(merged.get(key), value)
+        else:
+            merged[key] = value
+    return merged
 
 
 def _merge_jobs_by_runtime_key(runner, jobs: list[dict]) -> list[dict]:
@@ -94,13 +110,25 @@ def _hard_invalid_output_link(details: Mapping[str, object], output_url: str) ->
     return has_unavailable_url_signal(output_url) or has_unavailable_url_signal(final_url)
 
 
-def _recheck_recommended_output_links(jobs: list[dict], config: dict | None) -> list[dict]:
+def _job_runtime_key(item: Mapping[str, object]) -> str:
+    payload = dict(item)
+    return job_item_key(payload) or job_identity_key(payload)
+
+
+def _recheck_recommended_output_links(
+    jobs: list[dict],
+    config: dict | None,
+) -> tuple[list[dict], dict[str, str]]:
     checked_jobs: list[dict] = []
+    drop_reasons: dict[str, str] = {}
     for item in jobs:
         if not isinstance(item, dict):
             continue
+        runtime_key = _job_runtime_key(item)
         output_url = str(item.get("outputUrl") or choose_output_job_url(item, config) or "").strip()
         if not output_url:
+            if runtime_key:
+                drop_reasons[runtime_key] = "missing_output_url"
             continue
         details = fetch_job_details(
             output_url,
@@ -108,15 +136,65 @@ def _recheck_recommended_output_links(jobs: list[dict], config: dict | None) -> 
             timeout_seconds=_final_output_link_recheck_timeout_seconds(config),
         )
         if _hard_invalid_output_link(details, output_url):
+            if runtime_key:
+                drop_reasons[runtime_key] = "link_recheck_failed"
             continue
         rechecked = _merge_output_link_details(item, details, output_url)
         if is_unavailable_job(rechecked, config):
+            if runtime_key:
+                drop_reasons[runtime_key] = "unavailable_after_link_recheck"
             continue
         materialized = materialize_output_eligibility(rechecked, config)
-        analysis = materialized.get("analysis")
-        if isinstance(analysis, Mapping) and analysis.get("eligibleForOutput") is True:
+        decision = decide_source_aware_final_recommendation_visibility(
+            materialized,
+            config,
+            source=MATERIALIZED_OUTPUT_SOURCE,
+        )
+        if decision.visible:
             checked_jobs.append(materialized)
-    return checked_jobs
+        elif runtime_key:
+            drop_reasons[runtime_key] = decision.reason or "output_recheck_failed"
+    return checked_jobs, drop_reasons
+
+
+def _build_recommended_output_drop_reasons(
+    *,
+    all_jobs: list[Mapping[str, object]],
+    selected_jobs: list[Mapping[str, object]],
+    config: dict | None,
+) -> dict[str, str]:
+    selected_runtime_keys = {
+        _job_runtime_key(item)
+        for item in selected_jobs
+        if isinstance(item, Mapping) and _job_runtime_key(item)
+    }
+    selected_final_keys = {
+        build_final_output_dedupe_key(item, config)
+        for item in selected_jobs
+        if isinstance(item, Mapping) and build_final_output_dedupe_key(item, config)
+    }
+    reasons: dict[str, str] = {}
+    for item in all_jobs:
+        if not isinstance(item, Mapping):
+            continue
+        runtime_key = _job_runtime_key(item)
+        if not runtime_key or runtime_key in selected_runtime_keys:
+            continue
+        analysis = item.get("analysis")
+        if not isinstance(analysis, Mapping) or analysis.get("recommend") is not True:
+            continue
+        stamped = materialize_output_eligibility(enrich_recommended_job(item, config), config)
+        decision = decide_source_aware_final_recommendation_visibility(
+            stamped,
+            config,
+            source=MATERIALIZED_OUTPUT_SOURCE,
+        )
+        if decision.visible:
+            final_key = build_final_output_dedupe_key(stamped, config)
+            reasons[runtime_key] = "duplicate_merged" if final_key in selected_final_keys else "not_in_final_output_set"
+        else:
+            reasons[runtime_key] = decision.reason or "not_output_eligible"
+    return reasons
 
 
 def _load_cumulative_bucket_jobs(
@@ -168,7 +246,10 @@ def load_recommended_jobs(runner, candidate_id: int, *, job_result_factory) -> l
     config = _latest_runtime_config(runner, candidate_id)
     pool_loader = getattr(runner.runtime_mirror, "load_candidate_recommended_job_pool_payloads", None)
     if callable(pool_loader):
-        jobs = pool_loader(candidate_id=int(candidate_id))
+        jobs = _displayable_recommended_jobs(
+            pool_loader(candidate_id=int(candidate_id)),
+            config=config,
+        )
     else:
         jobs = []
     if not jobs:
@@ -192,6 +273,7 @@ def load_recommended_jobs(runner, candidate_id: int, *, job_result_factory) -> l
 def load_live_jobs(runner, candidate_id: int, *, job_result_factory) -> list:
     if runner.runtime_mirror is None:
         return []
+    config = _latest_runtime_config(runner, candidate_id)
     jobs = _load_cumulative_main_jobs(runner, candidate_id)
     if not jobs:
         return []
@@ -202,7 +284,8 @@ def load_live_jobs(runner, candidate_id: int, *, job_result_factory) -> list:
     )
     return job_search_runner_records.build_job_records(
         job_search_runner_records.filter_live_review_jobs(
-            merged_job_list
+            merged_job_list,
+            config=config,
         ),
         job_result_factory=job_result_factory,
     )
@@ -325,6 +408,10 @@ def refresh_python_recommended_output_json(
                 search_run_id = None
     if runtime_mirror is None or search_run_id is None or candidate_id is None:
         return 0
+    effective_config = _merge_runtime_config(
+        _latest_runtime_config(runner, int(candidate_id)),
+        config or {},
+    )
     pool_loader = getattr(runtime_mirror, "load_candidate_job_pool_payloads", None)
     recommended_pool_loader = getattr(
         runtime_mirror,
@@ -369,7 +456,7 @@ def refresh_python_recommended_output_json(
             xlsx_path=run_dir / "jobs_recommended.xlsx",
             jobs=[],
             manual_by_url={},
-            config=config or {},
+            config=effective_config,
         )
         return 0
     tracker_xlsx_path = run_dir / "jobs_recommended.xlsx"
@@ -385,12 +472,19 @@ def refresh_python_recommended_output_json(
     result = rebuild_recommended_output_payload(
         all_jobs=all_jobs,
         existing_recommended_jobs=existing_recommended_jobs,
-        config=config or {},
+        config=effective_config,
     )
     payload_jobs = result.payload.get("jobs", [])
+    output_drop_reasons: dict[str, str] = {}
     if isinstance(payload_jobs, list):
+        output_drop_reasons = _build_recommended_output_drop_reasons(
+            all_jobs=[item for item in all_jobs if isinstance(item, Mapping)],
+            selected_jobs=[item for item in payload_jobs if isinstance(item, Mapping)],
+            config=effective_config,
+        )
         payload_jobs = overlay_manual_fields_onto_jobs(payload_jobs, manual_by_alias)
-        payload_jobs = _recheck_recommended_output_links(payload_jobs, config or {})
+        payload_jobs, recheck_drop_reasons = _recheck_recommended_output_links(payload_jobs, effective_config)
+        output_drop_reasons.update(recheck_drop_reasons)
         result.payload["jobs"] = payload_jobs
         if review_states is not None and candidate_id is not None:
             review_states.merge_manual_fields_from_jobs(
@@ -415,13 +509,14 @@ def refresh_python_recommended_output_json(
             }
             if isinstance(payload_jobs, list)
             else set(),
+            output_drop_reasons=output_drop_reasons,
         )
     if isinstance(payload_jobs, list):
         write_tracker_xlsx(
             xlsx_path=tracker_xlsx_path,
             jobs=payload_jobs,
             manual_by_url=manual_by_alias,
-            config=config or {},
+            config=effective_config,
         )
     return len(payload_jobs) if isinstance(payload_jobs, list) else 0
 job_review_state_repo_for_run_dir = job_review_state_repository_for_run_dir

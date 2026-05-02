@@ -120,6 +120,41 @@ class JobSearchRunnerRecordsTests(unittest.TestCase):
 
         self.assertEqual(filtered, [])
 
+    def test_filter_live_review_jobs_hides_rejects_prefilter_and_below_floor(self) -> None:
+        jobs = [
+            {
+                "title": "Keep",
+                "url": "https://example.com/jobs/keep",
+                "analysis": {"recommend": True, "overallScore": 20},
+            },
+            {
+                "title": "Below floor",
+                "url": "https://example.com/jobs/below",
+                "analysis": {"recommend": True, "overallScore": 19},
+            },
+            {
+                "title": "AI reject",
+                "url": "https://example.com/jobs/reject",
+                "analysis": {"recommend": False, "overallScore": 42},
+            },
+            {
+                "title": "Prefilter reject",
+                "url": "https://example.com/jobs/prefilter",
+                "analysis": {
+                    "recommend": False,
+                    "overallScore": 0,
+                    "prefilterRejected": True,
+                },
+            },
+        ]
+
+        filtered = job_search_runner_records.filter_live_review_jobs(
+            jobs,
+            config={"analysis": {"recommendScoreThreshold": 20}},
+        )
+
+        self.assertEqual([item["title"] for item in filtered], ["Keep"])
+
     def test_build_job_records_maps_bound_role_fields(self) -> None:
         jobs = [
             {

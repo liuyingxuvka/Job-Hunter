@@ -4,7 +4,14 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from ...search.output.final_output import OUTPUT_ELIGIBILITY_RULE_VERSION, has_current_output_eligibility
+from ...search.output.final_output import (
+    MATERIALIZED_OUTPUT_SOURCE,
+    OUTPUT_ELIGIBILITY_RULE_VERSION,
+    POOL_READBACK_SOURCE,
+    PoolRecommendationVisibilityContext,
+    decide_source_aware_final_recommendation_visibility,
+    output_eligibility_policy_key,
+)
 from ..connection import Database
 from ..target_role_cleanup import (
     CURRENT_FIT_STATUS_KEY,
@@ -62,14 +69,6 @@ def _analysis_completed(analysis: dict[str, Any]) -> bool:
 
 def _analysis_score(analysis: dict[str, Any]) -> int | None:
     return _optional_int(analysis.get("overallScore"))
-
-
-def _has_any_current_output_stamp(analysis: dict[str, Any]) -> bool:
-    return (
-        analysis.get("eligibleForOutput") is True
-        and "outputEligibilityRuleVersion" in analysis
-        and bool(_text(analysis.get("outputEligibilityPolicyKey")))
-    )
 
 
 @dataclass(frozen=True)
@@ -214,7 +213,11 @@ class CandidateJobPoolRepository:
             candidate_id=int(candidate_id),
             source_rows=len(source_rows),
             upserted_jobs=len(rows),
-            recommended_jobs=sum(1 for row in rows if cls._row_is_visible_recommendation(row)),
+            recommended_jobs=sum(
+                1
+                for row in rows
+                if cls._dict_row_is_visible_recommendation(row, runtime_config)
+            ),
         )
 
     def upsert_runtime_jobs(
@@ -246,15 +249,28 @@ class CandidateJobPoolRepository:
                 )
             self._upsert_pool_rows(connection, rows)
 
-    def mark_recommended_output_set(self, *, candidate_id: int, job_keys: set[str]) -> None:
+    def mark_recommended_output_set(
+        self,
+        *,
+        candidate_id: int,
+        job_keys: set[str],
+        output_drop_reasons: dict[str, str] | None = None,
+    ) -> None:
         normalized_keys = {_text(key) for key in job_keys if _text(key)}
+        normalized_drop_reasons = {
+            _text(key): _text(reason)
+            for key, reason in (output_drop_reasons or {}).items()
+            if _text(key) and _text(reason)
+        }
         with self.database.session() as connection:
+            runtime_config = self._latest_runtime_config(connection, int(candidate_id))
             if normalized_keys:
                 placeholders = ",".join("?" for _ in normalized_keys)
                 rows = connection.execute(
                     f"""
                     SELECT
                       id,
+                      job_key,
                       analysis_json,
                       job_json,
                       recommendation_status,
@@ -276,6 +292,7 @@ class CandidateJobPoolRepository:
                     """
                     SELECT
                       id,
+                      job_key,
                       analysis_json,
                       job_json,
                       recommendation_status,
@@ -291,16 +308,48 @@ class CandidateJobPoolRepository:
                     """,
                     (int(candidate_id),),
                 ).fetchall()
-            reject_updates = [(int(row["id"]),) for row in rows]
+            reject_updates: list[tuple[str, str, int]] = []
+            for row in rows:
+                analysis = _loads_object(row["analysis_json"])
+                payload = _loads_object(row["job_json"])
+                payload["analysis"] = analysis
+                job_key = _text(row["job_key"])
+                reason = normalized_drop_reasons.get(job_key)
+                if not reason:
+                    decision = decide_source_aware_final_recommendation_visibility(
+                        payload,
+                        runtime_config,
+                        source=MATERIALIZED_OUTPUT_SOURCE,
+                    )
+                    reason = "not_in_final_output_set" if decision.visible else decision.reason
+                analysis["eligibleForOutput"] = False
+                analysis["outputEligibilityReason"] = reason
+                analysis["outputEligibilityRuleVersion"] = OUTPUT_ELIGIBILITY_RULE_VERSION
+                analysis["outputEligibilityPolicyKey"] = output_eligibility_policy_key(runtime_config)
+                analysis["finalOutputStatus"] = "reject"
+                analysis["finalOutputDropReason"] = reason
+                payload["analysis"] = analysis
+                reject_updates.append(
+                    (
+                        json.dumps(analysis, ensure_ascii=False),
+                        json.dumps(payload, ensure_ascii=False) if payload else "",
+                        int(row["id"]),
+                    )
+                )
             if reject_updates:
                 connection.executemany(
                     """
                     UPDATE candidate_jobs
                     SET output_status = 'reject',
+                        analysis_json = ?,
+                        job_json = CASE WHEN ? = '' THEN job_json ELSE ? END,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
-                    reject_updates,
+                    [
+                        (analysis_json, job_json, job_json, row_id)
+                        for analysis_json, job_json, row_id in reject_updates
+                    ],
                 )
 
     def persist_display_i18n(self, *, candidate_id: int, updates: dict[str, dict[str, Any]]) -> None:
@@ -389,10 +438,47 @@ class CandidateJobPoolRepository:
         return [self._record_from_row(row) for row in rows]
 
     def list_recommended_for_candidate(self, candidate_id: int) -> list[CandidateJobPoolRecord]:
+        with self.database.session() as connection:
+            runtime_config = self._latest_runtime_config(connection, int(candidate_id))
+            rows = connection.execute(
+                """
+                SELECT
+                  candidate_id,
+                  job_id,
+                  job_key,
+                  canonical_url,
+                  source_url,
+                  title,
+                  company_name,
+                  location_text,
+                  discovery_status,
+                  url_status,
+                  prefilter_status,
+                  jd_fetch_status,
+                  scoring_status,
+                  recommendation_status,
+                  output_status,
+                  pool_status,
+                  user_status,
+                  application_status,
+                  trash_status,
+                  review_status_code,
+                  hidden,
+                  not_interested,
+                  match_score,
+                  last_run_id,
+                  analysis_json,
+                  job_json
+                FROM candidate_jobs
+                WHERE candidate_id = ?
+                ORDER BY last_seen_at DESC, id DESC
+                """,
+                (int(candidate_id),),
+            ).fetchall()
         return [
-            record
-            for record in self.list_for_candidate(candidate_id)
-            if self._is_visible_recommendation(record)
+            self._record_from_row(row)
+            for row in rows
+            if self._sqlite_row_is_visible_recommendation(row, runtime_config)
         ]
 
     def load_job_payloads_for_candidate(self, candidate_id: int) -> list[dict[str, Any]]:
@@ -408,7 +494,14 @@ class CandidateJobPoolRepository:
                   source_url,
                   canonical_url,
                   date_found,
-                  match_score
+                  match_score,
+                  recommendation_status,
+                  output_status,
+                  pool_status,
+                  trash_status,
+                  hidden,
+                  not_interested,
+                  review_status_code
                 FROM candidate_jobs
                 WHERE candidate_id = ?
                   AND pool_status = 'active'
@@ -420,6 +513,7 @@ class CandidateJobPoolRepository:
 
     def load_recommended_payloads_for_candidate(self, candidate_id: int) -> list[dict[str, Any]]:
         with self.database.session() as connection:
+            runtime_config = self._latest_runtime_config(connection, int(candidate_id))
             rows = connection.execute(
                 """
                 SELECT
@@ -431,7 +525,14 @@ class CandidateJobPoolRepository:
                   source_url,
                   canonical_url,
                   date_found,
-                  match_score
+                  match_score,
+                  recommendation_status,
+                  output_status,
+                  pool_status,
+                  trash_status,
+                  hidden,
+                  not_interested,
+                  review_status_code
                 FROM candidate_jobs
                 WHERE candidate_id = ?
                   AND recommendation_status = 'pass'
@@ -445,7 +546,11 @@ class CandidateJobPoolRepository:
                 """,
                 (int(candidate_id),),
             ).fetchall()
-        return [self._payload_from_row(row) for row in rows]
+        return [
+            self._payload_from_row(row)
+            for row in rows
+            if self._sqlite_row_is_visible_recommendation(row, runtime_config)
+        ]
 
     def load_pending_payloads_for_candidate(self, candidate_id: int) -> list[dict[str, Any]]:
         with self.database.session() as connection:
@@ -477,11 +582,52 @@ class CandidateJobPoolRepository:
         return [self._payload_from_row(row) for row in rows]
 
     def summarize_candidate(self, candidate_id: int) -> CandidateJobPoolSummary:
-        records = self.list_for_candidate(candidate_id)
+        with self.database.session() as connection:
+            runtime_config = self._latest_runtime_config(connection, int(candidate_id))
+            rows = connection.execute(
+                """
+                SELECT
+                  candidate_id,
+                  job_id,
+                  job_key,
+                  canonical_url,
+                  source_url,
+                  title,
+                  company_name,
+                  location_text,
+                  discovery_status,
+                  url_status,
+                  prefilter_status,
+                  jd_fetch_status,
+                  scoring_status,
+                  recommendation_status,
+                  output_status,
+                  pool_status,
+                  user_status,
+                  application_status,
+                  trash_status,
+                  review_status_code,
+                  hidden,
+                  not_interested,
+                  match_score,
+                  last_run_id,
+                  analysis_json,
+                  job_json
+                FROM candidate_jobs
+                WHERE candidate_id = ?
+                ORDER BY last_seen_at DESC, id DESC
+                """,
+                (int(candidate_id),),
+            ).fetchall()
+        records = [self._record_from_row(row) for row in rows]
         return CandidateJobPoolSummary(
             total_jobs=len(records),
             scored_jobs=sum(1 for record in records if record.scoring_status == "scored"),
-            recommended_jobs=sum(1 for record in records if self._is_visible_recommendation(record)),
+            recommended_jobs=sum(
+                1
+                for row in rows
+                if self._sqlite_row_is_visible_recommendation(row, runtime_config)
+            ),
             pending_jobs=sum(1 for record in records if self._is_pending(record)),
             trashed_jobs=sum(1 for record in records if record.trash_status == "trashed" or record.hidden),
             rejected_jobs=sum(
@@ -661,13 +807,11 @@ class CandidateJobPoolRepository:
 
         if recommended:
             state["recommendation_status"] = "pass"
-            has_current_stamp = (
-                bool(analysis.get("eligibleForOutput"))
-                and (
-                    has_current_output_eligibility(payload, runtime_config)
-                    or (not runtime_config and _has_any_current_output_stamp(analysis))
-                )
-            )
+            has_current_stamp = decide_source_aware_final_recommendation_visibility(
+                payload,
+                runtime_config,
+                source=MATERIALIZED_OUTPUT_SOURCE,
+            ).visible
             state["output_status"] = "pass" if has_current_stamp else "reject"
         elif completed:
             state["recommendation_status"] = "reject"
@@ -713,6 +857,7 @@ class CandidateJobPoolRepository:
             SELECT config_json
             FROM search_runs
             WHERE candidate_id = ?
+              AND COALESCE(config_json, '') <> ''
             ORDER BY id DESC
             LIMIT 1
             """,
@@ -744,6 +889,25 @@ class CandidateJobPoolRepository:
         payload.setdefault("canonicalUrl", _text(row["canonical_url"]))
         payload.setdefault("dateFound", _text(row["date_found"]))
         return payload
+
+    @staticmethod
+    def _payload_for_visibility_row(row: Any) -> dict[str, Any]:
+        payload = _loads_object(row["job_json"])
+        analysis = _loads_object(row["analysis_json"])
+        payload["analysis"] = analysis
+        return payload
+
+    @staticmethod
+    def _pool_visibility_context_from_row(row: Any) -> PoolRecommendationVisibilityContext:
+        return PoolRecommendationVisibilityContext(
+            recommendation_status=_text(row["recommendation_status"]),
+            output_status=_text(row["output_status"]),
+            pool_status=_text(row["pool_status"]) if "pool_status" in row.keys() else "active",
+            trash_status=_text(row["trash_status"]),
+            hidden=bool(row["hidden"]),
+            not_interested=bool(row["not_interested"]),
+            review_status_code=_text(row["review_status_code"]),
+        )
 
     @staticmethod
     def _upsert_pool_rows(connection: Any, rows: list[dict[str, Any]]) -> None:
@@ -956,7 +1120,14 @@ class CandidateJobPoolRepository:
                 """,
                 (int(row["candidate_id"]), int(row["job_id"])),
             ).fetchone()
-            if existing is None or not CandidateJobPoolRepository._sqlite_row_is_visible_recommendation(existing):
+            runtime_config = CandidateJobPoolRepository._latest_runtime_config(
+                connection,
+                int(row["candidate_id"]),
+            )
+            if existing is None or not CandidateJobPoolRepository._sqlite_row_is_visible_recommendation(
+                existing,
+                runtime_config,
+            ):
                 prepared.append(row)
                 continue
             existing_analysis = _loads_object(existing["analysis_json"])
@@ -992,18 +1163,13 @@ class CandidateJobPoolRepository:
         return prepared
 
     @staticmethod
-    def _sqlite_row_is_visible_recommendation(row: Any) -> bool:
-        analysis = _loads_object(row["analysis_json"])
-        return (
-            _text(row["recommendation_status"]) == "pass"
-            and _text(row["output_status"]) == "pass"
-            and analysis.get("eligibleForOutput") is True
-            and _optional_int(analysis.get("outputEligibilityRuleVersion")) == OUTPUT_ELIGIBILITY_RULE_VERSION
-            and _text(row["trash_status"]) != "trashed"
-            and not bool(row["hidden"])
-            and not bool(row["not_interested"])
-            and _text(row["review_status_code"]) not in {"rejected", "dropped"}
-        )
+    def _sqlite_row_is_visible_recommendation(row: Any, runtime_config: dict[str, Any]) -> bool:
+        return decide_source_aware_final_recommendation_visibility(
+            CandidateJobPoolRepository._payload_for_visibility_row(row),
+            runtime_config,
+            source=POOL_READBACK_SOURCE,
+            pool_context=CandidateJobPoolRepository._pool_visibility_context_from_row(row),
+        ).visible
 
     @staticmethod
     def _row_values(row: dict[str, Any]) -> tuple[Any, ...]:
@@ -1076,26 +1242,27 @@ class CandidateJobPoolRepository:
         )
 
     @staticmethod
-    def _row_is_visible_recommendation(row: dict[str, Any]) -> bool:
-        return (
-            _text(row.get("recommendation_status")) == "pass"
-            and _text(row.get("output_status")) == "pass"
-            and _text(row.get("trash_status")) != "trashed"
-            and not bool(row.get("hidden"))
-            and not bool(row.get("not_interested"))
-            and _text(row.get("review_status_code")) not in {"rejected", "dropped"}
-        )
-
-    @staticmethod
-    def _is_visible_recommendation(record: CandidateJobPoolRecord) -> bool:
-        return (
-            record.recommendation_status == "pass"
-            and record.output_status == "pass"
-            and record.trash_status != "trashed"
-            and not record.hidden
-            and not record.not_interested
-            and record.review_status_code not in {"rejected", "dropped"}
-        )
+    def _dict_row_is_visible_recommendation(
+        row: dict[str, Any],
+        runtime_config: dict[str, Any],
+    ) -> bool:
+        return decide_source_aware_final_recommendation_visibility(
+            {
+                **_loads_object(row.get("job_json")),
+                "analysis": _loads_object(row.get("analysis_json")),
+            },
+            runtime_config,
+            source=POOL_READBACK_SOURCE,
+            pool_context=PoolRecommendationVisibilityContext(
+                recommendation_status=_text(row.get("recommendation_status")),
+                output_status=_text(row.get("output_status")),
+                pool_status=_text(row.get("pool_status")) or "active",
+                trash_status=_text(row.get("trash_status")) or "active",
+                hidden=bool(row.get("hidden")),
+                not_interested=bool(row.get("not_interested")),
+                review_status_code=_text(row.get("review_status_code")),
+            ),
+        ).visible
 
     @staticmethod
     def _is_pending(record: CandidateJobPoolRecord) -> bool:

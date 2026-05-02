@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ..run_state import job_identity_key, job_item_key, merge_job_item
+from ..run_state import job_identity_key, job_item_key, merge_job_item, merge_job_items_from_job_lists
 
 
 def _load_candidate_profile_payload(config: dict[str, Any], run_dir: Path) -> dict[str, Any] | None:
@@ -35,21 +35,14 @@ def _build_data_availability_note(candidate_profile: dict[str, Any] | None) -> s
 
 def _merge_jobs_for_resume(existing_jobs: list[dict], pending_jobs: list[dict]) -> dict[str, dict]:
     merged: dict[str, dict] = {}
-    for item in existing_jobs:
-        if not isinstance(item, dict):
-            continue
+    for item in merge_job_items_from_job_lists(
+        [dict(job) for job in existing_jobs if isinstance(job, dict)],
+        [dict(job) for job in pending_jobs if isinstance(job, dict)],
+    ):
         key = job_item_key(item) or job_identity_key(item)
         if not key:
             continue
         merged[key] = dict(item)
-    for item in pending_jobs:
-        if not isinstance(item, dict):
-            continue
-        key = job_item_key(item) or job_identity_key(item)
-        if not key:
-            continue
-        existing = merged.get(key)
-        merged[key] = merge_job_item(existing or {}, item) if existing else dict(item)
     return merged
 
 

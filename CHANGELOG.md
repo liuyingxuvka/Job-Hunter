@@ -10,6 +10,23 @@ This project currently follows a lightweight semantic versioning approach:
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-05-02
+
+### Fixed
+
+- Consolidated final recommendation visibility through a source-aware helper so fresh output, pool readback, historical retention, output refresh, and table display share one policy without recomputing the wrong source.
+- Tightened final recommendation table gating so only current final-output rows are shown, stale output-policy rows stay hidden, and duplicate jobs collapse across URL and structural identity aliases.
+- Preserved output drop reasons and final recommendation counts when durable candidate-pool rows are refreshed.
+
+### Changed
+
+- Lowered the unified recommendation score floor to 20 while keeping final-output, prefilter, link, and dedupe gates explicit.
+- Updated search result copy to distinguish final visible recommendations from intermediate AI recommendation-pass rows.
+
+### Added
+
+- Added FlowGuard coverage for recommendation table gates, source-aware visibility consolidation, and fixed-oracle chain equivalence.
+
 ## [0.9.4] - 2026-05-01
 
 ### Fixed

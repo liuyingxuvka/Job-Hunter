@@ -532,14 +532,14 @@ class SearchResultsCompactStep(SearchResultsStep):
                 f"公司池 {max(0, int(getattr(stats, 'candidate_company_pool_count', 0) or 0))} · "
                 f"发现 {max(0, int(getattr(stats, 'main_discovered_job_count', 0) or 0))} · "
                 f"分析 {max(0, int(getattr(stats, 'main_scored_job_count', 0) or 0))} · "
-                f"推荐 {max(0, int(getattr(stats, 'recommended_job_count', 0) or 0))} · "
+                f"最终推荐 {max(0, int(getattr(stats, 'recommended_job_count', 0) or 0))} · "
                 f"待补完 {max(0, int(getattr(stats, 'main_pending_analysis_count', 0) or 0))}"
             ),
             (
                 f"Pool {max(0, int(getattr(stats, 'candidate_company_pool_count', 0) or 0))} · "
                 f"found {max(0, int(getattr(stats, 'main_discovered_job_count', 0) or 0))} · "
                 f"scored {max(0, int(getattr(stats, 'main_scored_job_count', 0) or 0))} · "
-                f"recommended {max(0, int(getattr(stats, 'recommended_job_count', 0) or 0))} · "
+                f"final recommendations {max(0, int(getattr(stats, 'recommended_job_count', 0) or 0))} · "
                 f"pending {max(0, int(getattr(stats, 'main_pending_analysis_count', 0) or 0))}"
             ),
         )

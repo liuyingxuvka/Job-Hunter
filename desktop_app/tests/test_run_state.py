@@ -88,6 +88,29 @@ class RunStateTests(unittest.TestCase):
         self.assertEqual(len(merged), 1)
         self.assertEqual(merged[0]["location"], "Munich")
 
+    def test_merge_job_lists_merges_apply_and_detail_url_variants_by_structure(self) -> None:
+        detail = {
+            "title": "Engineer I, Fuel Cell System Test & Validation",
+            "company": "Plug Power",
+            "location": "Albany, NY",
+            "url": "https://ev.careers/jobs/407732528-engineer-i-fuel-cell-system-test-validation",
+            "analysis": {"overallScore": 82},
+        }
+        apply = {
+            "title": "Engineer I, Fuel Cell System Test & Validation",
+            "company": "Plug Power",
+            "location": "Albany, NY",
+            "url": "https://ev.careers/jobs/407732528/apply",
+            "analysis": {"recommend": True, "overallScore": 86},
+        }
+
+        merged = run_state.merge_job_items_from_job_lists([detail], [apply])
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["url"], "https://ev.careers/jobs/407732528/apply")
+        self.assertEqual(merged[0]["analysis"]["recommend"], True)
+        self.assertEqual(merged[0]["analysis"]["overallScore"], 86)
+
     def test_collect_resume_pending_jobs_skips_current_run_suspended_job(self) -> None:
         pending = run_state.collect_resume_pending_jobs_from_job_lists(
             [

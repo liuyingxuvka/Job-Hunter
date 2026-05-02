@@ -158,12 +158,12 @@ class OutputRestoreTests(unittest.TestCase):
 
     def test_append_merge_drops_rows_below_unified_threshold(self) -> None:
         row = {"outputKey": "low-score", "dateFound": "2026-04-10"}
-        row_to_job = lambda row: self._job("Low Score", 40, key=row["outputKey"], date_found=row["dateFound"], valid=True)
+        row_to_job = lambda row: self._job("Low Score", 19, key=row["outputKey"], date_found=row["dateFound"], valid=True)
         key_for_job = lambda job: str(job.get("outputKey") or "")
 
         result = merge_recommended_jobs_append_mode(
             existing_rows=[row],
-            all_jobs_by_key={"low-score": self._job("Low Score", 40, key="low-score", valid=True)},
+            all_jobs_by_key={"low-score": self._job("Low Score", 19, key="low-score", valid=True)},
             historical_jobs=[],
             new_jobs=[],
             tracker_now="2026-04-14T12:00:00Z",

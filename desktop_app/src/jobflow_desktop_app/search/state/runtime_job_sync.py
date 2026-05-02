@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..run_state import job_identity_key, job_item_key, merge_job_item
+from ..run_state import job_identity_key, job_item_key, merge_job_items_from_job_lists
 
 
 def _search_profile_id_from_job(item: dict[str, Any]) -> int | None:
@@ -30,17 +30,16 @@ def _search_profile_id_from_job(item: dict[str, Any]) -> int | None:
 
 def merge_runtime_jobs(job_lists: Any) -> dict[str, dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
-    for jobs in job_lists:
-        if not isinstance(jobs, list):
+    normalized_lists = [
+        [dict(item) for item in jobs if isinstance(item, dict)]
+        for jobs in job_lists
+        if isinstance(jobs, list)
+    ]
+    for item in merge_job_items_from_job_lists(*normalized_lists):
+        key = job_item_key(item) or job_identity_key(item)
+        if not key:
             continue
-        for item in jobs:
-            if not isinstance(item, dict):
-                continue
-            key = job_item_key(item) or job_identity_key(item)
-            if not key:
-                continue
-            existing = merged.get(key)
-            merged[key] = merge_job_item(existing or {}, item) if existing else dict(item)
+        merged[key] = dict(item)
     return merged
 
 

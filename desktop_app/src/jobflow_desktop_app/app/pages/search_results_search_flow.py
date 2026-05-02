@@ -19,9 +19,6 @@ def _is_no_qualified_company_stop(details: object) -> bool:
 
 
 def _load_cumulative_table_jobs(page, candidate_id: int) -> list:
-    jobs = page.runner.load_live_jobs(int(candidate_id))
-    if jobs:
-        return jobs
     return page.runner.load_recommended_jobs(int(candidate_id))
 
 

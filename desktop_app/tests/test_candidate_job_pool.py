@@ -733,6 +733,77 @@ class CandidateJobPoolRepositoryTests(unittest.TestCase):
             self.assertIn("https://acme.example/jobs/kept", payloads)
             self.assertNotIn("https://beta.example/jobs/history", payloads)
 
+    def test_mark_recommended_output_set_records_drop_reason(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context)
+            mirror = SearchRuntimeMirror(context.database)
+            run_id = mirror.create_run(
+                candidate_id=candidate_id,
+                run_dir=context.paths.runtime_dir / "search_runs" / "candidate_test",
+                status="running",
+                current_stage="direct",
+                started_at="2026-04-27T10:00:00+00:00",
+            )
+            jobs = [
+                materialize_output_eligibility(
+                    {
+                        "title": "Kept Fuel Cell Engineer",
+                        "company": "Acme Hydrogen",
+                        "location": "Berlin",
+                        "url": "https://acme.example/jobs/kept",
+                        "canonicalUrl": "https://acme.example/jobs/kept",
+                        "jd": {
+                            "applyUrl": "https://acme.example/jobs/kept",
+                            "finalUrl": "https://acme.example/jobs/kept",
+                        },
+                        "analysis": {"overallScore": 86, "recommend": True},
+                    },
+                    {},
+                ),
+                materialize_output_eligibility(
+                    {
+                        "title": "Dropped Fuel Cell Engineer",
+                        "company": "Beta Hydrogen",
+                        "location": "Berlin",
+                        "url": "https://beta.example/jobs/dropped",
+                        "canonicalUrl": "https://beta.example/jobs/dropped",
+                        "jd": {
+                            "applyUrl": "https://beta.example/jobs/dropped",
+                            "finalUrl": "https://beta.example/jobs/dropped",
+                        },
+                        "analysis": {"overallScore": 82, "recommend": True},
+                    },
+                    {},
+                ),
+            ]
+
+            mirror.replace_bucket_jobs(
+                search_run_id=run_id,
+                candidate_id=candidate_id,
+                job_bucket="all",
+                jobs=jobs,
+            )
+            CandidateJobPoolRepository(context.database).mark_recommended_output_set(
+                candidate_id=candidate_id,
+                job_keys={"https://acme.example/jobs/kept"},
+                output_drop_reasons={"https://beta.example/jobs/dropped": "link_recheck_failed"},
+            )
+
+            with context.database.session() as connection:
+                row = connection.execute(
+                    """
+                    SELECT analysis_json
+                    FROM candidate_jobs
+                    WHERE candidate_id = ? AND job_key = ?
+                    """,
+                    (candidate_id, "https://beta.example/jobs/dropped"),
+                ).fetchone()
+
+            analysis = json.loads(row["analysis_json"])
+            self.assertFalse(analysis["eligibleForOutput"])
+            self.assertEqual(analysis["outputEligibilityReason"], "link_recheck_failed")
+            self.assertEqual(analysis["finalOutputDropReason"], "link_recheck_failed")
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

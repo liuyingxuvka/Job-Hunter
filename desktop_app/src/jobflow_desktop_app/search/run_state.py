@@ -45,11 +45,33 @@ def job_identity_key(item: dict) -> str:
     return f"{title}|{company}|{date_found}"
 
 
+def _normalize_structural_key_text(value: object) -> str:
+    return re.sub(r"[\s\-_.,;:(){}\[\]<>]+", " ", str(value or "").strip()).casefold().strip()
+
+
+def job_structural_key(item: dict) -> str:
+    title = _normalize_structural_key_text(item.get("title"))
+    company = _normalize_structural_key_text(item.get("company"))
+    location = _normalize_structural_key_text(item.get("location"))
+    if not title or not company or not location:
+        return ""
+    return f"struct:{company}|{title}|{location}"
+
+
 def job_item_key(item: dict) -> str:
     url = canonical_job_item_url(item)
     if url:
         return url.casefold()
     return job_identity_key(item)
+
+
+def job_item_aliases(item: dict) -> tuple[str, ...]:
+    aliases: list[str] = []
+    for key in (job_item_key(item), job_structural_key(item), job_identity_key(item)):
+        normalized = str(key or "").strip()
+        if normalized and normalized not in aliases:
+            aliases.append(normalized)
+    return tuple(aliases)
 
 
 def merge_job_item(existing: dict, incoming: dict) -> dict:
@@ -109,17 +131,33 @@ def _merge_jobs_into_map(
     merged_jobs: dict[str, dict],
     jobs: list[dict],
 ) -> dict[str, dict]:
+    alias_to_key: dict[str, str] = {}
+    for existing_key, existing_item in merged_jobs.items():
+        if not isinstance(existing_item, dict):
+            continue
+        for alias in job_item_aliases(existing_item):
+            alias_to_key.setdefault(alias, existing_key)
     for item in jobs:
         if not isinstance(item, dict):
             continue
         key = job_item_key(item)
         if not key:
             continue
-        existing = merged_jobs.get(key)
+        aliases = job_item_aliases(item)
+        merge_key = next(
+            (alias_to_key[alias] for alias in aliases if alias in alias_to_key),
+            key,
+        )
+        existing = merged_jobs.get(merge_key)
         if existing is None:
-            merged_jobs[key] = dict(item)
+            merged_jobs[merge_key] = dict(item)
+            for alias in aliases:
+                alias_to_key.setdefault(alias, merge_key)
             continue
-        merged_jobs[key] = merge_job_item(existing, item)
+        merged = merge_job_item(existing, item)
+        merged_jobs[merge_key] = merged
+        for alias in (*aliases, *job_item_aliases(merged)):
+            alias_to_key.setdefault(alias, merge_key)
     return merged_jobs
 
 
@@ -205,6 +243,7 @@ __all__ = [
     "extract_match_score",
     "job_identity_key",
     "job_item_key",
+    "job_structural_key",
     "merge_job_item",
     "merge_resume_pending_job_lists",
     "normalize_resume_pending_jobs",

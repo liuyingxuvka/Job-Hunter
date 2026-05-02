@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jobflow-desktop-app"
-version = "0.9.4"
+version = "0.9.5"
 description = "Local desktop application for job discovery, screening, scoring, and export."
 readme = "README.md"
 license = {text = "MIT"}

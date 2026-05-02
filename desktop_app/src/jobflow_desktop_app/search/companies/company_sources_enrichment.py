@@ -15,7 +15,7 @@ from ..output.final_output import (
     normalize_job_url,
 )
 from ..analysis.service import ResponseRequestClient
-from ..run_state import analysis_completed, job_item_key, merge_job_item
+from ..run_state import analysis_completed, job_item_key, merge_job_items_from_job_lists
 from .sources_fetchers import extract_pdf_text_from_bytes, fetch_response, fetch_text, to_number
 from .sources_helpers import (
     dedupe_jobs_by_normalized_url,
@@ -78,28 +78,10 @@ def merge_company_source_jobs(
     existing_jobs: list[Mapping[str, Any]],
     incoming_jobs: list[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
-    merged: dict[str, dict[str, Any]] = {}
-    for raw_job in existing_jobs:
-        if not isinstance(raw_job, Mapping):
-            continue
-        job = dict(raw_job)
-        key = job_item_key(job)
-        if not key:
-            continue
-        merged[key] = job
-    for raw_job in incoming_jobs:
-        if not isinstance(raw_job, Mapping):
-            continue
-        job = dict(raw_job)
-        key = job_item_key(job)
-        if not key:
-            continue
-        existing = merged.get(key)
-        if existing is None:
-            merged[key] = job
-            continue
-        merged[key] = merge_job_item(existing, job)
-    return list(merged.values())
+    return merge_job_items_from_job_lists(
+        [dict(item) for item in existing_jobs if isinstance(item, Mapping)],
+        [dict(item) for item in incoming_jobs if isinstance(item, Mapping)],
+    )
 
 
 def build_found_job_records(

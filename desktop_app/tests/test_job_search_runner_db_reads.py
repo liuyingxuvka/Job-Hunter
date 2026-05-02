@@ -389,6 +389,66 @@ class JobSearchRunnerDbReadsTests(unittest.TestCase):
             self.assertEqual(stats.recommended_job_count, 2)
             self.assertEqual(stats.displayable_result_count, 2)
 
+    def test_load_recommended_jobs_hides_stale_policy_pool_rows(self) -> None:
+        with make_temp_context() as context:
+            candidate_id = create_candidate(context, name="Stale Policy Candidate")
+            profile_id = create_profile(
+                context,
+                candidate_id,
+                name="Hydrogen Systems Engineer",
+                scope_profile="hydrogen_core",
+                is_active=True,
+            )
+            runner, search_run_id = self._seed_run(context, candidate_id)
+            old_policy_config = self._default_runtime_config()
+            old_policy_config["analysis"]["recommendScoreThreshold"] = 20
+            stale_job = materialize_output_eligibility(
+                {
+                    "title": "Hydrogen Systems Technician",
+                    "company": "Acme Hydrogen",
+                    "location": "Berlin",
+                    "url": "https://acme.example/jobs/stale",
+                    "canonicalUrl": "https://acme.example/jobs/stale",
+                    "dateFound": "2026-04-16T10:00:00Z",
+                    "jd": {"applyUrl": "https://acme.example/jobs/stale/apply"},
+                    "analysis": {
+                        "overallScore": 30,
+                        "fitLevelCn": "低推荐",
+                        "fitTrack": "hydrogen_core",
+                        "recommend": True,
+                        "boundTargetRole": {
+                            "profileId": profile_id,
+                            "roleId": f"profile:{profile_id}",
+                            "nameEn": "Hydrogen Systems Engineer",
+                            "displayName": "Hydrogen Systems Engineer",
+                            "targetRoleText": "Hydrogen Systems Engineer",
+                            "score": 30,
+                        },
+                    },
+                },
+                old_policy_config,
+            )
+
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=search_run_id,
+                candidate_id=candidate_id,
+                job_bucket="recommended",
+                jobs=[stale_job],
+            )
+            runner.runtime_mirror.replace_bucket_jobs(
+                search_run_id=search_run_id,
+                candidate_id=candidate_id,
+                job_bucket="all",
+                jobs=[stale_job],
+            )
+
+            recommended_jobs = runner.load_recommended_jobs(candidate_id)
+            stats = runner.load_search_stats(candidate_id)
+
+            self.assertEqual(recommended_jobs, [])
+            self.assertEqual(stats.recommended_job_count, 0)
+            self.assertEqual(stats.displayable_result_count, 0)
+
     def test_load_live_jobs_generates_and_persists_display_i18n_fields(self) -> None:
         with make_temp_context() as context:
             candidate_id = create_candidate(context, name="Display I18N Candidate")

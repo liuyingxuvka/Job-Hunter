@@ -17,6 +17,10 @@ from ..analysis.scoring_contract import overall_score, passes_unified_recommenda
 Job = dict[str, Any]
 OUTPUT_ELIGIBILITY_RULE_VERSION = 2
 HISTORICAL_RECOMMENDATION_MARKER = "_existingRecommendedRow"
+FRESH_FINAL_OUTPUT_SOURCE = "fresh_final_output"
+POOL_READBACK_SOURCE = "pool_readback"
+HISTORICAL_APPEND_SOURCE = "historical_append"
+MATERIALIZED_OUTPUT_SOURCE = "materialized_output"
 
 TRACK_CLUSTER_LABEL = {
     "direct_fit": "Direct-Fit",
@@ -377,7 +381,7 @@ def output_eligibility_policy_key(config: Mapping[str, Any] | None) -> str:
         "analysis": {
             "postVerifyEnabled": _config_bool(config, "analysis", "postVerifyEnabled", default=False),
             "postVerifyRequireChecked": _config_bool(config, "analysis", "postVerifyRequireChecked", default=True),
-            "recommendScoreThreshold": _config_int(config, "analysis", "recommendScoreThreshold", default=50),
+            "recommendScoreThreshold": _config_int(config, "analysis", "recommendScoreThreshold", default=20),
         },
         "filters": {
             "excludeUnavailableLinks": _config_bool(config, "filters", "excludeUnavailableLinks", default=True),
@@ -654,8 +658,11 @@ def evaluate_output_eligibility(
 
 
 def is_output_eligible(job: Mapping[str, Any], config: Mapping[str, Any] | None) -> bool:
-    eligible, _reason = evaluate_output_eligibility(job, config)
-    return eligible
+    return decide_source_aware_final_recommendation_visibility(
+        job,
+        config,
+        source=FRESH_FINAL_OUTPUT_SOURCE,
+    ).visible
 
 
 def _materialized_output_rule_version(job: Mapping[str, Any]) -> int | None:
@@ -681,6 +688,16 @@ def has_current_output_eligibility(
         and "eligibleForOutput" in analysis
         and _materialized_output_rule_version(job) == OUTPUT_ELIGIBILITY_RULE_VERSION
         and str(analysis.get("outputEligibilityPolicyKey") or "") == output_eligibility_policy_key(config)
+    )
+
+
+def has_any_output_eligibility_stamp(job: Mapping[str, Any]) -> bool:
+    analysis = job.get("analysis")
+    return (
+        isinstance(analysis, Mapping)
+        and analysis.get("eligibleForOutput") is True
+        and "outputEligibilityRuleVersion" in analysis
+        and bool(str(analysis.get("outputEligibilityPolicyKey") or "").strip())
     )
 
 
@@ -720,7 +737,11 @@ def should_restore_historical_recommended_job(job: Mapping[str, Any], config: Ma
         return False
     if has_explicit_unavailable_job_signal(job):
         return False
-    return has_historical_recommendation_retention_eligibility(job, config)
+    return decide_source_aware_final_recommendation_visibility(
+        job,
+        config,
+        source=HISTORICAL_APPEND_SOURCE,
+    ).visible
 
 
 def has_historical_recommendation_retention_eligibility(
@@ -955,6 +976,105 @@ def pass_post_verify(job: Mapping[str, Any], config: Mapping[str, Any] | None, *
 
 
 @dataclass(frozen=True)
+class PoolRecommendationVisibilityContext:
+    recommendation_status: str = "pass"
+    output_status: str = "pass"
+    pool_status: str = "active"
+    trash_status: str = "active"
+    hidden: bool = False
+    not_interested: bool = False
+    review_status_code: str = ""
+
+
+@dataclass(frozen=True)
+class FinalRecommendationVisibilityDecision:
+    visible: bool
+    reason: str
+    source: str
+
+
+def _decision(visible: bool, reason: str, source: str) -> FinalRecommendationVisibilityDecision:
+    return FinalRecommendationVisibilityDecision(
+        visible=visible,
+        reason=reason,
+        source=source,
+    )
+
+
+def _materialized_output_visibility(
+    job: Mapping[str, Any],
+    config: Mapping[str, Any] | None,
+    *,
+    source: str,
+) -> FinalRecommendationVisibilityDecision:
+    analysis = job.get("analysis")
+    if not isinstance(analysis, Mapping):
+        return _decision(False, "missing_analysis", source)
+    if analysis.get("recommend") is not True:
+        return _decision(False, "not_recommended", source)
+    if analysis.get("eligibleForOutput") is not True:
+        return _decision(
+            False,
+            str(analysis.get("outputEligibilityReason") or "").strip() or "not_output_eligible",
+            source,
+        )
+    if has_current_output_eligibility(job, config):
+        return _decision(True, "visible_materialized_output", source)
+    if not config and has_any_output_eligibility_stamp(job):
+        return _decision(True, "visible_materialized_output_no_config", source)
+    return _decision(False, "stale_eligibility_stamp", source)
+
+
+def _pool_readback_visibility(
+    job: Mapping[str, Any],
+    config: Mapping[str, Any] | None,
+    context: PoolRecommendationVisibilityContext | None,
+) -> FinalRecommendationVisibilityDecision:
+    source = POOL_READBACK_SOURCE
+    if context is None:
+        return _decision(False, "missing_pool_context", source)
+    if context.pool_status != "active":
+        return _decision(False, "pool_inactive", source)
+    if context.trash_status == "trashed":
+        return _decision(False, "trashed", source)
+    if context.hidden:
+        return _decision(False, "hidden", source)
+    if context.not_interested:
+        return _decision(False, "not_interested", source)
+    if context.review_status_code in {"rejected", "dropped"}:
+        return _decision(False, "review_rejected", source)
+    if context.recommendation_status != "pass":
+        return _decision(False, "recommendation_status_not_pass", source)
+    if context.output_status != "pass":
+        return _decision(False, "output_status_not_pass", source)
+    decision = _materialized_output_visibility(job, config, source=source)
+    if decision.visible:
+        return _decision(True, "visible_materialized_pool", source)
+    return decision
+
+
+def decide_source_aware_final_recommendation_visibility(
+    job: Mapping[str, Any],
+    config: Mapping[str, Any] | None,
+    *,
+    source: str,
+    pool_context: PoolRecommendationVisibilityContext | None = None,
+) -> FinalRecommendationVisibilityDecision:
+    if source == FRESH_FINAL_OUTPUT_SOURCE:
+        eligible, reason = evaluate_output_eligibility(job, config)
+        return _decision(eligible, "visible_final_recommendation" if eligible else reason, source)
+    if source == HISTORICAL_APPEND_SOURCE:
+        if has_historical_recommendation_retention_eligibility(job, config):
+            return _decision(True, "visible_historical_retained", source)
+        return _decision(False, "historical_retention_failed", source)
+    if source == POOL_READBACK_SOURCE:
+        return _pool_readback_visibility(job, config, pool_context)
+    if source == MATERIALIZED_OUTPUT_SOURCE:
+        return _materialized_output_visibility(job, config, source=source)
+    return _decision(False, "unknown_source", source)
+
+
+@dataclass(frozen=True)
 class RecommendedOutputRebuildResult:
     payload: dict[str, Any]
     pruned_recent_invalid_rows: int = 0
@@ -969,14 +1089,21 @@ def _materialize_final_recommended_jobs(
         if not isinstance(job, Mapping):
             continue
         if _is_existing_recommended_row(job):
-            if has_historical_recommendation_retention_eligibility(job, config):
+            if decide_source_aware_final_recommendation_visibility(
+                job,
+                config,
+                source=HISTORICAL_APPEND_SOURCE,
+            ).visible:
                 materialized_jobs.append(
                     materialize_historical_recommendation_retention(job, config)
                 )
             continue
         stamped = materialize_output_eligibility(enrich_recommended_job(job, config), config)
-        analysis = stamped.get("analysis")
-        if isinstance(analysis, Mapping) and analysis.get("eligibleForOutput") is True:
+        if decide_source_aware_final_recommendation_visibility(
+            stamped,
+            config,
+            source=MATERIALIZED_OUTPUT_SOURCE,
+        ).visible:
             materialized_jobs.append(stamped)
     return materialized_jobs
 
@@ -998,8 +1125,11 @@ def rebuild_recommended_output_payload(
     recommended_only_jobs = [
         job
         for job in prepared_all_jobs
-        if isinstance(job.get("analysis"), Mapping)
-        and job["analysis"].get("eligibleForOutput") is True
+        if decide_source_aware_final_recommendation_visibility(
+            job,
+            config,
+            source=MATERIALIZED_OUTPUT_SOURCE,
+        ).visible
     ]
 
     combined_map: dict[str, Job] = {}
@@ -1058,12 +1188,20 @@ def rebuild_recommended_output_payload(
             if isinstance(row.get("job"), Mapping)
             else None,
             key_for_job=lambda job: build_final_output_dedupe_key(job, config),
-            passes_unified_threshold=lambda job: has_historical_recommendation_retention_eligibility(job, config)
-            if _is_existing_recommended_row(job)
-            else is_output_eligible(job, config),
-            passes_final_output_check=lambda job: has_historical_recommendation_retention_eligibility(job, config)
-            if _is_existing_recommended_row(job)
-            else is_output_eligible(job, config),
+            passes_unified_threshold=lambda job: decide_source_aware_final_recommendation_visibility(
+                job,
+                config,
+                source=HISTORICAL_APPEND_SOURCE
+                if _is_existing_recommended_row(job)
+                else FRESH_FINAL_OUTPUT_SOURCE,
+            ).visible,
+            passes_final_output_check=lambda job: decide_source_aware_final_recommendation_visibility(
+                job,
+                config,
+                source=HISTORICAL_APPEND_SOURCE
+                if _is_existing_recommended_row(job)
+                else FRESH_FINAL_OUTPUT_SOURCE,
+            ).visible,
             has_manual_tracking=has_manual_tracking,
             prefers_candidate_over_existing=lambda existing, candidate: prefers_candidate_over_existing(
                 existing,

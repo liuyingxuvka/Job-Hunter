@@ -78,7 +78,7 @@ DEFAULT_RUNTIME_CONFIG: dict[str, object] = {
         "postVerifyUseWebSearch": False,
         "postVerifyJdMaxChars": 1000,
         "transferableFitEnabled": True,
-        "recommendScoreThreshold": 60,
+        "recommendScoreThreshold": 20,
         "minTransferableScore": 55,
         "platformListingRecommendScoreThreshold": 68,
     },

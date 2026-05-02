@@ -10,7 +10,11 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from jobflow_desktop_app.search.output.final_output import (  # noqa: E402
+    FRESH_FINAL_OUTPUT_SOURCE,
+    POOL_READBACK_SOURCE,
+    PoolRecommendationVisibilityContext,
     build_final_output_dedupe_key,
+    decide_source_aware_final_recommendation_visibility,
     has_current_output_eligibility,
     is_output_eligible,
     materialize_output_eligibility,
@@ -90,7 +94,7 @@ class FinalOutputTests(unittest.TestCase):
             title="Electrolyzer Systems Engineer",
             url="https://acme.example.com/careers/jobs/67890",
             apply_url="https://acme.example.com/careers/jobs/67890/apply",
-            score=49,
+            score=19,
         )
         generic_title = self._job(
             title="View job",
@@ -114,6 +118,60 @@ class FinalOutputTests(unittest.TestCase):
             "https://acme.example.com/careers/jobs/12345/apply",
         )
         self.assertIn("推荐", jobs[0]["listTags"])
+
+    def test_replace_mode_allows_score_at_new_final_floor(self) -> None:
+        floor_job = self._job(
+            title="Hydrogen Systems Analyst",
+            url="https://acme.example.com/careers/jobs/2020",
+            apply_url="https://acme.example.com/careers/jobs/2020/apply",
+            score=20,
+        )
+        below_floor_job = self._job(
+            title="Hydrogen Systems Associate",
+            url="https://acme.example.com/careers/jobs/1919",
+            apply_url="https://acme.example.com/careers/jobs/1919/apply",
+            score=19,
+        )
+
+        result = rebuild_recommended_output_payload(
+            all_jobs=[floor_job, below_floor_job],
+            existing_recommended_jobs=[],
+            config=self._config(mode="replace"),
+            generated_at="2026-04-14T12:30:00Z",
+        )
+
+        self.assertEqual([job["title"] for job in result.payload["jobs"]], ["Hydrogen Systems Analyst"])
+
+    def test_replace_mode_merges_duplicate_final_output_keys(self) -> None:
+        first = self._job(
+            title="Fuel Cell Reliability Engineer",
+            url="https://acme.example.com/careers/jobs/dupe?utm_source=one",
+            apply_url="https://acme.example.com/careers/jobs/dupe/apply",
+            score=72,
+            summary="Responsibilities include hydrogen durability testing.",
+        )
+        better = self._job(
+            title="Senior Fuel Cell Reliability Engineer",
+            url="https://acme.example.com/careers/jobs/dupe?utm_source=two",
+            apply_url="https://acme.example.com/careers/jobs/dupe/apply",
+            score=86,
+            summary="Responsibilities include hydrogen durability testing, diagnostics, and validation.",
+        )
+
+        result = rebuild_recommended_output_payload(
+            all_jobs=[first, better],
+            existing_recommended_jobs=[],
+            config=self._config(mode="replace"),
+            generated_at="2026-04-14T12:30:00Z",
+        )
+
+        jobs = result.payload["jobs"]
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]["title"], "Senior Fuel Cell Reliability Engineer")
+        self.assertEqual(
+            build_final_output_dedupe_key(jobs[0], self._config(mode="replace")),
+            "https://acme.example.com/careers/jobs/dupe/apply",
+        )
 
     def test_append_mode_restores_existing_history_and_keeps_original_date_found(self) -> None:
         existing_job = self._job(
@@ -501,6 +559,60 @@ class FinalOutputTests(unittest.TestCase):
         job["jd"]["status"] = 404
 
         self.assertFalse(is_output_eligible(job, self._config(mode="replace")))
+
+    def test_source_aware_visibility_keeps_pool_stamp_without_recomputing_fresh_output(self) -> None:
+        config = self._config(mode="replace")
+        job = self._job(
+            title="Fuel Cell Reliability Engineer",
+            url="https://acme.example.com/careers/jobs/12345",
+            apply_url="https://acme.example.com/careers/jobs/12345/apply",
+            score=72,
+        )
+        stamped = materialize_output_eligibility(job, config)
+        stamped.pop("jd", None)
+        stamped.pop("outputUrl", None)
+
+        fresh = decide_source_aware_final_recommendation_visibility(
+            stamped,
+            config,
+            source=FRESH_FINAL_OUTPUT_SOURCE,
+        )
+        pool = decide_source_aware_final_recommendation_visibility(
+            stamped,
+            config,
+            source=POOL_READBACK_SOURCE,
+            pool_context=PoolRecommendationVisibilityContext(),
+        )
+
+        self.assertFalse(fresh.visible)
+        self.assertEqual(fresh.reason, "final_output_check_failed")
+        self.assertTrue(pool.visible)
+        self.assertEqual(pool.reason, "visible_materialized_pool")
+
+    def test_source_aware_visibility_hides_stale_pool_stamp(self) -> None:
+        old_config = self._config(mode="replace")
+        old_config["analysis"]["recommendScoreThreshold"] = 20
+        current_config = self._config(mode="replace")
+        current_config["analysis"]["recommendScoreThreshold"] = 80
+        stamped = materialize_output_eligibility(
+            self._job(
+                title="Fuel Cell Reliability Engineer",
+                url="https://acme.example.com/careers/jobs/12345",
+                apply_url="https://acme.example.com/careers/jobs/12345/apply",
+                score=72,
+            ),
+            old_config,
+        )
+
+        decision = decide_source_aware_final_recommendation_visibility(
+            stamped,
+            current_config,
+            source=POOL_READBACK_SOURCE,
+            pool_context=PoolRecommendationVisibilityContext(),
+        )
+
+        self.assertFalse(decision.visible)
+        self.assertEqual(decision.reason, "stale_eligibility_stamp")
 
 
 if __name__ == "__main__":

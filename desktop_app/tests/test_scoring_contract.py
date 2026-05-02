@@ -32,13 +32,13 @@ class ScoringContractTests(unittest.TestCase):
         self.assertEqual(fit_level(29), "不匹配")
 
     def test_overall_threshold_is_the_only_hard_gate(self) -> None:
-        self.assertEqual(UNIFIED_RECOMMEND_THRESHOLD, 50)
-        self.assertTrue(passes_unified_recommendation_threshold(50))
-        self.assertTrue(passes_unified_recommendation_threshold({"overallScore": 51}))
-        self.assertFalse(passes_unified_recommendation_threshold(49))
+        self.assertEqual(UNIFIED_RECOMMEND_THRESHOLD, 20)
+        self.assertTrue(passes_unified_recommendation_threshold(20))
+        self.assertTrue(passes_unified_recommendation_threshold({"overallScore": 21}))
+        self.assertFalse(passes_unified_recommendation_threshold(19))
         self.assertFalse(
             passes_unified_recommendation_threshold(
-                {"overallScore": 49, "targetRoleScore": 100}
+                {"overallScore": 19, "targetRoleScore": 100}
             )
         )
 
@@ -48,7 +48,7 @@ class ScoringContractTests(unittest.TestCase):
         self.assertEqual(bound_role_score({"matchScore": 88}), 0)
         self.assertTrue(should_keep_for_final_list(63, 18))
         self.assertTrue(should_keep_for_final_list(63, 99))
-        self.assertFalse(should_keep_for_final_list(49, 99))
+        self.assertFalse(should_keep_for_final_list(19, 99))
 
     def test_score_extractors_read_current_contract_fields(self) -> None:
         self.assertEqual(overall_score({"overallScore": 64, "matchScore": 52}), 64)
@@ -59,7 +59,7 @@ class ScoringContractTests(unittest.TestCase):
         self.assertEqual(bound_role_score({"roleScore": 91}), 0)
         self.assertEqual(overall_score({"matchScore": 81}), 0)
         self.assertEqual(overall_score({"score": 81}), 0)
-        self.assertEqual(unified_recommend_threshold(None), 50)
+        self.assertEqual(unified_recommend_threshold(None), 20)
         self.assertEqual(unified_recommend_threshold(65), 65)
         self.assertEqual(
             unified_recommend_threshold({"analysis": {"recommendScoreThreshold": 55}}),

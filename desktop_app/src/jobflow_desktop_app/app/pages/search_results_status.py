@@ -145,7 +145,7 @@ def search_completion_detail(
         parts = [
             f"This round found {discovered} job(s)",
             f"analyzed {scored}",
-            f"recommended {recommended}",
+            f"final recommendations {recommended}",
         ]
         if pool > 0:
             parts.append(f"current company pool {pool}")
@@ -159,7 +159,7 @@ def search_completion_detail(
     parts = [
         f"本轮找到 {discovered} 条",
         f"已分析 {scored} 条",
-        f"推荐 {recommended} 条",
+        f"最终推荐 {recommended} 条",
     ]
     if pool > 0:
         parts.append(f"当前公司池 {pool} 家")

@@ -318,10 +318,17 @@ class SearchRuntimeMirror:
             updates=updates,
         )
 
-    def mark_recommended_output_set(self, *, candidate_id: int, job_keys: set[str]) -> None:
+    def mark_recommended_output_set(
+        self,
+        *,
+        candidate_id: int,
+        job_keys: set[str],
+        output_drop_reasons: dict[str, str] | None = None,
+    ) -> None:
         self.artifacts.mark_recommended_output_set(
             candidate_id=candidate_id,
             job_keys=job_keys,
+            output_drop_reasons=output_drop_reasons,
         )
 
 

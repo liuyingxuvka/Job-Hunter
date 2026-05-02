@@ -703,7 +703,7 @@ def apply_runtime_model_override(
 
 def apply_runtime_analysis_defaults(*, analysis_config: dict) -> None:
     analysis_config.setdefault("preFilterEnabled", False)
-    analysis_config.setdefault("recommendScoreThreshold", 50)
+    analysis_config.setdefault("recommendScoreThreshold", 20)
     analysis_config.setdefault("targetRoleBindingMinScore", 50)
     analysis_config.setdefault("minTransferableScore", 50)
     analysis_work_cap = min(

@@ -12,6 +12,7 @@ from urllib.parse import urljoin, urlsplit
 from .discovery import merge_unique_strings
 from .ranking_thresholds import JOB_PRERANK_MIN_SCORE
 from ..output.final_output import (
+    build_job_composite_key,
     canonical_job_url,
     infer_region_tag,
     infer_source_quality,
@@ -440,13 +441,19 @@ def get_normalized_company_job_url_list(company: Mapping[str, Any], field_name: 
 def dedupe_jobs_by_normalized_url(jobs: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
     deduped: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
+    seen_structural_keys: set[str] = set()
     for job in jobs:
         normalized_url = normalize_job_url(job.get("url") or "")
         canonical_url = canonical_job_url(job)
         dedupe_url = canonical_url or normalized_url
+        structural_key = build_job_composite_key(job)
         if not dedupe_url or dedupe_url in seen_urls:
             continue
+        if structural_key and structural_key in seen_structural_keys:
+            continue
         seen_urls.add(dedupe_url)
+        if structural_key:
+            seen_structural_keys.add(structural_key)
         normalized_job = dict(job)
         normalized_job["url"] = normalized_url or dedupe_url
         if canonical_url and (str(job.get("canonicalUrl") or "").strip() or canonical_url != normalized_url):

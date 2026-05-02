@@ -11,6 +11,7 @@ from PySide6.QtTest import QTest
 from jobflow_desktop_app.app.pages.search_results import SearchResultsStep
 from jobflow_desktop_app.db.repositories.search_runtime import JobReviewStateRepository
 from jobflow_desktop_app.search.orchestration.job_search_runner import JobSearchRunner
+from jobflow_desktop_app.search.output.final_output import materialize_output_eligibility
 from jobflow_desktop_app.search.state.search_progress_state import (
     SearchProgress,
     SearchStats,
@@ -422,7 +423,8 @@ class SearchResultsRegressionTests(unittest.TestCase):
                 candidate_id=candidate_id,
                 job_bucket="all",
                 jobs=[
-                    {
+                    materialize_output_eligibility(
+                        {
                         "title": "Localization Program Manager",
                         "company": "Lingo Corp",
                         "location": "Berlin",
@@ -444,7 +446,9 @@ class SearchResultsRegressionTests(unittest.TestCase):
                                 "score": 74,
                             },
                         },
-                    }
+                        },
+                        runtime_config,
+                    )
                 ],
             )
             runner.runtime_mirror.replace_bucket_jobs(
@@ -452,7 +456,8 @@ class SearchResultsRegressionTests(unittest.TestCase):
                 candidate_id=candidate_id,
                 job_bucket="recommended",
                 jobs=[
-                    {
+                    materialize_output_eligibility(
+                        {
                         "title": "Localization Program Manager",
                         "company": "Lingo Corp",
                         "location": "Berlin",
@@ -473,7 +478,9 @@ class SearchResultsRegressionTests(unittest.TestCase):
                                 "score": 74,
                             },
                         },
-                    }
+                        },
+                        runtime_config,
+                    )
                 ],
             )
             runner.runtime_mirror.replace_bucket_jobs(
@@ -481,7 +488,8 @@ class SearchResultsRegressionTests(unittest.TestCase):
                 candidate_id=candidate_id,
                 job_bucket="all",
                 jobs=[
-                    {
+                    materialize_output_eligibility(
+                        {
                         "title": "Senior Localization Operations Manager",
                         "company": "Translate Co",
                         "location": "Munich",
@@ -503,7 +511,9 @@ class SearchResultsRegressionTests(unittest.TestCase):
                                 "score": 82,
                             },
                         },
-                    }
+                        },
+                        runtime_config,
+                    )
                 ],
             )
             runner.runtime_mirror.replace_bucket_jobs(
@@ -511,7 +521,8 @@ class SearchResultsRegressionTests(unittest.TestCase):
                 candidate_id=candidate_id,
                 job_bucket="recommended",
                 jobs=[
-                    {
+                    materialize_output_eligibility(
+                        {
                         "title": "Senior Localization Operations Manager",
                         "company": "Translate Co",
                         "location": "Munich",
@@ -533,7 +544,9 @@ class SearchResultsRegressionTests(unittest.TestCase):
                                 "score": 82,
                             },
                         },
-                    }
+                        },
+                        runtime_config,
+                    )
                 ],
             )
             JobReviewStateRepository(context.database).replace_candidate_review_state(
@@ -560,7 +573,7 @@ class SearchResultsRegressionTests(unittest.TestCase):
             focus_combo = step.table.cellWidget(focus_row, 7)
             self.assertEqual(focus_combo.currentText(), "重点")
 
-    def test_search_completion_keeps_cumulative_table_instead_of_latest_recommended_only(self) -> None:
+    def test_search_completion_renders_final_recommendations_not_live_pool(self) -> None:
         with make_temp_context() as context:
             save_openai_settings(context)
             candidate_id = self._make_candidate_bundle(
@@ -604,10 +617,10 @@ class SearchResultsRegressionTests(unittest.TestCase):
                 step._run_search()
             process_events()
 
-            self.assertEqual(step.table.rowCount(), 2)
+            self.assertEqual(step.table.rowCount(), 1)
             self.assertEqual(
                 {step.table.item(row, 0).text() for row in range(step.table.rowCount())},
-                {"Hydrogen Degradation Modeling Engineer", "Fuel Cell Validation Engineer"},
+                {"Fuel Cell Validation Engineer"},
             )
 
 

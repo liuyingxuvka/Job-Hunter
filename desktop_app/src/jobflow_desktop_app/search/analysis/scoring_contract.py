@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-UNIFIED_RECOMMEND_THRESHOLD = 50
+UNIFIED_RECOMMEND_THRESHOLD = 20
 
 
 def normalize_score(value: Any, *, default: int = 0) -> int:

@@ -287,7 +287,7 @@ class SearchResultsCompactStepTests(unittest.TestCase):
             process_events()
 
             self.assertEqual(compact.results_meta_label.text(), "已加载最近结果")
-            self.assertEqual(compact.results_stats_label.text(), "公司池 5 · 发现 8 · 分析 8 · 推荐 2 · 待补完 0")
+            self.assertEqual(compact.results_stats_label.text(), "公司池 5 · 发现 8 · 分析 8 · 最终推荐 2 · 待补完 0")
             self.assertEqual(compact.results_progress_label.text(), "公司池主流程")
             self.assertFalse(compact.results_meta_label.wordWrap())
             self.assertFalse(compact.results_stats_label.wordWrap())
